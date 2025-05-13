@@ -1,0 +1,66 @@
+site_name: Quizzical Beats Documentation
+site_description: Comprehensive documentation for Quizzical Beats music quiz application
+site_author: Christian Krakau-Louis
+copyright: "&copy; 2025 Christian Krakau-Louis"
+repo_url: https://github.com/christianlouis/musicround
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: static/img/logo.png
+  favicon: static/img/favicon.ico
+  palette:
+    primary: teal
+    accent: deep purple
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          selection:
+            docstring_style: google
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Getting Started: user-guide/getting-started.md
+    - User Interface: user-guide/user-interface.md
+    - Creating Rounds: user-guide/creating-rounds.md
+    - Importing Songs: user-guide/importing-songs.md
+    - Exporting Rounds: user-guide/exporting-rounds.md
+    - Account Management: user-guide/account-management.md
+  - Admin Guide:
+    - Installation: admin-guide/installation.md
+    - Configuration: admin-guide/configuration.md
+    - Backup & Restore: admin-guide/backup-restore.md
+    - System Health: admin-guide/system-health.md
+    - User Management: admin-guide/user-management.md
+  - Developer Guide:
+    - Architecture: developer-guide/architecture.md
+    - API Reference: developer-guide/api-reference.md
+    - Database Schema: developer-guide/database-schema.md
+    - OAuth Integration: developer-guide/oauth-integration.md
+    - Contributing: developer-guide/contributing.md
+  - FAQ: faq.md
+  - Changelog: changelog.md
+  - Brand Identity: brand-identity.md

@@ -1,6 +1,6 @@
 # OAuth Integration Callback URLs
 
-This document provides information about the OAuth callback URLs used in Quizzical Beats for various authentication providers.
+This document provides the callback URLs needed when configuring OAuth integration with various providers for Quizzical Beats.
 
 ## Overview
 
@@ -30,18 +30,20 @@ When configuring Authentik:
 
 ### Spotify API
 
-**Callback URL:** `https://your-domain.com/users/spotify-callback`  
-**Local Development:** `http://localhost:5000/users/spotify-callback`
+**Callback URL:** `https://your-domain.com/auth/spotify/callback`  
+**Local Development:** `http://localhost:5000/auth/spotify/callback`
 
 When configuring Spotify in the Spotify Developer Dashboard:
-1. Go to your app's settings
-2. Add the above URLs to the "Redirect URIs" section
-3. Save the changes
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
+2. Create or select your app
+3. Click "Edit Settings"
+4. Add the above URLs to the "Redirect URIs" section
+5. Save your changes
 
 ### Dropbox API
 
-**Callback URL:** `https://your-domain.com/users/dropbox-callback`  
-**Local Development:** `http://localhost:5000/users/dropbox-callback`
+**Callback URL:** `https://your-domain.com/users/dropbox/callback`  
+**Local Development:** `http://localhost:5000/users/dropbox/callback`
 
 When configuring Dropbox in the Dropbox Developer Console:
 1. Go to your app's settings in the [Dropbox App Console](https://www.dropbox.com/developers/apps)
@@ -50,9 +52,9 @@ When configuring Dropbox in the Dropbox Developer Console:
    - `files.content.read`
    - `files.content.write`
    - `sharing.write`
+   - `account_info.read`
    - `offline_access` (for refresh tokens)
 4. Set the app status to "Production" if it's still in development mode
-5. In the "Permissions" tab, ensure all required scopes are selected
 
 ## Environment Variables
 
@@ -66,10 +68,10 @@ GOOGLE_REDIRECT_URI=http://localhost:5000/users/login/google/callback
 AUTHENTIK_REDIRECT_URI=http://localhost:5000/users/login/authentik/callback
 
 # For Spotify API
-SPOTIFY_REDIRECT_URI=http://localhost:5000/users/spotify-callback
+SPOTIFY_REDIRECT_URI=http://localhost:5000/auth/spotify/callback
 
 # For Dropbox API
-# DROPBOX_REDIRECT_URI=http://localhost:5000/users/dropbox-callback
+# DROPBOX_REDIRECT_URI=http://localhost:5000/users/dropbox/callback
 # Note: The Dropbox URL is automatically generated using Flask's url_for function
 ```
 
