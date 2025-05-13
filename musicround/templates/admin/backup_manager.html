@@ -1,0 +1,528 @@
+{% extends 'base.html' %}
+{% block title %}Backup Manager{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-navy-800">System Backup Manager</h2>
+        <div class="text-sm text-navy-600">{{ version_info.version }} - {{ version_info.release_name }}</div>
+    </div>
+    
+    <!-- Status Card -->
+    <div class="mb-8 p-4 bg-gray-50 rounded-lg">
+        <div class="flex flex-wrap md:flex-nowrap gap-4">
+            <div class="flex-1 border rounded-lg p-4 bg-white">
+                <h3 class="text-lg font-semibold mb-2 text-navy-700">Backup Status</h3>
+                <div class="space-y-1">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Total backups:</span>
+                        <span class="font-medium">{{ backup_count }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Latest backup:</span>
+                        <span class="font-medium">{{ latest_backup|default('None yet') }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Scheduled backups:</span>
+                        <span class="font-medium">{{ 'Enabled' if schedule_enabled else 'Disabled' }}</span>
+                    </div>
+                    {% if schedule_enabled %}
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Next backup:</span>
+                        <span class="font-medium">{{ next_backup|default('Not scheduled') }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Storage location:</span>
+                        <span class="font-medium text-xs md:text-sm font-mono">{{ backup_location }}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex-1 border rounded-lg p-4 bg-white">
+                <h3 class="text-lg font-semibold mb-2 text-navy-700">Quick Actions</h3>
+                <div class="flex flex-col space-y-2">
+                    <form method="POST" action="{{ url_for('users.create_backup') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded flex items-center justify-center">
+                            <i class="fas fa-save mr-2"></i> Create New Backup
+                        </button>
+                    </form>
+                    
+                    <a href="#backup-list" class="w-full bg-navy-600 hover:bg-navy-700 text-white py-2 px-4 rounded flex items-center justify-center">
+                        <i class="fas fa-list mr-2"></i> Manage Backups
+                    </a>
+                    
+                    <button type="button" id="schedule-btn" onclick="toggleSchedulerForm()" class="w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded flex items-center justify-center">
+                        <i class="fas fa-clock mr-2"></i> Schedule Backups
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Backup Schedule Configuration -->
+    <div class="mb-8 p-4 border border-navy-200 rounded-lg {% if not show_schedule_form %}hidden{% endif %}" id="scheduler-form">
+        <h3 class="text-xl font-semibold mb-4 text-navy-700">Backup Schedule Configuration</h3>
+        
+        <form action="{{ url_for('users.schedule_backup') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block font-medium mb-1" for="schedule-time">Time of day (24-hour format)</label>
+                    <input type="time" class="border rounded px-3 py-2 w-full" id="schedule-time" name="schedule_time" value="{{ schedule_time or '03:00' }}">
+                </div>
+                
+                <div>
+                    <label class="block font-medium mb-1" for="frequency">Frequency</label>
+                    <select class="border rounded px-3 py-2 w-full" id="frequency" name="frequency">
+                        <option value="hourly" {% if schedule_frequency == 'hourly' %}selected{% endif %}>Hourly</option>
+                        <option value="daily" {% if schedule_frequency == 'daily' or not schedule_frequency %}selected{% endif %}>Daily</option>
+                        <option value="weekly" {% if schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+                        <option value="monthly" {% if schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block font-medium mb-1" for="retention-days">Retention Policy (days)</label>
+                    <input type="number" class="border rounded px-3 py-2 w-full" id="retention-days" name="retention_days" value="{{ retention_days }}" min="0" max="365" onchange="syncRetentionDays(this.value)">
+                    <p class="text-sm text-gray-500 mt-1">Enter 0 to keep all backups indefinitely</p>
+                </div>
+            </div>
+            
+            <div class="flex flex-wrap gap-2 mt-4">
+                <button type="submit" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                    <i class="fas fa-save mr-2"></i> Save Schedule
+                </button>
+                
+                <button type="button" onclick="toggleSchedulerForm()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
+                    Cancel
+                </button>
+            </div>
+        </form>
+        
+        <!-- Configuration Suggestion Button (replacing Docker Compose Labels button) -->
+        <div class="mt-4 pt-4 border-t border-gray-200">
+            <button type="button" onclick="openConfigModal()" class="mt-2 bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
+                <i class="fas fa-file-code mr-2"></i> View Configuration Suggestion
+            </button>
+            <p class="text-sm text-gray-500 mt-1">
+                View suggested configuration for scheduled backups
+            </p>
+        </div>
+    </div>
+    
+    <!-- Create Backup Form (Hidden by default) -->
+    <div id="create-backup-form" class="mb-8 p-4 border border-navy-200 rounded-lg {% if not show_create_form %}hidden{% endif %}">
+        <h3 class="text-lg font-semibold mb-4 text-navy-700">Create Custom Backup</h3>
+        
+        <form method="POST" action="{{ url_for('users.create_backup') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="backup_name">Backup Name (Optional)</label>
+                <input type="text" id="backup_name" name="backup_name" 
+                       class="border rounded px-3 py-2 w-full"
+                       placeholder="e.g., pre_upgrade_backup">
+                <p class="text-sm text-gray-500 mt-1">Leave blank for automatic timestamp-based name</p>
+            </div>
+            
+            <div class="flex items-center mb-4">
+                <input type="checkbox" id="include_mp3s" name="include_mp3s" value="true"
+                       checked
+                       class="w-4 h-4 text-teal-600 mr-2">
+                <label for="include_mp3s" class="font-medium">Include MP3 Files</label>
+            </div>
+            
+            <div class="flex items-center mb-4">
+                <input type="checkbox" id="include_config" name="include_config" value="true"
+                       checked
+                       class="w-4 h-4 text-teal-600 mr-2">
+                <label for="include_config" class="font-medium">Include Configuration Files</label>
+            </div>
+            
+            <div class="flex flex-wrap gap-2">
+                <button type="submit" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                    <i class="fas fa-save mr-2"></i> Create Backup
+                </button>
+                <button type="button" onclick="toggleCreateForm()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Configuration Suggestion Modal (replacing Docker Compose Labels Modal) -->
+    <div id="config-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden overflow-y-auto p-4">
+        <div class="bg-white rounded-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4 sticky top-0 bg-white pb-2">
+                <h3 class="text-xl font-semibold text-navy-700">Backup Configuration Suggestion</h3>
+                <button onclick="closeConfigModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <p class="text-gray-600 mb-2">
+                    Here's a suggested configuration for scheduled backups:
+                </p>
+                
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    {% if config_suggestion %}
+                        <div class="mb-4">
+                            <h4 class="font-medium text-navy-700 mb-2">Docker Compose Labels</h4>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap">{{ config_suggestion.docker_compose_suggestion }}</pre>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <h4 class="font-medium text-navy-700 mb-2">Ofelia Configuration (Alternative)</h4>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap">{{ config_suggestion.ofelia_ini_suggestion }}</pre>
+                        </div>
+                        
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+                            <h4 class="font-medium text-navy-700 mb-2">Instructions</h4>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap">{{ config_suggestion.instructions }}</pre>
+                        </div>
+                    {% else %}
+                        <p class="text-gray-500">Configuration suggestion not available.</p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-info-circle text-blue-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-blue-700">
+                            This is a configuration suggestion only. You'll need to implement it manually based on your system setup.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex justify-end">
+                <button onclick="copyConfigToClipboard()" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600 mr-2">
+                    <i class="fas fa-copy mr-2"></i> Copy to Clipboard
+                </button>
+                <button onclick="closeConfigModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Notification Modal -->
+    <div id="notification-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden">
+        <div class="bg-white rounded-lg max-w-md w-full p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold" id="notification-title">Notification</h3>
+                <button onclick="closeNotificationModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <p id="notification-message" class="text-gray-600"></p>
+            </div>
+            
+            <div class="flex justify-end">
+                <button onclick="closeNotificationModal()" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                    OK
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Backup List -->
+    <div id="backup-list" class="mb-8">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-semibold text-navy-700">Existing Backups</h3>
+            
+            <!-- Upload Backup Button -->
+            <button type="button" onclick="toggleUploadForm()" class="bg-navy-600 text-white px-4 py-2 rounded hover:bg-navy-700">
+                <i class="fas fa-upload mr-2"></i> Upload Backup
+            </button>
+        </div>
+        
+        <!-- Upload Backup Form (Hidden by default) -->
+        <div id="upload-backup-form" class="mb-4 p-4 border border-navy-200 rounded-lg hidden">
+            <h4 class="text-lg font-semibold mb-3 text-navy-700">Upload Backup File</h4>
+            
+            <form method="POST" action="{{ url_for('users.upload_backup') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                
+                <div class="mb-4">
+                    <label class="block font-medium mb-1" for="backup_file">Select Backup ZIP File</label>
+                    <input type="file" id="backup_file" name="backup_file" 
+                           accept=".zip"
+                           class="border rounded px-3 py-2 w-full">
+                    <p class="text-sm text-gray-500 mt-1">Only .zip backup files are supported</p>
+                </div>
+                
+                <div class="flex flex-wrap gap-2">
+                    <button type="submit" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                        <i class="fas fa-upload mr-2"></i> Upload Backup
+                    </button>
+                    <button type="button" onclick="toggleUploadForm()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Retention Policy (add after Upload Backup Form) -->
+        <div id="retention-policy-section" class="mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-navy-700">Backup Retention Policy</h3>
+                
+                <!-- Toggle Retention Policy Form Button -->
+                <button type="button" onclick="toggleRetentionForm()" class="bg-navy-600 text-white px-4 py-2 rounded hover:bg-navy-700">
+                    <i class="fas fa-calendar-alt mr-2"></i> Configure Retention
+                </button>
+            </div>
+            
+            <!-- Current Retention Policy Status -->
+            <div class="mb-4 p-4 bg-gray-50 rounded-lg">
+                <div class="flex items-center mb-2">
+                    <div class="h-4 w-4 rounded-full {% if retention_days > 0 %}bg-green-500{% else %}bg-gray-400{% endif %} mr-2"></div>
+                    <h4 class="font-medium">Retention Policy Status</h4>
+                </div>
+                <p class="text-sm text-gray-600">
+                    {% if retention_days > 0 %}
+                        Currently keeping backups for {{ retention_days }} days. Older backups will be automatically deleted.
+                    {% else %}
+                        No retention policy is currently applied. All backups will be kept indefinitely.
+                    {% endif %}
+                </p>
+            </div>
+            
+            <!-- Retention Policy Form (Hidden by default) -->
+            <div id="retention-policy-form" class="mb-4 p-4 border border-navy-200 rounded-lg hidden">
+                <h4 class="text-lg font-semibold mb-3 text-navy-700">Configure Backup Retention</h4>
+                
+                <form method="POST" action="{{ url_for('users.apply_retention_policy') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    
+                    <div class="mb-4">
+                        <label class="block font-medium mb-1" for="retention_days_policy">Keep Backups For</label>
+                        <div class="flex items-center">
+                            <input type="number" id="retention_days_policy" name="retention_days" 
+                                   min="0" max="365" value="{{ retention_days }}"
+                                   class="border rounded px-3 py-2 w-24 mr-2" onchange="syncRetentionDays(this.value)">
+                            <span>days</span>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">Enter 0 to keep all backups indefinitely</p>
+                    </div>
+                    
+                    <div class="flex flex-wrap gap-2">
+                        <button type="submit" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                            <i class="fas fa-save mr-2"></i> Save Policy
+                        </button>
+                        <button type="submit" name="apply_now" value="true" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" 
+                                onclick="return confirm('Are you sure you want to apply the retention policy now? This will delete backups older than the specified period.')">
+                            <i class="fas fa-trash-alt mr-2"></i> Apply Now
+                        </button>
+                        <button type="button" onclick="toggleRetentionForm()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        {% if backups %}
+            <div class="overflow-x-auto border rounded-lg">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Backup Name</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for backup in backups %}
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="font-medium text-gray-900">{{ backup.backup_name }}</div>
+                                    <div class="text-xs text-gray-500">{{ backup.file_name }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    {% if backup.timestamp %}
+                                        {{ backup.timestamp|timestamp_to_datetime|format_datetime('%Y-%m-%d %H:%M') }}
+                                    {% else %}
+                                        Unknown
+                                    {% endif %}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    v{{ backup.version }}
+                                    {% if backup.release_name %}
+                                        <div class="text-xs text-gray-500">{{ backup.release_name }}</div>
+                                    {% endif %}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    {{ (backup.file_size / 1024 / 1024)|round(2) }} MB
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                    <div class="flex gap-2">
+                                        <a href="{{ url_for('users.download_backup', filename=backup.file_name) }}" class="text-teal-600 hover:text-teal-900" title="Download">
+                                            <i class="fas fa-download"></i>
+                                        </a>
+                                        
+                                        <form method="POST" action="{{ url_for('users.verify_backup', filename=backup.file_name) }}" class="inline">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="text-blue-600 hover:text-blue-900" title="Verify">
+                                                <i class="fas fa-check-circle"></i>
+                                            </button>
+                                        </form>
+                                        
+                                        <form method="POST" action="{{ url_for('users.restore_backup', filename=backup.file_name) }}" class="inline"
+                                              onsubmit="return confirm('Are you sure you want to restore this backup? This will overwrite current data.')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="text-orange-600 hover:text-orange-900" title="Restore">
+                                                <i class="fas fa-undo"></i>
+                                            </button>
+                                        </form>
+                                        
+                                        <form method="POST" action="{{ url_for('users.delete_backup', filename=backup.file_name) }}" class="inline"
+                                              onsubmit="return confirm('Are you sure you want to delete this backup?')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="text-red-600 hover:text-red-900" title="Delete">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="bg-gray-50 p-4 rounded-lg text-center">
+                <p class="text-gray-500">No backups found.</p>
+                <button onclick="toggleCreateForm()" class="mt-2 text-teal-600 hover:text-teal-800">
+                    <i class="fas fa-plus-circle mr-1"></i> Create your first backup
+                </button>
+            </div>
+        {% endif %}
+    </div>
+    
+    <!-- System Health Status -->
+    <div class="mb-8">
+        <h3 class="text-xl font-semibold mb-4 text-navy-700">System Health</h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="border rounded-lg p-4 bg-white">
+                <div class="flex items-center mb-2">
+                    <div class="h-4 w-4 rounded-full bg-green-500 mr-2"></div>
+                    <h4 class="font-medium">Database</h4>
+                </div>
+                <p class="text-sm text-gray-600">Database is operational and accessible.</p>
+            </div>
+            
+            <div class="border rounded-lg p-4 bg-white">
+                <div class="flex items-center mb-2">
+                    <div class="h-4 w-4 rounded-full bg-green-500 mr-2"></div>
+                    <h4 class="font-medium">File Storage</h4>
+                </div>
+                <p class="text-sm text-gray-600">File storage is available and writable.</p>
+            </div>
+            
+            <div class="border rounded-lg p-4 bg-white">
+                <div class="flex items-center mb-2">
+                    <div class="h-4 w-4 rounded-full bg-green-500 mr-2"></div>
+                    <h4 class="font-medium">Configuration</h4>
+                </div>
+                <p class="text-sm text-gray-600">System configuration is valid.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Back to Admin -->
+    <div class="flex justify-between">
+        <a href="{{ url_for('users.system_settings') }}" class="bg-navy-600 text-white px-6 py-2 rounded hover:bg-navy-700">
+            <i class="fas fa-cog mr-2"></i> Back to System Settings
+        </a>
+        
+        <a href="{{ url_for('core.index') }}" class="bg-gray-300 text-gray-700 px-6 py-2 rounded hover:bg-gray-400">
+            Back to Home
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleCreateForm() {
+        const form = document.getElementById('create-backup-form');
+        form.classList.toggle('hidden');
+    }
+    
+    function toggleUploadForm() {
+        const form = document.getElementById('upload-backup-form');
+        form.classList.toggle('hidden');
+    }
+    
+    function toggleRetentionForm() {
+        const form = document.getElementById('retention-policy-form');
+        form.classList.toggle('hidden');
+    }
+    
+    function toggleSchedulerForm() {
+        const form = document.getElementById('scheduler-form');
+        form.classList.toggle('hidden');
+    }
+    
+    function openConfigModal() {
+        const modal = document.getElementById('config-modal');
+        modal.classList.remove('hidden');
+    }
+    
+    function closeConfigModal() {
+        const modal = document.getElementById('config-modal');
+        modal.classList.add('hidden');
+    }
+    
+    function copyConfigToClipboard() {
+        const content = document.querySelector('#config-modal pre').textContent;
+        navigator.clipboard.writeText(content).then(() => {
+            showNotificationModal('Success', 'Configuration suggestion copied to clipboard!');
+        }).catch(err => {
+            console.error('Failed to copy: ', err);
+            showNotificationModal('Error', 'Failed to copy to clipboard. Please select and copy manually.');
+        });
+    }
+    
+    function closeNotificationModal() {
+        const modal = document.getElementById('notification-modal');
+        modal.classList.add('hidden');
+    }
+    
+    function showNotificationModal(title, message) {
+        const modal = document.getElementById('notification-modal');
+        document.getElementById('notification-title').textContent = title;
+        document.getElementById('notification-message').textContent = message;
+        modal.classList.remove('hidden');
+    }
+    
+    // Function to sync retention days between both forms
+    function syncRetentionDays(value) {
+        // Update both retention days inputs with the same value
+        document.getElementById('retention-days').value = value;
+        document.getElementById('retention_days_policy').value = value;
+    }
+    
+    // Show notification if passed from backend
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if notification %}
+            showNotificationModal('Notification', '{{ notification.message }}');
+        {% endif %}
+    });
+</script>
+{% endblock %}

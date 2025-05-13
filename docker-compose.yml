@@ -1,0 +1,59 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./musicround:/app/musicround
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./migrations:/app/migrations
+      - ./.env:/app/.env
+      - musicround_data:/data
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.backup.schedule: "@hourly"
+      ofelia.job-exec.backup.command: "python /app/run.py backup create --auto"
+      ofelia.job-exec.backup.no-overlap: "true"
+      ofelia.job-exec.retention.schedule: "@weekly"
+      ofelia.job-exec.retention.command: "python /app/run.py backup retention --days 13"
+      ofelia.job-exec.retention.no-overlap: "true"
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development  # Using the older style for compatibility
+      - FLASK_DEBUG=1
+      - SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+      - PYTHONUNBUFFERED=1
+      # Hot reloading specific settings
+      - FLASK_RUN_EXTRA_FILES=./templates:/app/templates,./static:/app/static
+      - FLASK_RUN_HOST=0.0.0.0
+      - FLASK_RUN_PORT=5000
+      - PYTHONDONTWRITEBYTECODE=1
+      # Email configuration variables
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_SENDER=${MAIL_SENDER}
+      - MAIL_RECIPIENT=${MAIL_RECIPIENT}
+    restart: unless-stopped
+    # Updated command with explicit extra-files and reload arguments
+    command: python -m flask run --host=0.0.0.0 --port=5000 --reload --extra-files ./templates:/app/templates,./static:/app/static
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    depends_on:
+      - web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    command: daemon --docker
+    labels:
+      ofelia.job-local.my-test-job.schedule: "@hourly"
+      ofelia.job-local.my-test-job.command: "date"
+
+volumes:
+  musicround_data:
+    driver: local

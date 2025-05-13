@@ -1,0 +1,226 @@
+{% extends 'base.html' %}
+
+{% block title %}Error {{ code }} - Quizzical Beats{% endblock %}
+
+{% block content %}
+    <div class="flex justify-center items-center min-h-[70vh] px-4">
+        <div class="w-full max-w-lg text-center">
+            <div class="mb-6">
+                <i class="fas fa-exclamation-triangle text-orange-500 text-6xl"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-4">Error {{ code }}</h1>
+            
+            <!-- Error message container - will be updated by JS -->
+            <div class="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-lg mb-6 relative group">
+                <!-- Loading indicator initially shown -->
+                <div id="loading-message" class="flex items-center justify-center py-2">
+                    <div class="mr-3">
+                        <i class="fas fa-circle-notch fa-spin text-orange-500"></i>
+                    </div>
+                    <p>Interpreting this error for you...</p>
+                </div>
+                
+                <!-- Friendly error message initially hidden -->
+                <div id="friendly-error-container" class="hidden">
+                    <div class="flex items-center justify-between">
+                        <p id="friendly-error-message" class="text-lg"></p>
+                        <button 
+                            class="copy-btn text-gray-500 hover:text-navy-600 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" 
+                            onclick="copyToClipboard(document.getElementById('friendly-error-message').innerText)" 
+                            title="Copy error message">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Technical error message initially hidden (fallback) -->
+                <div id="technical-error-container" class="hidden">
+                    <div class="flex items-center justify-between">
+                        <p id="technical-error-fallback" class="text-lg">{{ message }}</p>
+                        <button 
+                            class="copy-btn text-gray-500 hover:text-navy-600 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" 
+                            onclick="copyToClipboard('{{ message }}')" 
+                            title="Copy error message">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Technical error message (always available in details) -->
+            <div class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+                <details class="technical-error-accordion">
+                    <summary class="cursor-pointer text-md font-bold text-navy-800 py-2 flex items-center justify-between">
+                        <span>Technical Details</span>
+                        <i class="fas fa-chevron-down text-sm transition-transform"></i>
+                    </summary>
+                    <div class="mt-2">
+                        <div class="bg-gray-100 p-3 rounded overflow-auto text-sm relative">
+                            <p id="technical-error">{{ message }}</p>
+                        </div>
+                    </div>
+                </details>
+            </div>
+            
+            {% if 'access_token' in session and (debug_info or traceback) %}
+            <!-- Debug info section -->
+            <div class="mt-6 bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+                <!-- Copy all button at the top -->
+                <div class="flex justify-end mb-3">
+                    <button 
+                        class="flex items-center bg-navy-600 hover:bg-navy-700 text-white text-sm py-1 px-3 rounded transition-colors"
+                        onclick="copyAllErrorInfo()"
+                        title="Copy all error information">
+                        <i class="fas fa-copy mr-2"></i> Copy All Error Info
+                    </button>
+                </div>
+                
+                <details class="debug-accordion">
+                    <summary class="cursor-pointer text-lg font-bold text-navy-800 py-2 flex items-center justify-between">
+                        <span>Debug Information</span>
+                        <i class="fas fa-chevron-down text-sm transition-transform"></i>
+                    </summary>
+                    <div class="mt-4 debug-content">
+                        <div class="bg-gray-100 p-4 rounded overflow-auto text-sm font-mono relative">
+                            <pre id="debug-info-pre">{{ debug_info }}</pre>
+                        </div>
+                        
+                        {% if traceback %}
+                        <div class="mt-4">
+                            <h3 class="text-md font-bold text-navy-800 mb-2">Traceback</h3>
+                            <div class="bg-gray-100 p-4 rounded overflow-auto text-sm font-mono relative">
+                                <pre id="traceback-pre">{{ traceback }}</pre>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </details>
+            </div>
+            {% endif %}
+            
+            <a href="{{ url_for('core.index') }}" class="inline-flex items-center bg-navy-700 hover:bg-navy-800 text-white py-2 px-4 rounded transition-colors">
+                <i class="fas fa-home mr-2"></i> Return to Homepage
+            </a>
+        </div>
+    </div>
+
+    <!-- Hidden element to store all error info for copying -->
+    <div id="all-error-info" class="hidden">Error {{ code }}: <span id="copy-message"></span>
+
+TECHNICAL DETAILS:
+{{ message }}
+{% if debug_info %}
+
+DEBUG INFORMATION:
+{{ debug_info }}{% endif %}{% if traceback %}
+
+TRACEBACK:
+{{ traceback }}{% endif %}
+    </div>
+
+    <!-- Store error info for JS -->
+    <div id="error-info-data" class="hidden" data-error-info='{{ error_info_for_js|safe }}'></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Function to fetch friendly error message
+    document.addEventListener('DOMContentLoaded', function() {
+        // Get error info
+        const errorInfoEl = document.getElementById('error-info-data');
+        if (!errorInfoEl) return;
+        
+        try {
+            const errorInfo = JSON.parse(errorInfoEl.getAttribute('data-error-info'));
+            
+            // Set a timeout in case the API call takes too long
+            const timeoutId = setTimeout(() => {
+                showTechnicalErrorFallback();
+            }, 5000); // 5 seconds timeout
+            
+            // Make API call to get friendly error message
+            fetch('/api/friendly-error', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(errorInfo)
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearTimeout(timeoutId);
+                if (data.success && data.message) {
+                    showFriendlyErrorMessage(data.message);
+                    document.getElementById('copy-message').innerText = data.message;
+                } else {
+                    showTechnicalErrorFallback();
+                }
+            })
+            .catch(error => {
+                clearTimeout(timeoutId);
+                console.error('Error fetching friendly message:', error);
+                showTechnicalErrorFallback();
+            });
+        } catch (error) {
+            console.error('Error parsing error info:', error);
+            showTechnicalErrorFallback();
+        }
+    });
+    
+    function showFriendlyErrorMessage(message) {
+        document.getElementById('loading-message').classList.add('hidden');
+        const friendlyContainer = document.getElementById('friendly-error-container');
+        friendlyContainer.classList.remove('hidden');
+        document.getElementById('friendly-error-message').innerText = message;
+    }
+    
+    function showTechnicalErrorFallback() {
+        document.getElementById('loading-message').classList.add('hidden');
+        document.getElementById('technical-error-container').classList.remove('hidden');
+        document.getElementById('copy-message').innerText = document.getElementById('technical-error-fallback').innerText;
+    }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(function() {
+            showCopyNotification();
+        }, function(err) {
+            console.error('Could not copy text: ', err);
+        });
+    }
+    
+    function copyAllErrorInfo() {
+        const allErrorInfo = document.getElementById('all-error-info').innerText;
+        copyToClipboard(allErrorInfo);
+    }
+
+    function showCopyNotification() {
+        const notification = document.createElement('div');
+        notification.className = 'fixed bottom-4 right-4 bg-navy-600 text-white px-4 py-2 rounded shadow-lg transform translate-y-0 opacity-100 transition-all duration-300';
+        notification.innerHTML = '<i class="fas fa-check mr-2"></i> Copied to clipboard';
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.classList.add('opacity-0', 'translate-y-2');
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 300);
+        }, 2000);
+    }
+
+    // Add animation to details elements
+    document.addEventListener('DOMContentLoaded', function() {
+        const details = document.querySelectorAll('.debug-accordion, .technical-error-accordion');
+        details.forEach(detail => {
+            detail.addEventListener('toggle', function() {
+                const icon = this.querySelector('i.fa-chevron-down');
+                if (this.open) {
+                    icon.classList.add('rotate-180');
+                } else {
+                    icon.classList.remove('rotate-180');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
+

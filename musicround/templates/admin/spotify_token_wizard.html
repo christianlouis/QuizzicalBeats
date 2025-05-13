@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}Spotify Token Wizard{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <div class="flex items-center mb-6">
+        <h2 class="text-2xl font-bold text-navy-800 flex-grow">Spotify Refresh Token Wizard</h2>
+        <img src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png" alt="Spotify Logo" class="h-8">
+    </div>
+    
+    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+        <h3 class="text-lg font-medium mb-2">What is this for?</h3>
+        <p class="mb-2">This wizard helps you generate a Spotify refresh token for the system account (fallback account). This token will be used when:</p>
+        <ul class="list-disc pl-6 mb-2">
+            <li>A user doesn't have their own Spotify account connected</li>
+            <li>The system needs to perform Spotify API operations in the background</li>
+            <li>For shared/global Spotify functionality</li>
+        </ul>
+        <p class="text-sm text-gray-600">The refresh token doesn't expire, making it ideal for long-term system use.</p>
+    </div>
+
+    {% if has_token %}
+    <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+        <div class="flex items-center text-green-700 mb-2">
+            <i class="fas fa-check-circle mr-2"></i>
+            <span class="font-medium">Fallback token is configured</span>
+        </div>
+        <p>A Spotify refresh token is already configured for the system account. You can replace it if needed.</p>
+    </div>
+    {% endif %}
+    
+    {% if has_credentials %}
+    <div class="mb-8 border-b pb-4">
+        <h3 class="text-xl font-semibold mb-4 text-navy-700">Option 1: Automated Setup (Recommended)</h3>
+        <p class="mb-4">This will guide you through the Spotify OAuth flow to generate a refresh token automatically.</p>
+        
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="start_auth">
+            
+            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-6 rounded-md flex items-center">
+                <i class="fab fa-spotify mr-2"></i> Start Spotify Authorization
+            </button>
+        </form>
+        
+        <div class="mt-3 text-sm text-gray-600">
+            <p>You'll be redirected to Spotify to authorize access, then brought back to this page when complete.</p>
+        </div>
+    </div>
+    
+    <div class="mb-8">
+        <h3 class="text-xl font-semibold mb-4 text-navy-700">Option 2: Manual Entry</h3>
+        <p class="mb-4">If you already have a Spotify refresh token (obtained elsewhere), you can enter it directly:</p>
+        
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="manual_save">
+            
+            <div class="mb-4">
+                <label for="refresh_token" class="block font-medium mb-1">Refresh Token</label>
+                <input type="password" id="refresh_token" name="refresh_token" 
+                      class="border rounded px-3 py-2 w-full" placeholder="Enter your Spotify refresh token">
+            </div>
+            
+            <button type="submit" class="bg-navy-600 hover:bg-navy-700 text-white py-2 px-6 rounded-md">
+                Save Token
+            </button>
+        </form>
+    </div>
+    {% else %}
+    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <div class="flex items-center text-yellow-700 mb-2">
+            <i class="fas fa-exclamation-triangle mr-2"></i>
+            <span class="font-medium">Spotify API credentials not configured</span>
+        </div>
+        <p class="mb-3">Your Spotify API credentials are missing or incomplete. The following values need to be set in your environment configuration:</p>
+        <ul class="list-disc pl-6">
+            <li>SPOTIFY_CLIENT_ID</li>
+            <li>SPOTIFY_CLIENT_SECRET</li>
+            <li>SPOTIFY_REDIRECT_URI</li>
+        </ul>
+    </div>
+    {% endif %}
+    
+    <div class="mt-8 flex justify-between">
+        <a href="{{ url_for('users.system_settings') }}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-6 rounded-md">
+            Back to Settings
+        </a>
+        
+        <a href="https://developer.spotify.com/documentation/web-api/concepts/access-token" target="_blank" class="text-navy-600 hover:underline flex items-center">
+            <span>Learn about Spotify authentication</span>
+            <i class="fas fa-external-link-alt ml-1"></i>
+        </a>
+    </div>
+</div>
+{% endblock %}

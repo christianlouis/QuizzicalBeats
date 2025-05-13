@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+
+{% block title %}Review Music Quiz - Quizzical Beats{% endblock %}
+
+{% block content %}
+  <div class="max-w-7xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-4 text-navy-800 font-montserrat">Review Your Music Quiz</h1>
+    <div class="bg-white shadow-md rounded-lg p-6 mb-6">
+      <p class="mb-4 font-medium text-navy-700">Quiz Criteria: {{ round_criteria }}
+        {% if genre %}
+          <span class="inline-block bg-orange-100 text-orange-800 text-sm font-medium px-2.5 py-0.5 rounded ml-2">Genre: {{ genre }}</span>
+        {% endif %}
+        {% if decade %}
+          <span class="inline-block bg-teal-100 text-teal-800 text-sm font-medium px-2.5 py-0.5 rounded ml-2">Decade: {{ decade }}</span>
+        {% endif %}
+        {% if tag %}
+          <span class="inline-block bg-purple-100 text-purple-800 text-sm font-medium px-2.5 py-0.5 rounded ml-2">Tag: {{ tag }}</span>
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="overflow-x-auto bg-white shadow-md rounded-lg mb-8">
+      <table class="w-full table-auto">
+        <thead class="bg-navy-50 text-navy-800">
+          <tr>
+            <th class="px-4 py-3 text-left font-semibold">#</th>
+            <th class="px-4 py-3 text-left font-semibold">Cover</th>
+            <th class="px-4 py-3 text-left font-semibold">Title</th>
+            <th class="px-4 py-3 text-left font-semibold">Artist</th>
+            <th class="px-4 py-3 text-left font-semibold">Year</th>
+            <th class="px-4 py-3 text-left font-semibold">Genre</th>
+            <th class="px-4 py-3 text-left font-semibold">Preview</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for song in songs %}
+            <tr class="hover:bg-gray-50">
+              <td class="px-4 py-3 font-medium">{{ loop.index }}</td>
+              <td class="px-4 py-3"><img src="{{ song.cover_url }}" alt="{{ song.title }}" class="w-16 h-16 object-cover rounded-md shadow-sm"></td>
+              <td class="px-4 py-3 font-medium">{{ song.title }}</td>
+              <td class="px-4 py-3">{{ song.artist }}</td>
+              <td class="px-4 py-3">{{ song.year }}</td>
+              <td class="px-4 py-3">{{ song.genre }}</td>
+              <td class="px-4 py-3">
+                <audio controls class="w-full max-w-[200px]" src="{{ song.preview_url }}">Your browser does not support the audio element.</audio>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap gap-4 mt-6">
+      <form method="POST" action="{{ url_for('generate.save_round') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="round_criteria" value="{{ round_criteria }}">
+        
+        <div class="mb-4">
+          <label for="round_name" class="block text-gray-700 text-sm font-bold mb-2">Round Name (Optional)</label>
+          <input type="text" id="round_name" name="round_name" value="{{ round_name or '' }}" 
+                 class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                 placeholder="Enter a name for this round">
+        </div>
+        
+        {% if genre %}
+          <input type="hidden" name="genre" value="{{ genre }}">
+        {% endif %}
+        {% if decade %}
+          <input type="hidden" name="decade" value="{{ decade }}">
+        {% endif %}
+        {% if tag %}
+          <input type="hidden" name="tag" value="{{ tag }}">
+        {% endif %}
+        {% for song in songs %}
+          <input type="hidden" name="song_id" value="{{ song.id }}">
+        {% endfor %}
+        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+          <i class="fas fa-save mr-2"></i> Save This Quiz
+        </button>
+      </form>
+      <a href="{{ url_for('generate.build_music_round') }}" class="inline-block bg-navy-600 hover:bg-navy-700 text-white py-2 px-4 rounded transition-colors font-semibold">
+        <i class="fas fa-refresh mr-2"></i> Generate Different Quiz
+      </a>
+    </div>
+  </div>
+{% endblock %}

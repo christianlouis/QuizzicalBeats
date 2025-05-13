@@ -1,0 +1,1478 @@
+{% extends 'base.html' %}
+
+{% block title %}Your Song Library - Quizzical Beats{% endblock %}
+
+{% block head %}
+    <style>
+        .sort-header {
+            cursor: pointer;
+            position: relative;
+        }
+        .sort-header:hover {
+            background-color: #f3f4f6;
+        }
+        .sort-header::after {
+            content: '↕';
+            font-size: 0.8em;
+            margin-left: 5px;
+            opacity: 0.5;
+        }
+        .sort-asc::after {
+            content: '↑';
+            opacity: 1;
+        }
+        .sort-desc::after {
+            content: '↓';
+            opacity: 1;
+        }
+        .song-row {
+            transition: background-color 0.2s;
+        }
+        .song-row:hover {
+            background-color: #f0f9ff;
+        }
+        /* Filter inputs */
+        .filter-row input {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .filter-row input:focus {
+            border-color: #00ACC1;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(0, 172, 193, 0.2);
+        }
+        /* Tag styles */
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            background-color: #e0f2f1;
+            color: #00796b;
+            border-radius: 16px;
+            padding: 4px 12px;
+            margin: 2px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tag:hover {
+            background-color: #b2dfdb;
+        }
+        .tag .tag-remove {
+            margin-left: 6px;
+            cursor: pointer;
+        }
+        /* Tab system for song details */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 1rem;
+        }
+        .tab {
+            padding: 0.75rem 1.25rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-weight: 500;
+        }
+        .tab:hover {
+            background-color: #f7fafc;
+        }
+        .tab.active {
+            border-bottom-color: #00ACC1;
+            color: #00ACC1;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        /* Audio features styling */
+        .audio-feature {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .audio-feature-label {
+            width: 40%;
+            font-weight: 500;
+            color: #4a5568;
+        }
+        .audio-feature-value {
+            width: 15%;
+            font-weight: 600;
+            color: #2d3748;
+        }
+        .audio-feature-bar {
+            width: 45%;
+            height: 8px;
+            background-color: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .audio-feature-bar-fill {
+            height: 100%;
+            background-color: #00ACC1;
+        }
+        .no-features-message {
+            padding: 2rem;
+            text-align: center;
+            background-color: #f7fafc;
+            border-radius: 0.5rem;
+            color: #718096;
+        }
+        /* Add indicator for songs without audio features */
+        .missing-features {
+            background-color: #fff5f5 !important;
+        }
+        .missing-features-indicator {
+            display: inline-flex;
+            align-items: center;
+            background-color: #fed7d7;
+            color: #c53030;
+            border-radius: 16px;
+            padding: 2px 8px;
+            margin-left: 8px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-3">Your Song Library</h1>
+            <p class="text-gray-600 mb-6">Browse, search and manage all your imported songs to use in music quizzes.</p>
+        </div>
+        
+        {% if songs %}
+            <div class="mb-6 bg-white shadow-md rounded-lg p-5">
+                <div class="flex flex-col md:flex-row gap-4">
+                    <div class="w-full md:w-1/3">
+                        <label for="globalSearch" class="block text-sm font-medium text-gray-700 mb-1">Search Songs</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                                <i class="fas fa-search text-gray-400"></i>
+                            </span>
+                            <input type="text" id="globalSearch" placeholder="Search titles, artists, genres..." 
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                        </div>
+                    </div>
+                    
+                    <div class="w-full md:w-1/3">
+                        <label for="pageSizeSelect" class="block text-sm font-medium text-gray-700 mb-1">Records per page</label>
+                        <select id="pageSizeSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                            <option value="25">25 songs</option>
+                            <option value="50">50 songs</option>
+                            <option value="100">100 songs</option>
+                            <option value="all">All songs</option>
+                        </select>
+                    </div>
+                    
+                    <div class="w-full md:w-1/3 flex items-end">
+                        <div class="w-full text-right">
+                            <p class="text-sm text-gray-600 mb-1">Total songs in your collection</p>
+                            <p class="text-navy-800 font-semibold text-lg">
+                                <span id="visibleCount">{{ songs|length }}</span> / <span id="totalCount">{{ songs|length }}</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto bg-white shadow-md rounded-lg mb-8">
+                <table id="songs-table" class="w-full table-auto">
+                    <thead>
+                        <tr class="bg-navy-50 text-navy-800">
+                            <th class="px-4 py-3 text-left sort-header" data-sort="id">ID</th>
+                            <th class="px-4 py-3 text-left sort-header" data-sort="title">Title</th>
+                            <th class="px-4 py-3 text-left sort-header" data-sort="artist">Artist(s)</th>
+                            <th class="px-4 py-3 text-left sort-header" data-sort="genre">Genre</th>
+                            <th class="px-4 py-3 text-left sort-header" data-sort="year">Year</th>
+                            <th class="px-4 py-3 text-left sort-header" data-sort="used_count">Times Used</th>
+                            <th class="px-4 py-3 text-left">Preview</th>
+                            <th class="px-4 py-3 text-left">Actions</th>
+                        </tr>
+                        <tr class="filter-row bg-gray-50">
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter ID" data-col="id"></td>
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter title" data-col="title"></td>
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter artist" data-col="artist"></td>
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter genre" data-col="genre"></td>
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter year" data-col="year"></td>
+                            <td class="px-4 py-2"><input type="text" placeholder="Filter used" data-col="used_count"></td>
+                            <td class="px-4 py-2"></td>
+                            <td class="px-4 py-2"></td>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        {% for song in songs %}
+                            <tr class="song-row hover:bg-gray-50" data-song-id="{{ song.id }}">
+                                <td class="px-4 py-3">{{ song.id }}</td>
+                                <td class="px-4 py-3 font-medium">{{ song.title }}</td>
+                                <td class="px-4 py-3">{{ song.artist }}</td>
+                                <td class="px-4 py-3">
+                                    {% if song.genre %}
+                                    <span class="bg-orange-100 text-orange-800 text-xs font-medium px-2 py-1 rounded">{{ song.genre }}</span>
+                                    {% else %}
+                                    <span class="text-gray-400">Unknown</span>
+                                    {% endif %}
+                                </td>
+                                <td class="px-4 py-3">{{ song.year }}</td>
+                                <td class="px-4 py-3 text-center">
+                                    <span class="{% if song.used_count > 0 %}bg-navy-100 text-navy-800{% else %}bg-gray-100 text-gray-600{% endif %} text-xs font-medium px-2 py-1 rounded-full">
+                                        {{ song.used_count }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    {% if song.preview_url %}
+                                    <audio controls class="preview-audio w-full max-w-[180px]" src="{{ song.preview_url }}" preload="none">Your browser does not support the audio element.</audio>
+                                    {% else %}
+                                    <span class="text-gray-400">No preview</span>
+                                    {% endif %}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex space-x-2">
+                                        <button type="button" 
+                                                class="edit-song-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all" 
+                                                title="Edit song">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button type="button" 
+                                                class="delete-song-btn text-red-600 hover:text-red-800 px-2 py-1 rounded-md border border-transparent hover:border-red-200 hover:bg-red-50 transition-all"
+                                                data-song-id="{{ song.id }}"
+                                                data-song-title="{{ song.title }}"
+                                                title="Delete song">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                
+                <div class="bg-gray-50 px-4 py-3 flex items-center justify-between border-t border-gray-200">
+                    <div class="flex items-center">
+                        <span class="text-sm text-gray-700">
+                            Page <span id="currentPage">1</span> of <span id="totalPages">1</span>
+                        </span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="prevPageBtn" class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fas fa-angle-left mr-1"></i> Previous
+                        </button>
+                        <button id="nextPageBtn" class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Next <i class="fas fa-angle-right ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-8 bg-navy-50 rounded-lg p-6 border border-navy-100">
+                <h3 class="text-xl font-semibold text-navy-800 mb-3 font-montserrat">Library Stats</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-white rounded-md p-4 shadow-sm">
+                        <h4 class="text-sm text-gray-600 mb-1">Total Songs</h4>
+                        <p class="text-2xl font-semibold text-navy-800">{{ songs|length }}</p>
+                    </div>
+                    <div class="bg-white rounded-md p-4 shadow-sm">
+                        <h4 class="text-sm text-gray-600 mb-1">Unique Artists</h4>
+                        <p class="text-2xl font-semibold text-teal-500">{{ unique_artists|default('N/A') }}</p>
+                    </div>
+                    <div class="bg-white rounded-md p-4 shadow-sm">
+                        <h4 class="text-sm text-gray-600 mb-1">Genres</h4>
+                        <p class="text-2xl font-semibold text-orange-500">{{ unique_genres|default('N/A') }}</p>
+                    </div>
+                    <div class="bg-white rounded-md p-4 shadow-sm">
+                        <h4 class="text-sm text-gray-600 mb-1">Most Used Songs</h4>
+                        <p class="text-2xl font-semibold text-navy-800">{{ most_used|default('0') }}</p>
+                    </div>
+                </div>
+
+                <!-- Spotify Audio Features Section -->
+                <div class="mt-6">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-lg font-medium text-navy-800">Spotify Audio Features</h4>
+                        <button id="updateAudioFeaturesBtn" class="bg-[#1DB954] hover:bg-[#1AA346] text-white px-4 py-2 rounded-md transition-colors inline-flex items-center">
+                            <i class="fas fa-music mr-2"></i> Update Audio Features
+                        </button>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2 mb-4">
+                        Retrieve audio features (danceability, energy, tempo, etc.) for Spotify tracks in your library.
+                    </p>
+                    <div id="audioFeaturesProgress" class="hidden">
+                        <div class="w-full bg-gray-200 rounded-full h-4 mb-2">
+                            <div id="audioFeaturesProgressBar" class="bg-[#1DB954] h-4 rounded-full text-xs text-white text-center leading-4" style="width: 0%">0%</div>
+                        </div>
+                        <p id="audioFeaturesStatus" class="text-sm text-gray-600">Processing songs...</p>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="p-8 text-center bg-white shadow-md rounded-lg">
+                <div class="text-gray-400 text-5xl mb-4">
+                    <i class="fas fa-music"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-navy-800 mb-2 font-montserrat">No songs found</h3>
+                <p class="text-gray-600 mb-4">Start by importing songs from Spotify or Deezer</p>
+                <div class="flex flex-wrap justify-center gap-3">
+                    <a href="{{ url_for('core.search') }}" class="bg-[#1DB954] hover:bg-[#1AA346] text-white px-4 py-2 rounded-md transition-colors inline-flex items-center">
+                        <i class="fab fa-spotify mr-2"></i> Import from Spotify
+                    </a>
+                    <a href="{{ url_for('deezer.deezer_search') }}" class="bg-[#a238ff] hover:bg-[#8a30d8] text-white px-4 py-2 rounded-md transition-colors inline-flex items-center">
+                        <i class="fab fa-deezer mr-2"></i> Import from Deezer
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Song Detail Modal -->
+    <div id="songDetailModal" class="hidden fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-4xl mx-auto">
+            <div class="flex justify-between items-center bg-navy-800 text-white px-6 py-4 rounded-t-lg">
+                <h3 class="text-xl font-semibold font-montserrat" id="modalTitle">Song Details</h3>
+                <button type="button" class="text-white hover:text-gray-300 focus:outline-none" id="closeModal">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="modalContent" class="p-6">
+                <!-- Content will be loaded dynamically -->
+                <div class="flex justify-center items-center py-12">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteConfirmModal" class="hidden fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl max-w-md mx-auto">
+            <div class="bg-red-500 text-white px-6 py-4 rounded-t-lg">
+                <h3 class="text-xl font-semibold font-montserrat">Confirm Delete</h3>
+            </div>
+            <div class="p-6">
+                <p>Are you sure you want to delete the song "<span id="deleteSongTitle" class="font-semibold"></span>"?</p>
+                <p class="text-sm text-gray-500 mt-2">This action cannot be undone.</p>
+            </div>
+            <div class="bg-gray-50 px-6 py-4 rounded-b-lg flex justify-end space-x-3">
+                <button id="cancelDeleteBtn" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md transition-colors">
+                    Cancel
+                </button>
+                <button id="confirmDeleteBtn" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-md transition-colors">
+                    Delete Song
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-notification" class="fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg max-w-xs hidden">
+        <div class="flex items-center">
+            <div class="flex-shrink-0">
+                <i id="toast-icon" class="mr-2"></i>
+            </div>
+            <div class="ml-3">
+                <p id="toast-message" class="text-sm font-medium text-white"></p>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            // Store the CSRF token for use in AJAX requests
+            const csrfToken = "{{ csrf_token() }}";
+            
+            // Set up CSRF token for all AJAX requests
+            $.ajaxSetup({
+                beforeSend: function(xhr, settings) {
+                    if (!/^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type) && !this.crossDomain) {
+                        xhr.setRequestHeader("X-CSRFToken", csrfToken);
+                    }
+                }
+            });
+            
+            // Basic table variables
+            let allRows = $('.song-row').toArray();
+            let currentPage = 1;
+            let pageSize = 25;
+            let sortColumn = 'title';
+            let sortDirection = 'asc';
+            let filteredRows = [...allRows];
+            
+            // Initial sorting by title
+            sortTable('title', 'asc');
+            
+            // Toast notification system
+            function showToast(message, type = 'success') {
+                const toast = $('#toast-notification');
+                const icon = $('#toast-icon');
+                const messageEl = $('#toast-message');
+                
+                // Set icon and background color based on type
+                if (type === 'success') {
+                    toast.removeClass('bg-red-600').addClass('bg-teal-600');
+                    icon.removeClass('fa-exclamation-circle').addClass('fa-check-circle');
+                } else {
+                    toast.removeClass('bg-teal-600').addClass('bg-red-600');
+                    icon.removeClass('fa-check-circle').addClass('fa-exclamation-circle');
+                }
+                
+                // Set message
+                messageEl.text(message);
+                
+                // Show toast
+                toast.removeClass('hidden').addClass('block');
+                
+                // Hide toast after 3 seconds
+                setTimeout(function() {
+                    toast.removeClass('block').addClass('hidden');
+                }, 3000);
+            }
+            
+            // Song row click handler
+            $('.song-row').on('click', function(e) {
+                // Ignore clicks on buttons, audio controls, etc.
+                if ($(e.target).is('button') || $(e.target).closest('button').length || 
+                    $(e.target).is('audio') || $(e.target).closest('audio').length) {
+                    return;
+                }
+                
+                const songId = $(this).data('song-id');
+                openSongModal(songId);
+            });
+            
+            // Edit song button click handler
+            $('.edit-song-btn').on('click', function(e) {
+                e.stopPropagation();
+                const songId = $(this).closest('.song-row').data('song-id');
+                openSongModal(songId);
+            });
+            
+            // Delete song button click handler
+            $('.delete-song-btn').on('click', function(e) {
+                e.stopPropagation();
+                const songId = $(this).data('song-id');
+                const songTitle = $(this).data('song-title');
+                
+                // Set the song title in the confirmation modal
+                $('#deleteSongTitle').text(songTitle);
+                
+                // Store the song ID for the confirmation button
+                $('#confirmDeleteBtn').data('song-id', songId);
+                
+                // Show the delete confirmation modal
+                $('#deleteConfirmModal').removeClass('hidden');
+            });
+            
+            // Cancel delete button click handler
+            $('#cancelDeleteBtn').on('click', function() {
+                $('#deleteConfirmModal').addClass('hidden');
+            });
+            
+            // Confirm delete button click handler
+            $('#confirmDeleteBtn').on('click', function() {
+                const songId = $(this).data('song-id');
+                
+                // Call API to delete the song
+                $.ajax({
+                    url: `/api/songs/${songId}`,
+                    method: 'DELETE',
+                    success: function(data) {
+                        // Hide the confirmation modal
+                        $('#deleteConfirmModal').addClass('hidden');
+                        
+                        // Remove the row from the table
+                        const row = $(`.song-row[data-song-id="${songId}"]`);
+                        
+                        // Remove from our arrays
+                        allRows = allRows.filter(r => $(r).data('song-id') != songId);
+                        filteredRows = filteredRows.filter(r => $(r).data('song-id') != songId);
+                        
+                        // Animate the row's removal
+                        row.css('background-color', '#ffcccc')
+                           .fadeOut(400, function() {
+                               $(this).remove();
+                               renderTable();
+                           });
+                        
+                        // Show success message
+                        showToast(data.message || 'Song deleted successfully');
+                    },
+                    error: function(xhr) {
+                        // Hide the confirmation modal
+                        $('#deleteConfirmModal').addClass('hidden');
+                        
+                        // Parse the error message
+                        let errorMsg = xhr.responseJSON?.error || 'Failed to delete the song';
+                        let roundsList = '';
+                        
+                        // If the song is used in rounds, show which ones
+                        if (xhr.responseJSON?.rounds && xhr.responseJSON.rounds.length > 0) {
+                            roundsList = 'Used in rounds: ' + xhr.responseJSON.rounds.join(', ');
+                            errorMsg += `. ${roundsList}`;
+                        }
+                        
+                        // Show error message
+                        showToast(errorMsg, 'error');
+                    }
+                });
+            });
+            
+            // Close delete modal on outside click
+            $(document).on('click', function(e) {
+                if ($(e.target).is('#deleteConfirmModal')) {
+                    $('#deleteConfirmModal').addClass('hidden');
+                }
+            });
+            
+            // Sort table by column
+            function sortTable(column, direction) {
+                // Update sort indicators
+                $('.sort-header').removeClass('sort-asc sort-desc');
+                $(`.sort-header[data-sort="${column}"]`).addClass(direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                
+                // Store current sort settings
+                sortColumn = column;
+                sortDirection = direction;
+                
+                // Sort the rows
+                filteredRows.sort(function(a, b) {
+                    const aValue = $(a).find(`td:nth-child(${getColumnIndex(column)})`).text().trim();
+                    const bValue = $(b).find(`td:nth-child(${getColumnIndex(column)})`).text().trim();
+                    
+                    // Handle numeric columns
+                    if (['id', 'year', 'used_count'].includes(column)) {
+                        return direction === 'asc' ? 
+                            parseInt(aValue || 0) - parseInt(bValue || 0) : 
+                            parseInt(bValue || 0) - parseInt(aValue || 0);
+                    }
+                    
+                    // Handle text columns
+                    return direction === 'asc' ? 
+                        aValue.localeCompare(bValue) : 
+                        bValue.localeCompare(aValue);
+                });
+                
+                // Re-render table
+                renderTable();
+            }
+            
+            // Helper to get column index by name
+            function getColumnIndex(columnName) {
+                const columnMap = {
+                    'id': 1,
+                    'title': 2,
+                    'artist': 3,
+                    'genre': 4,
+                    'year': 5,
+                    'used_count': 6
+                };
+                return columnMap[columnName] || 1;
+            }
+            
+            // Sort header click handler
+            $('.sort-header').on('click', function() {
+                const column = $(this).data('sort');
+                let direction = 'asc';
+                
+                // Toggle direction if already sorted by this column
+                if (sortColumn === column) {
+                    direction = sortDirection === 'asc' ? 'desc' : 'asc';
+                }
+                
+                // Sort table
+                sortTable(column, direction);
+            });
+            
+            // Filter table by column
+            function filterTable() {
+                // Get all filter values
+                const filters = {};
+                $('.filter-row input').each(function() {
+                    const column = $(this).data('col');
+                    const value = $(this).val().toLowerCase().trim();
+                    if (value) {
+                        filters[column] = value;
+                    }
+                });
+                
+                // Get global search value
+                const globalSearch = $('#globalSearch').val().toLowerCase().trim();
+                
+                // Reset filtered rows to all rows
+                filteredRows = allRows.filter(function(row) {
+                    const $row = $(row);
+                    let matches = true;
+                    
+                    // Apply column filters
+                    for (const column in filters) {
+                        const cellText = $row.find(`td:nth-child(${getColumnIndex(column)})`).text().toLowerCase();
+                        if (!cellText.includes(filters[column])) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    
+                    // Apply global search if there's a value
+                    if (matches && globalSearch) {
+                        // Check all cells except the audio and actions columns
+                        matches = false;
+                        for (let i = 1; i <= 6; i++) {
+                            const cellText = $row.find(`td:nth-child(${i})`).text().toLowerCase();
+                            if (cellText.includes(globalSearch)) {
+                                matches = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    return matches;
+                });
+                
+                // Re-sort the filtered rows
+                sortTable(sortColumn, sortDirection);
+                
+                // Reset to first page after filtering
+                currentPage = 1;
+                renderTable();
+                
+                // Update count display
+                $('#visibleCount').text(filteredRows.length);
+            }
+            
+            // Set up filter input handlers
+            $('.filter-row input').on('input', filterTable);
+            $('#globalSearch').on('input', filterTable);
+            
+            // Render table with current page and filters
+            function renderTable() {
+                // Hide all rows first
+                $('.song-row').hide();
+                
+                // Calculate page bounds
+                const start = pageSize === 'all' ? 0 : (currentPage - 1) * pageSize;
+                const end = pageSize === 'all' ? filteredRows.length : start + parseInt(pageSize);
+                
+                // Show rows for current page
+                for (let i = start; i < end && i < filteredRows.length; i++) {
+                    $(filteredRows[i]).show();
+                }
+                
+                // Update pagination controls
+                const totalPages = pageSize === 'all' ? 1 : Math.ceil(filteredRows.length / pageSize);
+                $('#currentPage').text(currentPage);
+                $('#totalPages').text(totalPages);
+                $('#prevPageBtn').prop('disabled', currentPage <= 1);
+                $('#nextPageBtn').prop('disabled', currentPage >= totalPages);
+                
+                // Update total count
+                $('#totalCount').text(allRows.length);
+                $('#visibleCount').text(filteredRows.length);
+            }
+            
+            // Page size change handler
+            $('#pageSizeSelect').on('change', function() {
+                pageSize = $(this).val();
+                currentPage = 1;
+                renderTable();
+            });
+            
+            // Pagination buttons
+            $('#prevPageBtn').on('click', function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable();
+                }
+            });
+            
+            $('#nextPageBtn').on('click', function() {
+                const totalPages = pageSize === 'all' ? 1 : Math.ceil(filteredRows.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderTable();
+                }
+            });
+            
+            // Function to open song modal
+            function openSongModal(songId) {
+                const modal = $('#songDetailModal');
+                const modalContent = $('#modalContent');
+                
+                // Show modal with loading state
+                modal.removeClass('hidden');
+                modalContent.html(`
+                    <div class="flex justify-center items-center py-12">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+                    </div>
+                `);
+                
+                // Set modal title
+                $('#modalTitle').text('Loading Song Details...');
+                
+                // Fetch song details
+                $.ajax({
+                    url: `/api/songs/${songId}`,
+                    method: 'GET',
+                    success: function(data) {
+                        // Set modal title
+                        $('#modalTitle').text(data.title);
+                        
+                        // Build modal content
+                        const content = `
+                            <div class="tabs">
+                                <div class="tab active" data-tab="details">Details</div>
+                                <div class="tab" data-tab="audio-features">Audio Features</div>
+                            </div>
+                            <div class="tab-content active" id="details">
+                                <div class="flex flex-col md:flex-row gap-8">
+                                    <!-- Left column: Cover and audio preview -->
+                                    <div class="w-full md:w-1/3">
+                                        <div class="mb-6">
+                                            <img src="${data.cover_url || '/static/favicon.ico'}" 
+                                                alt="Album Cover" 
+                                                class="w-full h-auto max-w-[250px] mx-auto rounded-lg shadow-md">
+                                        </div>
+                                        
+                                        <div class="mb-6">
+                                            <h4 class="font-medium mb-2 text-gray-700">Preview</h4>
+                                            <audio controls class="w-full" id="songAudio">
+                                                <source src="${data.preview_url || ''}" type="audio/mpeg">
+                                                Your browser does not support the audio element.
+                                            </audio>
+                                        </div>
+                                        
+                                        <div class="mb-6">
+                                            <h4 class="font-medium mb-2 text-gray-700">Usage Statistics</h4>
+                                            <div class="bg-navy-50 rounded-lg p-4">
+                                                <p class="flex justify-between">
+                                                    <span>Times used in quizzes:</span>
+                                                    <span class="font-semibold text-navy-800">${data.used_count || 0}</span>
+                                                </p>
+                                                <p class="flex justify-between mt-1">
+                                                    <span>Last used:</span>
+                                                    <span class="font-semibold text-navy-800">${data.last_used || 'Never'}</span>
+                                                </p>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="mb-6 flex flex-col space-y-2">
+                                            <button id="refreshSongBtn" data-song-id="${songId}" 
+                                                class="w-full bg-teal-500 hover:bg-teal-600 text-white font-medium py-2 px-4 rounded-md flex items-center justify-center">
+                                                <i class="fas fa-sync-alt mr-2"></i> Refresh Metadata
+                                            </button>
+                                            
+                                            <button id="deleteSongModalBtn" data-song-id="${songId}" data-song-title="${data.title}"
+                                                class="w-full bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-md flex items-center justify-center">
+                                                <i class="fas fa-trash-alt mr-2"></i> Delete Song
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Right column: Song details form -->
+                                    <div class="w-full md:w-2/3">
+                                        <form id="editSongForm">
+                                            <input type="hidden" name="csrf_token" value="${csrfToken}">
+                                            <input type="hidden" name="song_id" value="${songId}">
+                                            
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="title">Title</label>
+                                                    <input type="text" id="title" name="title" value="${data.title || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="artist">Artist</label>
+                                                    <input type="text" id="artist" name="artist" value="${data.artist || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="genre">Genre</label>
+                                                    <input type="text" id="genre" name="genre" value="${data.genre || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="year">Year</label>
+                                                    <input type="text" id="year" name="year" value="${data.year || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="isrc">ISRC</label>
+                                                    <input type="text" id="isrc" name="isrc" value="${data.isrc || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="popularity">Popularity</label>
+                                                    <input type="number" id="popularity" name="popularity" min="0" max="100" value="${data.popularity || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="spotify_id">Spotify ID</label>
+                                                    <input type="text" id="spotify_id" name="spotify_id" value="${data.spotify_id || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="deezer_id">Deezer ID</label>
+                                                    <input type="text" id="deezer_id" name="deezer_id" value="${data.deezer_id || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group col-span-2">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="preview_url">Preview URL</label>
+                                                    <input type="text" id="preview_url" name="preview_url" value="${data.preview_url || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group col-span-2">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="cover_url">Cover URL</label>
+                                                    <input type="text" id="cover_url" name="cover_url" value="${data.cover_url || ''}" 
+                                                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                </div>
+                                                
+                                                <div class="form-group col-span-2">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="metadata_sources">Metadata Sources</label>
+                                                    <input type="text" id="metadata_sources" name="metadata_sources" value="${data.metadata_sources || ''}" readonly 
+                                                        class="bg-gray-100 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight">
+                                                </div>
+
+                                                <!-- Tags section -->
+                                                <div class="form-group col-span-2">
+                                                    <label class="block text-gray-700 text-sm font-bold mb-2">Tags</label>
+                                                    <div id="tagsContainer" class="bg-gray-50 p-3 rounded-md min-h-[100px] border border-gray-200">
+                                                        ${renderTags(data.tags || [])}
+                                                    </div>
+                                                    <div class="flex mt-2">
+                                                        <input type="text" id="newTagInput" placeholder="Add a new tag..." 
+                                                            class="flex-grow shadow appearance-none border rounded-l-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-teal-500">
+                                                        <button type="button" id="addTagBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-r-md">
+                                                            <i class="fas fa-plus"></i>
+                                                        </button>
+                                                    </div>
+                                                    <input type="hidden" id="tags" name="tags" value="${JSON.stringify(data.tags || [])}">
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="mt-6">
+                                                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-md">
+                                                    <i class="fas fa-save mr-2"></i> Save Changes
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-content" id="audio-features">
+                                ${renderAudioFeatures(data)}
+                            </div>
+                        `;
+                        
+                        // Set modal content
+                        modalContent.html(content);
+                        
+                        // Initialize audio player
+                        if ($('#songAudio')[0]) {
+                            $('#songAudio')[0].load();
+                        }
+                        
+                        // Tags functionality
+                        setUpTagsSystem(data.tags || []);
+                        
+                        // Modal refresh metadata button handler
+                        $('#refreshSongBtn').on('click', function() {
+                            const btnSongId = $(this).data('song-id');
+                            const button = $(this);
+                            
+                            // Update button state
+                            const originalHtml = button.html();
+                            button.html('<i class="fas fa-spinner fa-spin"></i> Refreshing...').prop('disabled', true);
+                            
+                            // Call API to refresh metadata
+                            $.ajax({
+                                url: `/api/songs/${btnSongId}/refresh-metadata`,
+                                method: 'POST',
+                                success: function(data) {
+                                    // Update form fields
+                                    $('#title').val(data.title || '');
+                                    $('#artist').val(data.artist || '');
+                                    $('#genre').val(data.genre || '');
+                                    $('#year').val(data.year || '');
+                                    $('#isrc').val(data.isrc || '');
+                                    $('#popularity').val(data.popularity || '');
+                                    $('#spotify_id').val(data.spotify_id || '');
+                                    $('#deezer_id').val(data.deezer_id || '');
+                                    $('#preview_url').val(data.preview_url || '');
+                                    $('#cover_url').val(data.cover_url || '');
+                                    $('#metadata_sources').val(data.metadata_sources || '');
+                                    
+                                    // Update tags
+                                    if (data.tags) {
+                                        setUpTagsSystem(data.tags);
+                                    }
+                                    
+                                    // Update audio player
+                                    if (data.preview_url) {
+                                        $('#songAudio source').attr('src', data.preview_url);
+                                        $('#songAudio')[0].load();
+                                    }
+                                    
+                                    // Update image
+                                    if (data.cover_url) {
+                                        $('img').attr('src', data.cover_url);
+                                    }
+                                    
+                                    // Update title
+                                    $('#modalTitle').text(data.title);
+                                    
+                                    // Update table row in the main table
+                                    updateRowData(btnSongId, data);
+                                    
+                                    // Reset button
+                                    button.html(originalHtml).prop('disabled', false);
+                                    
+                                    // Show success message
+                                    showToast('Metadata refreshed successfully!');
+                                },
+                                error: function(xhr) {
+                                    // Reset button
+                                    button.html(originalHtml).prop('disabled', false);
+                                    
+                                    // Show error message
+                                    showToast(xhr.responseJSON?.error || 'Failed to refresh metadata', 'error');
+                                }
+                            });
+                        });
+                        
+                        // Delete song button in modal handler
+                        $('#deleteSongModalBtn').on('click', function() {
+                            const songId = $(this).data('song-id');
+                            const songTitle = $(this).data('song-title');
+                            
+                            // Close the detail modal first
+                            closeModal();
+                            
+                            // Set the song title in the confirmation modal
+                            $('#deleteSongTitle').text(songTitle);
+                            
+                            // Store the song ID for the confirmation button
+                            $('#confirmDeleteBtn').data('song-id', songId);
+                            
+                            // Show the delete confirmation modal
+                            $('#deleteConfirmModal').removeClass('hidden');
+                        });
+                        
+                        // Form submission handler
+                        $('#editSongForm').on('submit', function(e) {
+                            e.preventDefault();
+                            
+                            const form = $(this);
+                            const submitBtn = form.find('button[type="submit"]');
+                            const formData = {
+                                title: $('#title').val(),
+                                artist: $('#artist').val(),
+                                genre: $('#genre').val(),
+                                year: $('#year').val(),
+                                isrc: $('#isrc').val(),
+                                popularity: $('#popularity').val(),
+                                spotify_id: $('#spotify_id').val(),
+                                deezer_id: $('#deezer_id').val(),
+                                preview_url: $('#preview_url').val(),
+                                cover_url: $('#cover_url').val(),
+                                tags: JSON.parse($('#tags').val())
+                            };
+                            
+                            // Update button state
+                            const originalHtml = submitBtn.html();
+                            submitBtn.html('<i class="fas fa-spinner fa-spin"></i> Saving...').prop('disabled', true);
+                            
+                            // Call API to update song
+                            $.ajax({
+                                url: `/api/songs/${songId}`,
+                                method: 'PUT',
+                                contentType: 'application/json',
+                                data: JSON.stringify(formData),
+                                success: function(data) {
+                                    // Update modal title
+                                    $('#modalTitle').text(data.title);
+                                    
+                                    // Update audio player if URL changed
+                                    if ($('#preview_url').val() !== data.preview_url && data.preview_url) {
+                                        $('#songAudio source').attr('src', data.preview_url);
+                                        $('#songAudio')[0].load();
+                                    }
+                                    
+                                    // Update image if URL changed
+                                    if ($('#cover_url').val() !== data.cover_url && data.cover_url) {
+                                        $('img').attr('src', data.cover_url);
+                                    }
+                                    
+                                    // Update table row
+                                    updateRowData(songId, data);
+                                    
+                                    // Resort table if needed
+                                    if (['title', 'artist', 'genre', 'year'].includes(sortColumn)) {
+                                        sortTable(sortColumn, sortDirection);
+                                    }
+                                    
+                                    // Reset button
+                                    submitBtn.html(originalHtml).prop('disabled', false);
+                                    
+                                    // Show success message
+                                    showToast('Song updated successfully!');
+                                },
+                                error: function(xhr) {
+                                    // Reset button
+                                    submitBtn.html(originalHtml).prop('disabled', false);
+                                    
+                                    // Show error message
+                                    showToast(xhr.responseJSON?.error || 'Failed to update song', 'error');
+                                }
+                            });
+                        });
+                        
+                        // Tab switching functionality
+                        $('.tab').on('click', function() {
+                            const tabName = $(this).data('tab');
+                            
+                            // Update active tab
+                            $('.tab').removeClass('active');
+                            $(this).addClass('active');
+                            
+                            // Update active content
+                            $('.tab-content').removeClass('active');
+                            $(`#${tabName}`).addClass('active');
+                        });
+                        
+                        // Handler for "Get Audio Features" button
+                        $(document).on('click', '#getSongFeaturesBtn', function() {
+                            const songId = $(this).data('song-id');
+                            const button = $(this);
+                            
+                            // Update button state
+                            const originalHtml = button.html();
+                            button.html('<i class="fas fa-spinner fa-spin"></i> Fetching...').prop('disabled', true);
+                            
+                            // Call API to fetch and update audio features
+                            $.ajax({
+                                url: `/api/songs/update-audio-features`,
+                                method: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({
+                                    song_ids: [songId],
+                                    process_specific: true
+                                }),
+                                success: function(data) {
+                                    // Refresh the song details to show new audio features
+                                    $.ajax({
+                                        url: `/api/songs/${songId}`,
+                                        method: 'GET',
+                                        success: function(songData) {
+                                            // Replace the tab content with fresh data
+                                            $('#audio-features').html(renderAudioFeatures(songData));
+                                            
+                                            // Select the audio features tab to show the new data
+                                            $('.tab[data-tab="audio-features"]').click();
+                                            
+                                            // Show success toast
+                                            showToast('Audio features updated successfully!');
+                                        },
+                                        error: function() {
+                                            // Reset button
+                                            button.html(originalHtml).prop('disabled', false);
+                                            showToast('Error fetching updated song data', 'error');
+                                        }
+                                    });
+                                },
+                                error: function(xhr) {
+                                    // Reset button
+                                    button.html(originalHtml).prop('disabled', false);
+                                    
+                                    // Show error toast
+                                    showToast(xhr.responseJSON?.message || 'Failed to update audio features', 'error');
+                                }
+                            });
+                        });
+                    },
+                    error: function(xhr) {
+                        // Show error in modal
+                        modalContent.html(`
+                            <div class="text-center py-10">
+                                <div class="bg-red-100 p-6 rounded-lg">
+                                    <i class="fas fa-exclamation-circle text-red-600 text-4xl mb-4"></i>
+                                    <p class="text-red-600 font-medium mb-4">Error loading song details</p>
+                                    <p class="text-gray-700 mb-4">${xhr.responseJSON?.error || xhr.statusText || 'Unknown error'}</p>
+                                    <button id="closeErrorBtn" class="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md">
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        `);
+                        
+                        $('#closeErrorBtn').on('click', function() {
+                            closeModal();
+                        });
+                    }
+                });
+            }
+            
+            // Function to render tags
+            function renderTags(tags) {
+                if (!tags || tags.length === 0) {
+                    return '<p class="text-gray-400 italic">No tags</p>';
+                }
+                
+                let html = '';
+                tags.forEach(tag => {
+                    html += `<span class="tag" data-id="${tag.id || ''}" data-name="${tag.name}">
+                        ${tag.name}
+                        <span class="tag-remove" title="Remove tag"><i class="fas fa-times"></i></span>
+                    </span>`;
+                });
+                
+                return html;
+            }
+            
+            // Set up tags management system
+            function setUpTagsSystem(tags) {
+                // Initialize tags
+                $('#tagsContainer').html(renderTags(tags));
+                $('#tags').val(JSON.stringify(tags));
+                
+                // Add tag button handler
+                $('#addTagBtn').off('click').on('click', function() {
+                    const tagInput = $('#newTagInput');
+                    const tagName = tagInput.val().trim();
+                    
+                    if (!tagName) return;
+                    
+                    // Get current tags
+                    let currentTags = JSON.parse($('#tags').val());
+                    
+                    // Check if tag already exists
+                    if (!currentTags.some(tag => tag.name.toLowerCase() === tagName.toLowerCase())) {
+                        // Add new tag
+                        currentTags.push({ id: null, name: tagName });
+                        
+                        // Update hidden input and display
+                        $('#tags').val(JSON.stringify(currentTags));
+                        $('#tagsContainer').html(renderTags(currentTags));
+                        
+                        // Set up remove handlers for the new tags
+                        setUpTagRemoveHandlers();
+                    }
+                    
+                    // Clear input
+                    tagInput.val('');
+                });
+                
+                // Add tag on enter key
+                $('#newTagInput').off('keypress').on('keypress', function(e) {
+                    if (e.which === 13) {
+                        e.preventDefault();
+                        $('#addTagBtn').click();
+                    }
+                });
+                
+                // Set up remove tag handlers
+                setUpTagRemoveHandlers();
+            }
+            
+            // Set up handlers for removing tags
+            function setUpTagRemoveHandlers() {
+                $('.tag-remove').off('click').on('click', function(e) {
+                    e.stopPropagation();
+                    
+                    const tag = $(this).closest('.tag');
+                    const tagName = tag.data('name');
+                    const tagId = tag.data('id');
+                    
+                    // Get current tags
+                    let currentTags = JSON.parse($('#tags').val());
+                    
+                    // Remove tag
+                    currentTags = currentTags.filter(t => !(t.name === tagName && (t.id === tagId || (!t.id && !tagId))));
+                    
+                    // Update hidden input
+                    $('#tags').val(JSON.stringify(currentTags));
+                    
+                    // Remove from display
+                    tag.remove();
+                    
+                    // If no tags left, show placeholder
+                    if (currentTags.length === 0) {
+                        $('#tagsContainer').html('<p class="text-gray-400 italic">No tags</p>');
+                    }
+                });
+            }
+            
+            // Function to update row data in the table
+            function updateRowData(songId, data) {
+                const row = $(`tr[data-song-id="${songId}"]`);
+                if (row.length) {
+                    // Update text cells
+                    row.find('td:nth-child(2)').text(data.title || '');
+                    row.find('td:nth-child(3)').text(data.artist || '');
+                    
+                    // Update genre with appropriate styling
+                    const genreCell = row.find('td:nth-child(4)');
+                    if (data.genre) {
+                        genreCell.html(`<span class="bg-orange-100 text-orange-800 text-xs font-medium px-2 py-1 rounded">${data.genre}</span>`);
+                    } else {
+                        genreCell.html(`<span class="text-gray-400">Unknown</span>`);
+                    }
+                    
+                    row.find('td:nth-child(5)').text(data.year || '');
+                    
+                    // Update audio preview
+                    if (data.preview_url) {
+                        const audioCell = row.find('td:nth-child(7)');
+                        if (audioCell.find('audio').length) {
+                            audioCell.find('audio').attr('src', data.preview_url);
+                            audioCell.find('audio')[0].load();
+                        } else {
+                            audioCell.html(`<audio controls class="preview-audio w-full max-w-[180px]" src="${data.preview_url}" preload="none">Your browser does not support audio.</audio>`);
+                        }
+                    }
+                    
+                    // Update delete button song title attribute
+                    row.find('.delete-song-btn').data('song-title', data.title);
+                    
+                    // Update the row in our arrays
+                    for (let i = 0; i < allRows.length; i++) {
+                        if ($(allRows[i]).data('song-id') == songId) {
+                            allRows[i] = row[0];
+                            break;
+                        }
+                    }
+                    
+                    for (let i = 0; i < filteredRows.length; i++) {
+                        if ($(filteredRows[i]).data('song-id') == songId) {
+                            filteredRows[i] = row[0];
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Close modal function
+            function closeModal() {
+                $('#songDetailModal').addClass('hidden');
+            }
+            
+            // Close button handler
+            $('#closeModal').on('click', closeModal);
+            
+            // Close on outside click
+            $(document).on('click', function(e) {
+                if ($(e.target).is('#songDetailModal')) {
+                    closeModal();
+                }
+            });
+            
+            // Close on escape key
+            $(document).on('keydown', function(e) {
+                if (e.key === 'Escape' && !$('#songDetailModal').hasClass('hidden')) {
+                    closeModal();
+                }
+            });
+            
+            // Function to render audio features in a visual way
+            function renderAudioFeatures(data) {
+                // Check if song has any audio features
+                if (!data.acousticness && !data.danceability && !data.energy && !data.tempo) {
+                    return `
+                        <div class="no-features-message">
+                            <i class="fas fa-music text-4xl text-gray-300 mb-4"></i>
+                            <h3 class="text-lg font-medium mb-2">No Audio Features Available</h3>
+                            <p class="mb-4">This song doesn't have Spotify audio features data yet.</p>
+                            <button id="getSongFeaturesBtn" data-song-id="${data.id}" 
+                                class="bg-[#1DB954] hover:bg-[#1AA346] text-white px-4 py-2 rounded-md transition-colors">
+                                <i class="fas fa-sync-alt mr-2"></i> Get Audio Features
+                            </button>
+                        </div>
+                    `;
+                }
+                
+                // Format features with appropriate scale and labels
+                const features = [
+                    { name: 'Danceability', value: data.danceability, description: 'How suitable for dancing (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Energy', value: data.energy, description: 'Intensity and activity (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Acousticness', value: data.acousticness, description: 'Confidence track is acoustic (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Instrumentalness', value: data.instrumentalness, description: 'Predicts if track has no vocals (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Liveness', value: data.liveness, description: 'Presence of audience (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Speechiness', value: data.speechiness, description: 'Presence of spoken words (0.0 to 1.0)', scale: 1.0 },
+                    { name: 'Valence', value: data.valence, description: 'Musical positiveness (0.0 to 1.0)', scale: 1.0 }
+                ];
+                
+                // Format features with different scales
+                const otherFeatures = [
+                    { name: 'Loudness', value: data.loudness, description: 'Overall loudness in dB (-60 to 0 typically)', format: (val) => val ? `${val.toFixed(1)} dB` : 'N/A' },
+                    { name: 'Tempo', value: data.tempo, description: 'Estimated tempo in BPM', format: (val) => val ? `${val.toFixed(1)} BPM` : 'N/A' },
+                    { name: 'Key', value: data.key, description: 'Key of the track (standard Pitch Class notation)', 
+                      format: (val) => {
+                          if (val === null || val === undefined) return 'N/A';
+                          const keys = ['C', 'C♯/D♭', 'D', 'D♯/E♭', 'E', 'F', 'F♯/G♭', 'G', 'G♯/A♭', 'A', 'A♯/B♭', 'B'];
+                          return val >= 0 && val < 12 ? keys[val] : 'Unknown';
+                      }
+                    },
+                    { name: 'Mode', value: data.mode, description: 'Modality - major (1) or minor (0)', 
+                      format: (val) => {
+                          if (val === null || val === undefined) return 'N/A';
+                          return val === 1 ? 'Major' : val === 0 ? 'Minor' : 'Unknown';
+                      }
+                    },
+                    { name: 'Time Signature', value: data.time_signature, description: 'Estimated time signature', 
+                      format: (val) => {
+                          if (val === null || val === undefined) return 'N/A';
+                          return `${val}/4`;
+                      }
+                    },
+                    { name: 'Duration', value: data.duration_ms, description: 'Duration of track', 
+                      format: (val) => {
+                          if (!val) return 'N/A';
+                          const minutes = Math.floor(val / 60000);
+                          const seconds = ((val % 60000) / 1000).toFixed(0);
+                          return `${minutes}:${seconds.padStart(2, '0')}`;
+                      }
+                    }
+                ];
+                
+                // Render the audio features visualization
+                let html = '<div class="p-4">';
+                
+                // Add section for scaled features (0.0 to 1.0) with visualization bars
+                html += `<div class="mb-6">
+                    <h3 class="text-lg font-medium mb-4">Audio Characteristics</h3>
+                    <div class="bg-gray-50 rounded-lg p-4">`;
+                
+                // Add feature bars
+                features.forEach(feature => {
+                    if (feature.value !== null && feature.value !== undefined) {
+                        const percentage = Math.round((feature.value / feature.scale) * 100);
+                        html += `
+                            <div class="audio-feature">
+                                <div class="audio-feature-label" title="${feature.description}">${feature.name}</div>
+                                <div class="audio-feature-value">${feature.value.toFixed(2)}</div>
+                                <div class="audio-feature-bar">
+                                    <div class="audio-feature-bar-fill" style="width: ${percentage}%"></div>
+                                </div>
+                            </div>`;
+                    }
+                });
+                
+                html += `</div></div>`;
+                
+                // Add section for other features (different scales)
+                html += `<div class="mb-6">
+                    <h3 class="text-lg font-medium mb-4">Musical Properties</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+                
+                // Add other feature cards
+                otherFeatures.forEach(feature => {
+                    const value = feature.format ? feature.format(feature.value) : (feature.value || 'N/A');
+                    html += `
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <div class="font-medium text-navy-800">${feature.name}</div>
+                            <div class="text-2xl font-bold mt-2">${value}</div>
+                            <div class="text-sm text-gray-500 mt-1">${feature.description}</div>
+                        </div>`;
+                });
+                
+                html += `</div></div>`;
+                
+                html += '</div>';
+                return html;
+            }
+            
+            // Auto-pause other audio when one starts playing
+            $(document).on('play', 'audio', function() {
+                $('audio').not(this).each(function() {
+                    if (!this.paused) {
+                        this.pause();
+                    }
+                });
+            });
+
+            // Update Audio Features button handler
+            $('#updateAudioFeaturesBtn').on('click', function() {
+                const button = $(this);
+                const progressContainer = $('#audioFeaturesProgress');
+                const progressBar = $('#audioFeaturesProgressBar');
+                const statusText = $('#audioFeaturesStatus');
+                
+                // Update button state
+                const originalHtml = button.html();
+                button.html('<i class="fas fa-spinner fa-spin mr-2"></i> Processing...').prop('disabled', true);
+                
+                // Show progress container
+                progressContainer.removeClass('hidden');
+                progressBar.css('width', '0%').text('0%');
+                statusText.text('Starting audio features update...');
+                
+                // Call API to update audio features
+                $.ajax({
+                    url: '/api/songs/update-audio-features',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        batch_size: 50,
+                        process_all: false  // Only process songs that don't have audio features yet
+                    }),
+                    success: function(data) {
+                        // Calculate percentage
+                        const processed = data.processed;
+                        const total = data.total;
+                        const percentage = total > 0 ? Math.round((processed / total) * 100) : 100;
+                        
+                        // Update progress bar
+                        progressBar.css('width', percentage + '%').text(percentage + '%');
+                        
+                        // Update status text
+                        if (data.processed === 0) {
+                            statusText.text('No songs needed audio features.');
+                        } else {
+                            statusText.text(`Updated ${processed} of ${total} songs. ${data.errors} errors.`);
+                        }
+                        
+                        // Reset button
+                        button.html(originalHtml).prop('disabled', false);
+                        
+                        // Show success message
+                        showToast(data.message || 'Audio features updated successfully!');
+                        
+                        // Hide progress container after 5 seconds
+                        setTimeout(function() {
+                            progressContainer.addClass('hidden');
+                        }, 5000);
+                    },
+                    error: function(xhr) {
+                        // Reset button
+                        button.html(originalHtml).prop('disabled', false);
+                        
+                        // Update status text
+                        statusText.text('Error updating audio features.');
+                        
+                        // Show error message
+                        showToast(xhr.responseJSON?.message || 'Failed to update audio features', 'error');
+                    }
+                });
+            });
+            
+            // Initial render
+            renderTable();
+        });
+    </script>
+{% endblock %}
+

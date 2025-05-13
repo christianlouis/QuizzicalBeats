@@ -1,0 +1,257 @@
+{% extends 'base.html' %}
+{% block title %}System Settings{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <h2 class="text-2xl font-bold mb-6 text-navy-800">System Settings</h2>
+    
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        
+        <!-- TTS Settings Section -->
+        <div class="mb-8 border-b pb-6">
+            <h3 class="text-xl font-semibold mb-4 text-navy-700">Text-to-Speech Settings</h3>
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="default_tts_service">Default TTS Service</label>
+                <select name="default_tts_service" id="default_tts_service" class="border rounded px-3 py-2 w-full">
+                    <option value="">(None)</option>
+                    {% for service in tts_services %}
+                        <option value="{{ service.id }}" {% if settings.get('default_tts_service') == service.id %}selected{% endif %}>
+                            {{ service.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <p class="text-sm text-gray-500 mt-1">The default text-to-speech service to use for audio generation</p>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="default_tts_voice">Default TTS Voice</label>
+                <select name="default_tts_voice" id="default_tts_voice" class="border rounded px-3 py-2 w-full">
+                    <option value="">(None)</option>
+                    
+                    {% for service in tts_services %}
+                        <optgroup label="{{ service.name }}">
+                            {% for voice in service.voices %}
+                                <option value="{{ voice.id }}" {% if settings.get('default_tts_voice') == voice.id %}selected{% endif %}>
+                                    {{ voice.name }} {% if voice.gender or voice.language %}({{ voice.gender }}{% if voice.language and voice.gender %}, {{ voice.language }}{% elif voice.language %}{{ voice.language }}{% endif %}){% endif %}
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endfor %}
+                </select>
+                <p class="text-sm text-gray-500 mt-1">Default voice ID for the selected TTS service</p>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="default_tts_model">Default TTS Model</label>
+                <select name="default_tts_model" id="default_tts_model" class="border rounded px-3 py-2 w-full">
+                    <option value="">(None)</option>
+                    
+                    {% for service in tts_services %}
+                        {% if service.models %}
+                            <optgroup label="{{ service.name }} Models">
+                                {% for model in service.models %}
+                                    <option value="{{ model.id }}" {% if settings.get('default_tts_model') == model.id %}selected{% endif %}>
+                                        {{ model.name }}
+                                    </option>
+                                {% endfor %}
+                            </optgroup>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+                <p class="text-sm text-gray-500 mt-1">Default model for OpenAI or ElevenLabs TTS</p>
+            </div>
+        </div>
+
+        <!-- Spotify Integration Settings -->
+        <div class="mb-8 border-b pb-6">
+            <h3 class="text-xl font-semibold mb-4 text-navy-700">Spotify Integration</h3>
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="fallback_spotify_refresh_token">Fallback Spotify Refresh Token</label>
+                <div class="flex">
+                    <input type="password" name="fallback_spotify_refresh_token" id="fallback_spotify_refresh_token" 
+                           class="border rounded-l px-3 py-2 flex-grow"
+                           value="{{ settings.get('fallback_spotify_refresh_token', '') }}">
+                    <button type="button" onclick="toggleTokenVisibility()" 
+                            class="bg-gray-200 px-3 py-2 rounded-r border-t border-r border-b">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+                <p class="text-sm text-gray-500 mt-1">Service account refresh token used when users don't have Spotify access</p>
+                <div class="mt-2">
+                    <a href="{{ url_for('users.spotify_link') }}" class="bg-navy-600 text-white px-4 py-2 rounded inline-flex items-center">
+                        <i class="fab fa-spotify mr-2"></i> Connect Spotify Account
+                    </a>
+                </div>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block font-medium mb-1" for="spotify_region">Default Spotify Region</label>
+                <select name="spotify_region" id="spotify_region" class="border rounded px-3 py-2 w-full">
+                    <option value="">(None)</option>
+                    {% for region in spotify_regions %}
+                        <option value="{{ region.code }}" {% if settings.get('spotify_region') == region.code %}selected{% endif %}>
+                            {{ region.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <p class="text-sm text-gray-500 mt-1">Default region for Spotify API searches and charts</p>
+            </div>
+        </div>
+
+        <!-- Authentication Settings Section -->
+        <div class="mb-8 border-b pb-6">
+            <h3 class="text-xl font-semibold mb-4 text-navy-700">Authentication Settings</h3>
+            
+            <div class="flex items-center mb-4">
+                <input type="checkbox" id="allow_signups" name="allow_signups" value="true"
+                       {% if settings.get('allow_signups', 'true') == 'true' %}checked{% endif %}
+                       class="w-4 h-4 text-blue-600 mr-2">
+                <label for="allow_signups" class="font-medium">Allow New User Registrations</label>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">
+                When disabled, new users cannot create accounts. Existing users can still log in, and OAuth login will still work for existing accounts.
+            </p>
+        </div>
+
+        <!-- Backup & System Health Section -->
+        <div class="mb-8 border-b pb-6">
+            <h3 class="text-xl font-semibold mb-4 text-navy-700">Backup & System Health</h3>
+            
+            <div class="flex flex-col md:flex-row gap-4">
+                <a href="{{ url_for('users.backup_manager') }}" class="flex-1 bg-teal-500 hover:bg-teal-600 text-white py-3 px-4 rounded flex items-center justify-center">
+                    <i class="fas fa-database mr-2"></i> Backup Manager
+                </a>
+                
+                <a href="{{ url_for('users.system_health') }}" class="flex-1 bg-navy-600 hover:bg-navy-700 text-white py-3 px-4 rounded flex items-center justify-center">
+                    <i class="fas fa-heartbeat mr-2"></i> System Health
+                </a>
+            </div>
+            
+            <p class="text-sm text-gray-600 mt-2">
+                Manage system backups, restore from previous backups, and monitor system health.
+            </p>
+            
+            <div class="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-info-circle text-blue-500"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-blue-700">
+                            Regular backups are recommended to prevent data loss. The backup system will save your database, MP3 files, and system configuration.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Additional Settings -->
+        <div class="mb-4">
+            <h3 class="text-xl font-semibold mb-4 text-navy-700">Additional Settings</h3>
+            
+            {% for key, label in editable_settings %}
+                {% if key not in ['default_tts_service', 'default_tts_voice', 'default_tts_model', 'fallback_spotify_refresh_token', 'spotify_region', 'allow_signups'] %}
+                <div class="mb-4">
+                    <label class="block font-medium mb-1" for="{{ key }}">{{ label }}</label>
+                    {% if key == 'enable_public_rounds' %}
+                        <select name="{{ key }}" id="{{ key }}" class="border rounded px-3 py-2 w-full">
+                            <option value="true" {% if settings.get(key) == 'true' %}selected{% endif %}>Enabled</option>
+                            <option value="false" {% if settings.get(key) != 'true' %}selected{% endif %}>Disabled</option>
+                        </select>
+                    {% else %}
+                        <input type="text" name="{{ key }}" id="{{ key }}" class="border rounded px-3 py-2 w-full"
+                              value="{{ settings.get(key, '') }}">
+                    {% endif %}
+                    <p class="text-sm text-gray-500 mt-1">
+                        {% if key == 'max_songs_per_round' %}
+                            Maximum number of songs that can be included in a music round
+                        {% elif key == 'enable_public_rounds' %}
+                            Allow users to make their music rounds publicly accessible
+                        {% endif %}
+                    </p>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="flex justify-between">
+            <button type="submit" class="bg-teal-500 text-white px-6 py-2 rounded hover:bg-teal-600">
+                <i class="fas fa-save mr-2"></i> Save Settings
+            </button>
+            <a href="{{ url_for('core.index') }}" class="bg-gray-300 text-gray-700 px-6 py-2 rounded hover:bg-gray-400">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleTokenVisibility() {
+        const tokenField = document.getElementById('fallback_spotify_refresh_token');
+        if (tokenField.type === 'password') {
+            tokenField.type = 'text';
+        } else {
+            tokenField.type = 'password';
+        }
+    }
+    
+    // Dynamic voice selection based on service
+    document.getElementById('default_tts_service').addEventListener('change', function() {
+        const selectedService = this.value;
+        const voiceSelect = document.getElementById('default_tts_voice');
+        const modelSelect = document.getElementById('default_tts_model');
+        
+        // Hide all options first
+        Array.from(voiceSelect.options).forEach(option => {
+            option.style.display = 'none';
+        });
+        
+        Array.from(modelSelect.options).forEach(option => {
+            option.style.display = 'none';
+        });
+        
+        // Show only options for the selected service
+        Array.from(voiceSelect.options).forEach(option => {
+            if (option.value === '' || option.parentNode.label.includes(selectedService)) {
+                option.style.display = '';
+            }
+        });
+        
+        Array.from(modelSelect.options).forEach(option => {
+            if (option.value === '' || option.parentNode.label.includes(selectedService)) {
+                option.style.display = '';
+            }
+        });
+        
+        // Reset to empty if current selection is not valid for the service
+        let validVoice = false;
+        Array.from(voiceSelect.options).forEach(option => {
+            if (option.selected && option.style.display !== 'none') {
+                validVoice = true;
+            }
+        });
+        
+        if (!validVoice) {
+            voiceSelect.value = '';
+        }
+        
+        let validModel = false;
+        Array.from(modelSelect.options).forEach(option => {
+            if (option.selected && option.style.display !== 'none') {
+                validModel = true;
+            }
+        });
+        
+        if (!validModel) {
+            modelSelect.value = '';
+        }
+    });
+    
+    // Trigger the change event on page load to set up initial state
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('default_tts_service').dispatchEvent(new Event('change'));
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+body {
+    background-color: #DEDEDE;
+    color: #232323;
+}
+
+.card {
+    margin-top: 50px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+}
+
+.card-header {
+    background-color: #191414;
+    color: #fff;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+.btn-primary {
+    background-color: #1DB954;
+    border-color: #1DB954;
+}
+
+.btn-primary:hover {
+    background-color: #1ed760;
+    border-color: #1ed760;
+}
+
+.alert {
+    margin-top: 50px;
+}
+

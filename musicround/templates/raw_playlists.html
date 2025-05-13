@@ -1,0 +1,260 @@
+{% extends 'base.html' %}
+
+{% block title %}Raw Spotify Playlists{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-2 text-navy-800 font-montserrat">Raw Spotify API Response</h1>
+    <p class="text-gray-600 mb-6">Examining the raw Spotify API response for playlist queries.</p>
+
+    <!-- Parameters Form -->
+    <div class="bg-white shadow-md rounded-lg p-6 mb-8">
+        <form method="GET" action="{{ url_for('import.get_raw_playlists') }}" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label for="account" class="block text-sm font-medium text-gray-700 mb-1">Spotify Account</label>
+                <select name="account" id="account" 
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                    <option value="spotify" {% if account == 'spotify' %}selected{% endif %}>spotify</option>
+                    <option value="spotifycharts" {% if account == 'spotifycharts' %}selected{% endif %}>spotifycharts</option>
+                    <option value="spotifymaps" {% if account == 'spotifymaps' %}selected{% endif %}>spotifymaps</option>
+                    <option value="spotifyuk" {% if account == 'spotifyuk' %}selected{% endif %}>spotifyuk</option>
+                    <option value="spotifyusa" {% if account == 'spotifyusa' %}selected{% endif %}>spotifyusa</option>
+                    <option value="spotify_germany" {% if account == 'spotify_germany' %}selected{% endif %}>spotify_germany</option>
+                </select>
+            </div>
+            
+            <div>
+                <label for="limit" class="block text-sm font-medium text-gray-700 mb-1">Limit</label>
+                <input type="number" name="limit" id="limit" min="1" max="50" value="{{ limit }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                <p class="text-xs text-gray-500 mt-1">Max 50 items per request</p>
+            </div>
+            
+            <div>
+                <label for="offset" class="block text-sm font-medium text-gray-700 mb-1">Offset</label>
+                <input type="number" name="offset" id="offset" min="0" value="{{ offset }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+            </div>
+            
+            <div class="md:col-span-3">
+                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md shadow-sm transition-colors">
+                    Get Raw Response
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Spotipy Results -->
+        <div>
+            <h2 class="text-xl font-bold mb-4">Spotipy Response</h2>
+            
+            {% if results.spotipy.error %}
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <h3 class="font-medium text-red-800 mb-2">Error:</h3>
+                <pre class="text-red-700 text-sm whitespace-pre-wrap">{{ results.spotipy.error }}</pre>
+            </div>
+            {% endif %}
+            
+            {% if results.spotipy.raw_response %}
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <!-- Response metadata -->
+                <div class="mb-4">
+                    <h3 class="font-medium text-gray-800 mb-2">Response Metadata:</h3>
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <tbody class="divide-y divide-gray-200">
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Total Playlists</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response.total }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Items Returned</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response.items|length }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Has Next Page</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response.next else "No" }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Has Previous Page</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response.previous else "No" }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Playlists -->
+                <div>
+                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.spotipy.raw_response.items|length }}):</h3>
+                    <div class="overflow-y-auto max-h-96 border border-gray-200 rounded-lg">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tracks</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for playlist in results.spotipy.raw_response.items %}
+                                <tr>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ loop.index }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.id }}</td>
+                                    <td class="px-3 py-2 text-sm text-gray-900">{{ playlist.name }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.tracks.total }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Pagination links -->
+                {% if results.spotipy.raw_response.previous or results.spotipy.raw_response.next %}
+                <div class="mt-4 flex justify-between">
+                    {% if results.spotipy.raw_response.previous %}
+                    <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset-limit) }}"
+                       class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
+                       &laquo; Previous
+                    </a>
+                    {% else %}
+                    <span></span>
+                    {% endif %}
+                    
+                    {% if results.spotipy.raw_response.next %}
+                    <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset+limit) }}"
+                       class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
+                       Next &raquo;
+                    </a>
+                    {% else %}
+                    <span></span>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                <!-- Raw JSON -->
+                <div class="mt-4">
+                    <details>
+                        <summary class="cursor-pointer text-teal-600 hover:text-teal-800">View Raw JSON</summary>
+                        <div class="mt-2 p-4 bg-gray-50 rounded-lg overflow-x-auto">
+                            <pre class="text-xs text-gray-800">{{ results.spotipy.raw_response | tojson(indent=2) }}</pre>
+                        </div>
+                    </details>
+                </div>
+            </div>
+            {% else %}
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                <p class="text-gray-500">No response data available</p>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Direct API Results -->
+        <div>
+            <h2 class="text-xl font-bold mb-4">Direct API Response</h2>
+            
+            {% if results.direct.error %}
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <h3 class="font-medium text-red-800 mb-2">Error:</h3>
+                <pre class="text-red-700 text-sm whitespace-pre-wrap">{{ results.direct.error }}</pre>
+            </div>
+            {% endif %}
+            
+            {% if results.direct.raw_response %}
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <!-- Response metadata -->
+                <div class="mb-4">
+                    <h3 class="font-medium text-gray-800 mb-2">Response Metadata:</h3>
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <tbody class="divide-y divide-gray-200">
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Total Playlists</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response.total }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Items Returned</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response.items|length }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Has Next Page</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response.next else "No" }}</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 text-sm font-medium text-gray-700">Has Previous Page</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response.previous else "No" }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Playlists -->
+                <div>
+                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.direct.raw_response.items|length }}):</h3>
+                    <div class="overflow-y-auto max-h-96 border border-gray-200 rounded-lg">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tracks</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for playlist in results.direct.raw_response.items %}
+                                <tr>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ loop.index }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.id }}</td>
+                                    <td class="px-3 py-2 text-sm text-gray-900">{{ playlist.name }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.tracks.total }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Pagination links -->
+                {% if results.direct.raw_response.previous or results.direct.raw_response.next %}
+                <div class="mt-4 flex justify-between">
+                    {% if results.direct.raw_response.previous %}
+                    <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset-limit) }}"
+                       class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
+                       &laquo; Previous
+                    </a>
+                    {% else %}
+                    <span></span>
+                    {% endif %}
+                    
+                    {% if results.direct.raw_response.next %}
+                    <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset+limit) }}"
+                       class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
+                       Next &raquo;
+                    </a>
+                    {% else %}
+                    <span></span>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                <!-- Raw JSON -->
+                <div class="mt-4">
+                    <details>
+                        <summary class="cursor-pointer text-teal-600 hover:text-teal-800">View Raw JSON</summary>
+                        <div class="mt-2 p-4 bg-gray-50 rounded-lg overflow-x-auto">
+                            <pre class="text-xs text-gray-800">{{ results.direct.raw_response | tojson(indent=2) }}</pre>
+                        </div>
+                    </details>
+                </div>
+            </div>
+            {% else %}
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                <p class="text-gray-500">No response data available</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

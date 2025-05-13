@@ -1,0 +1,1173 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ round.name or 'Quiz #' + round.id|string }} - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold text-navy-800 font-montserrat">{{ round.name or 'Music Quiz #' + round.id|string }}</h1>
+        <div class="flex space-x-2">
+            <button id="delete-round-btn" class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors">
+                <i class="fas fa-trash-alt mr-2"></i> Delete Quiz
+            </button>
+            <a href="{{ url_for('rounds.rounds_list') }}" class="inline-flex items-center px-4 py-2 bg-navy-700 hover:bg-navy-800 text-white rounded-md transition-colors">
+                <i class="fas fa-arrow-left mr-2"></i> Back to Quizzes
+            </a>
+        </div>
+    </div>
+    
+    <div class="bg-white shadow-md rounded-lg p-6 mb-6">
+        <div class="flex flex-col md:flex-row md:justify-between mb-4 pb-4 border-b border-gray-200">
+            <div class="mb-4 md:mb-0">
+                <form id="edit-title-form" class="hidden" method="POST" action="{{ url_for('rounds.update_round_name', round_id=round.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="flex items-center mb-2">
+                        <input type="text" name="round_name" id="round_name_input" value="{{ round.name or '' }}" 
+                               class="shadow-sm border border-gray-300 rounded-md py-2 px-3 mr-2 text-gray-700 leading-tight focus:outline-none focus:ring focus:border-teal-500" 
+                               placeholder="Enter quiz name">
+                        <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white p-2 rounded">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button type="button" id="cancel-edit-title" class="bg-gray-400 hover:bg-gray-500 text-white p-2 rounded ml-1">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </form>
+                <div id="quiz-title-display" class="flex items-center">
+                    <h2 class="text-2xl font-semibold text-navy-800 font-montserrat mb-2">{{ round.name or 'Quiz #' + round.id|string }}</h2>
+                    <button id="edit-title-btn" class="ml-2 text-gray-500 hover:text-teal-600">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </div>
+                <p class="text-gray-700">
+                    <span class="font-semibold text-teal-700">Type:</span> 
+                    <span class="px-2 py-1 text-xs font-semibold rounded-full 
+                        {% if round.round_type == 'Random' %}bg-navy-100 text-navy-800
+                        {% elif round.round_type == 'Decade' %}bg-teal-100 text-teal-800
+                        {% elif round.round_type == 'Genre' %}bg-orange-100 text-orange-800
+                        {% elif round.round_type == 'Tag' %}bg-purple-100 text-purple-800
+                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                        {{ round.round_type }}
+                    </span>
+                </p>
+                <p class="text-gray-700 mt-1"><span class="font-semibold text-teal-700">Criteria:</span> {{ round.round_criteria_used }}</p>
+                <p class="text-gray-700 mt-1"><span class="font-semibold text-teal-700">Created:</span> {{ round.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+            </div>
+            
+            <div class="self-end mt-4 md:mt-0">
+                <span class="text-sm text-gray-500">Quiz ID: {{ round.id }}</span>
+            </div>
+        </div>
+        
+        <div class="flex items-center justify-center">
+            <div class="text-center px-6 py-2 rounded-full bg-navy-100 text-navy-800 font-semibold inline-block">
+                <span>{{ songs|length }} Songs</span>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Quiz Content</h2>
+    <div class="overflow-x-auto bg-white shadow-md rounded-lg mb-8">
+        <form id="songs-form" method="POST" action="{{ url_for('rounds.update_round_songs', round_id=round.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="song_order" id="song-order-input" value="{{ round.songs }}">
+            
+            <table id="songs-table" class="w-full table-auto">
+                <thead class="bg-navy-50 text-navy-800">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-semibold">#</th>
+                        <th class="px-4 py-3 text-left font-semibold">Cover</th>
+                        <th class="px-4 py-3 text-left font-semibold">Title</th>
+                        <th class="px-4 py-3 text-left font-semibold">Artist</th>
+                        <th class="px-4 py-3 text-left font-semibold">Year</th>
+                        <th class="px-4 py-3 text-left font-semibold">Genre</th>
+                        <th class="px-4 py-3 text-left font-semibold">Preview</th>
+                        <th class="px-4 py-3 text-left font-semibold">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="songs-tbody" class="divide-y divide-gray-200">
+                    {% for song in songs %}
+                        <tr id="song-{{ song.id }}" class="hover:bg-gray-50 song-row" data-id="{{ song.id }}">
+                            <td class="px-4 py-3 font-medium">
+                                <span class="song-index">{{ loop.index }}</span>
+                                <span class="cursor-move ml-2 text-gray-400 handle"><i class="fas fa-grip-lines"></i></span>
+                            </td>
+                            <td class="px-4 py-3"><img src="{{ song.cover_url }}" alt="{{ song.title }}" class="w-16 h-16 object-cover rounded-md shadow-sm"></td>
+                            <td class="px-4 py-3 font-medium">{{ song.title }}</td>
+                            <td class="px-4 py-3">{{ song.artist }}</td>
+                            <td class="px-4 py-3">{{ song.year }}</td>
+                            <td class="px-4 py-3">{{ song.genre }}</td>
+                            <td class="px-4 py-3">
+                                <audio controls class="w-full max-w-[200px]" src="{{ song.preview_url }}">Your browser does not support the audio element.</audio>
+                            </td>
+                            <td class="px-4 py-3">
+                                <button type="button" class="remove-song text-red-500 hover:text-red-700" data-id="{{ song.id }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            <div class="p-4 bg-gray-50 flex justify-between items-center">
+                <div class="flex items-center">
+                    <button type="button" id="add-song-btn" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors">
+                        <i class="fas fa-plus mr-2"></i> Add Song
+                    </button>
+                </div>
+                <div class="flex items-center">
+                    <button type="submit" id="save-songs-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                        <i class="fas fa-save mr-2"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-lg transition-shadow">
+            <div class="flex items-center justify-center mb-4 text-navy-800">
+                <i class="fas fa-file-audio fa-3x"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Generate MP3</h3>
+            <p class="text-gray-600 mb-4 text-center text-sm">Create an audio file with all songs to play during your quiz.</p>
+            <button id="generate-mp3-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+                <i class="fas fa-music mr-2"></i> Generate MP3
+            </button>
+        </div>
+        
+        <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-lg transition-shadow">
+            <div class="flex items-center justify-center mb-4 text-navy-800">
+                <i class="fas fa-file-pdf fa-3x"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Generate PDF</h3>
+            <p class="text-gray-600 mb-4 text-center text-sm">Create a printable list of songs and answers for your reference.</p>
+            <button id="generate-pdf-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+                <i class="fas fa-download mr-2"></i> Generate PDF
+            </button>
+        </div>
+        
+        <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-lg transition-shadow">
+            <div class="flex items-center justify-center mb-4 text-navy-800">
+                <i class="fas fa-envelope fa-3x"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Send via Email</h3>
+            <p class="text-gray-600 mb-4 text-center text-sm">Email this quiz to yourself for safekeeping or offline access.</p>
+            <button id="send-email-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+                <i class="fas fa-paper-plane mr-2"></i> Send Email
+            </button>
+        </div>
+        
+        <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-lg transition-shadow">
+            <div class="flex items-center justify-center mb-4 text-navy-800">
+                <i class="fas fa-file-export fa-3x"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Export Options</h3>
+            <p class="text-gray-600 mb-4 text-center text-sm">View formatted song list or export to your Dropbox account.</p>
+            <button id="show-formatted-list-btn" class="bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold mb-3">
+                <i class="fas fa-list-ol mr-2"></i> Show Formatted List
+            </button>
+            <button id="export-dropbox-btn" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+                <i class="fab fa-dropbox mr-2"></i> Export to Dropbox
+            </button>
+        </div>
+    </div>
+
+    <!-- Dropbox Export Modal -->
+    <div id="dropboxExportModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-gray-800">Export to Dropbox</h3>
+                <button id="closeDropboxModalBtn" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- Dropbox Connection Status -->
+            <div id="dropboxStatusSection" class="mb-4">
+                {% if current_user.dropbox_id %}
+                    <div class="flex items-center p-3 bg-green-100 text-green-700 rounded-md">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        <span>Connected to Dropbox</span>
+                    </div>
+                {% else %}
+                    <div class="flex items-center p-3 bg-yellow-100 text-yellow-700 rounded-md">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        <span>Not connected to Dropbox</span>
+                    </div>
+                    <a href="{{ url_for('users.profile') }}" class="mt-2 block text-center bg-[#0061FF] hover:bg-[#0055DF] text-white py-2 px-4 rounded-md transition-colors">
+                        Connect to Dropbox
+                    </a>
+                {% endif %}
+            </div>
+            
+            {% if current_user.dropbox_id %}
+            <!-- Export Options Form -->
+            <div class="mb-4">
+                <p class="text-sm text-gray-600 mb-2">Choose what to include in the export:</p>
+                
+                <div class="flex items-center mb-2">
+                    <input type="checkbox" id="includeMP3s" name="includeMP3s" class="mr-2" checked>
+                    <label for="includeMP3s" class="text-gray-700">Include MP3 files</label>
+                </div>
+                
+                <div class="mt-4">
+                    <p class="text-xs text-gray-500">
+                        Files will be exported to your configured Dropbox folder:
+                        <span class="font-mono block mt-1 bg-gray-100 p-1 rounded">{{ current_user.dropbox_export_path or '/QuizzicalBeats' }}</span>
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Export Button -->
+            <button id="startDropboxExportBtn" data-round-id="{{ round.id }}" class="w-full bg-[#0061FF] hover:bg-[#0055DF] text-white py-2 px-4 rounded-md transition-colors">
+                <i class="fab fa-dropbox mr-2"></i> Export Round
+            </button>
+            
+            <!-- Export Status -->
+            <div id="exportStatus" class="mt-4 hidden">
+                <div class="flex items-center justify-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0061FF]"></div>
+                    <span class="ml-2 text-gray-700">Exporting, please wait...</span>
+                </div>
+            </div>
+            
+            <!-- Success Result -->
+            <div id="exportSuccess" class="mt-4 hidden">
+                <div class="p-3 bg-green-100 text-green-700 rounded-md mb-3">
+                    <div class="flex items-center mb-2">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        <span class="font-semibold">Export Successful!</span>
+                    </div>
+                    <p class="text-sm">Your round has been exported to Dropbox successfully.</p>
+                </div>
+                
+                <div id="sharedLinks" class="mt-3 space-y-2">
+                    <p class="text-sm font-medium text-gray-700">Shared Links:</p>
+                </div>
+                
+                <div class="mt-4">
+                    <button id="copyAllLinks" class="bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded inline-flex items-center">
+                        <i class="fas fa-copy mr-2"></i> Copy All Links
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Error Result -->
+            <div id="exportError" class="mt-4 hidden">
+                <div class="p-3 bg-red-100 text-red-700 rounded-md">
+                    <div class="flex items-center mb-2">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        <span class="font-semibold">Export Failed</span>
+                    </div>
+                    <p id="errorMessage" class="text-sm"></p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-notification" class="fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg transform transition-transform duration-300 translate-x-full">
+        <div class="flex items-center">
+            <div class="flex-shrink-0 mr-2">
+                <i id="toast-icon" class="fas"></i>
+            </div>
+            <div class="ml-3 mr-4">
+                <p id="toast-message" class="text-sm font-medium"></p>
+            </div>
+            <div class="ml-auto pl-3">
+                <div class="-mx-1.5 -my-1.5">
+                    <button id="toast-close-btn" class="text-white hover:opacity-75 focus:outline-none p-1.5 rounded-lg">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MP3 Generation Status Modal -->
+    <div id="mp3-status-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 max-w-md mx-auto text-center">
+            <div id="mp3-loading" class="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500 mx-auto mb-4"></div>
+            <h2 id="mp3-status-title" class="text-2xl font-semibold mb-4 font-montserrat">Generating MP3...</h2>
+            <p id="mp3-status-message" class="text-gray-700 mb-6">Please wait, this may take a few minutes.</p>
+            <div id="mp3-download-btn-container" class="hidden">
+                <a id="mp3-download-btn" href="#" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                    <i class="fas fa-download mr-2"></i> Download MP3
+                </a>
+            </div>
+            <button id="close-mp3-modal" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">Close</button>
+        </div>
+    </div>
+
+    <!-- PDF Generation Status Modal -->
+    <div id="pdf-status-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 max-w-md mx-auto text-center">
+            <div id="pdf-loading" class="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500 mx-auto mb-4"></div>
+            <h2 id="pdf-status-title" class="text-2xl font-semibold mb-4 font-montserrat">Generating PDF...</h2>
+            <p id="pdf-status-message" class="text-gray-700 mb-6">Please wait...</p>
+            <div id="pdf-download-btn-container" class="hidden">
+                <a id="pdf-download-btn" href="#" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                    <i class="fas fa-download mr-2"></i> Download PDF
+                </a>
+            </div>
+            <button id="close-pdf-modal" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">Close</button>
+        </div>
+    </div>
+
+    <!-- Email Status Modal -->
+    <div id="email-status-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 max-w-md mx-auto text-center">
+            <h2 class="text-2xl font-semibold mb-4 font-montserrat" id="email-status-title"></h2>
+            <p id="email-status-message" class="text-gray-700"></p>
+            <button id="close-email-modal" class="mt-6 bg-navy-600 hover:bg-navy-700 text-white py-2 px-4 rounded transition-colors">Close</button>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirmation-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 max-w-md mx-auto">
+            <h2 class="text-2xl font-semibold mb-4 font-montserrat text-red-600">Delete Quiz</h2>
+            <p class="text-gray-700 mb-6">Are you sure you want to delete this quiz? This action cannot be undone.</p>
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-delete" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">Cancel</button>
+                <button id="confirm-delete" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded transition-colors">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Song Modal -->
+    <div id="add-song-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-full max-w-2xl mx-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-semibold font-montserrat">Add Songs to Quiz</h2>
+                <button id="close-add-song-modal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times fa-lg"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <input type="text" id="song-search" placeholder="Search songs by title or artist" 
+                      class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring focus:border-teal-500">
+            </div>
+            
+            <div id="search-results" class="max-h-64 overflow-y-auto mb-4">
+                <!-- Search results will be loaded here -->
+                <p class="text-gray-500 text-center p-4">Type to search for songs</p>
+            </div>
+            
+            <div class="flex justify-end">
+                <button id="cancel-add-song" class="bg-gray-300 hover:bg-gray-400 text-gray-800 mr-2 py-2 px-4 rounded transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Formatted Song List Modal -->
+    <div id="formatted-list-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-full max-w-2xl mx-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-semibold font-montserrat">Formatted Song List</h2>
+                <button id="close-formatted-list-modal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times fa-lg"></i>
+                </button>
+            </div>
+            
+            <div class="mb-6">
+                <p class="text-gray-600 mb-2">Copy and paste this formatted list into Google Docs or any text editor:</p>
+                <div class="bg-gray-100 p-4 rounded-lg">
+                    <pre id="formatted-songs" class="whitespace-pre-wrap font-mono text-gray-800" style="font-family: 'Courier New', monospace;"></pre>
+                </div>
+            </div>
+            
+            <div class="flex justify-between">
+                <button id="copy-to-clipboard" class="bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded transition-colors">
+                    <i class="fas fa-copy mr-2"></i> Copy to Clipboard
+                </button>
+                <button id="close-formatted-list" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dropbox Export Status Modal -->
+    <div id="dropbox-status-modal" class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-50 z-50 hidden">
+        <div class="bg-white rounded-lg p-8 max-w-md mx-auto text-center">
+            <div id="dropbox-loading" class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <h2 id="dropbox-status-title" class="text-2xl font-semibold mb-4 font-montserrat">Exporting to Dropbox...</h2>
+            <p id="dropbox-status-message" class="text-gray-700 mb-6">Please wait while we export your quiz to Dropbox.</p>
+            <div id="dropbox-links-container" class="hidden">
+                <div class="bg-gray-100 p-4 rounded-lg mb-4 text-left">
+                    <h3 class="font-semibold mb-2">Shared Links:</h3>
+                    <div class="space-y-2" id="dropbox-dynamic-links">
+                        <!-- Links will be added here dynamically via JavaScript -->
+                    </div>
+                </div>
+            </div>
+            <button id="close-dropbox-modal" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">Close</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Elements for new functionality
+        const generateMp3Btn = document.getElementById('generate-mp3-btn');
+        const generatePdfBtn = document.getElementById('generate-pdf-btn');
+        const sendEmailBtn = document.getElementById('send-email-btn');
+        const deleteRoundBtn = document.getElementById('delete-round-btn');
+        const confirmDeleteBtn = document.getElementById('confirm-delete');
+        const cancelDeleteBtn = document.getElementById('cancel-delete');
+        const deleteConfirmationModal = document.getElementById('delete-confirmation-modal');
+        
+        // MP3 modal elements
+        const mp3StatusModal = document.getElementById('mp3-status-modal');
+        const mp3StatusTitle = document.getElementById('mp3-status-title');
+        const mp3StatusMessage = document.getElementById('mp3-status-message');
+        const mp3Loading = document.getElementById('mp3-loading');
+        const mp3DownloadBtn = document.getElementById('mp3-download-btn');
+        const mp3DownloadBtnContainer = document.getElementById('mp3-download-btn-container');
+        const closeMP3Modal = document.getElementById('close-mp3-modal');
+        
+        // PDF modal elements
+        const pdfStatusModal = document.getElementById('pdf-status-modal');
+        const pdfStatusTitle = document.getElementById('pdf-status-title');
+        const pdfStatusMessage = document.getElementById('pdf-status-message');
+        const pdfLoading = document.getElementById('pdf-loading');
+        const pdfDownloadBtn = document.getElementById('pdf-download-btn');
+        const pdfDownloadBtnContainer = document.getElementById('pdf-download-btn-container');
+        const closePDFModal = document.getElementById('close-pdf-modal');
+        
+        // Email modal elements
+        const emailStatusModal = document.getElementById('email-status-modal');
+        const emailStatusTitle = document.getElementById('email-status-title');
+        const emailStatusMessage = document.getElementById('email-status-message');
+        const closeEmailModal = document.getElementById('close-email-modal');
+        
+        // Dropbox modal elements
+        const dropboxStatusModal = document.getElementById('dropbox-status-modal');
+        const dropboxStatusTitle = document.getElementById('dropbox-status-title');
+        const dropboxStatusMessage = document.getElementById('dropbox-status-message');
+        const dropboxLoading = document.getElementById('dropbox-loading');
+        const dropboxLinksContainer = document.getElementById('dropbox-links-container');
+        const closeDropboxModal = document.getElementById('close-dropbox-modal');
+        const exportDropboxBtn = document.getElementById('export-dropbox-btn');
+        
+        // Dropbox Export Modal elements
+        const dropboxExportModal = document.getElementById('dropboxExportModal');
+        const closeDropboxModalBtn = document.getElementById('closeDropboxModalBtn');
+        const startDropboxExportBtn = document.getElementById('startDropboxExportBtn');
+        const exportStatus = document.getElementById('exportStatus');
+        const exportSuccess = document.getElementById('exportSuccess');
+        const exportError = document.getElementById('exportError');
+        const errorMessage = document.getElementById('errorMessage');
+        const sharedLinks = document.getElementById('sharedLinks');
+        const copyAllLinksBtn = document.getElementById('copyAllLinks');
+        
+        // Existing elements
+        const songOrderInput = document.getElementById('song-order-input');
+        const songsForm = document.getElementById('songs-form');
+        const songsTable = document.getElementById('songs-table');
+        const songsTbody = document.getElementById('songs-tbody');
+        const addSongBtn = document.getElementById('add-song-btn');
+        const addSongModal = document.getElementById('add-song-modal');
+        const closeAddSongModal = document.getElementById('close-add-song-modal');
+        const cancelAddSong = document.getElementById('cancel-add-song');
+        const songSearch = document.getElementById('song-search');
+        const searchResults = document.getElementById('search-results');
+        const editTitleBtn = document.getElementById('edit-title-btn');
+        const editTitleForm = document.getElementById('edit-title-form');
+        const cancelEditTitle = document.getElementById('cancel-edit-title');
+        const quizTitleDisplay = document.getElementById('quiz-title-display');
+        
+        // Formatted song list modal elements
+        const formattedListModal = document.getElementById('formatted-list-modal');
+        const formattedSongs = document.getElementById('formatted-songs');
+        const showFormattedListBtn = document.getElementById('show-formatted-list-btn');
+        const closeFormattedListModal = document.getElementById('close-formatted-list-modal');
+        const copyToClipboardBtn = document.getElementById('copy-to-clipboard');
+        const closeFormattedList = document.getElementById('close-formatted-list');
+        
+        // Toast notification elements
+        const toast = document.getElementById('toast-notification');
+        const toastMessage = document.getElementById('toast-message');
+        const toastIcon = document.getElementById('toast-icon');
+        const toastCloseBtn = document.getElementById('toast-close-btn');
+        
+        // Toast notification functions
+        function showToast(message, type = 'success') {
+            // Set message
+            toastMessage.textContent = message;
+            
+            // Set toast type and styling
+            if (type === 'success') {
+                toast.className = 'fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg bg-green-500 text-white';
+                toastIcon.className = 'fas fa-check-circle';
+            } else if (type === 'error') {
+                toast.className = 'fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg bg-red-500 text-white';
+                toastIcon.className = 'fas fa-exclamation-circle';
+            } else if (type === 'info') {
+                toast.className = 'fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg bg-blue-500 text-white';
+                toastIcon.className = 'fas fa-info-circle';
+            } else if (type === 'warning') {
+                toast.className = 'fixed top-5 right-5 z-50 p-4 rounded-lg shadow-lg bg-yellow-500 text-white';
+                toastIcon.className = 'fas fa-exclamation-triangle';
+            }
+            
+            // Show toast with animation
+            toast.style.transform = 'translateX(0)';
+            
+            // Auto-hide after 5 seconds
+            setTimeout(function() {
+                hideToast();
+            }, 5000);
+        }
+        
+        function hideToast() {
+            toast.style.transform = 'translateX(100%)';
+        }
+        
+        // Close toast button event
+        toastCloseBtn.addEventListener('click', hideToast);
+        
+        // Process flash messages from server
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    showToast('{{ message|safe }}', '{{ category }}');
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        // Process email error if any
+        {% if email_error %}
+            showToast('{{ email_error }}', 'error');
+        {% endif %}
+        
+        // Set up sortable for reordering songs
+        const sortable = new Sortable(songsTbody, {
+            handle: '.handle',
+            animation: 150,
+            onEnd: function() {
+                updateSongOrder();
+                updateSongNumbers();
+            }
+        });
+        
+        // Function to update song order
+        function updateSongOrder() {
+            const songIds = Array.from(document.querySelectorAll('.song-row'))
+                .map(row => row.getAttribute('data-id'));
+            songOrderInput.value = songIds.join(',');
+        }
+        
+        // Function to update song numbers
+        function updateSongNumbers() {
+            Array.from(document.querySelectorAll('.song-row')).forEach((row, index) => {
+                row.querySelector('.song-index').textContent = index + 1;
+            });
+        }
+        
+        // Handle removing songs
+        document.querySelectorAll('.remove-song').forEach(button => {
+            button.addEventListener('click', function() {
+                if (confirm('Are you sure you want to remove this song from the quiz?')) {
+                    const songId = this.getAttribute('data-id');
+                    document.getElementById('song-' + songId).remove();
+                    updateSongOrder();
+                    updateSongNumbers();
+                    showToast('Song removed from quiz', 'info');
+                }
+            });
+        });
+        
+        // Handle adding songs
+        addSongBtn.addEventListener('click', function() {
+            addSongModal.classList.remove('hidden');
+        });
+        
+        closeAddSongModal.addEventListener('click', function() {
+            addSongModal.classList.add('hidden');
+        });
+        
+        cancelAddSong.addEventListener('click', function() {
+            addSongModal.classList.add('hidden');
+        });
+        
+        // Handle song search
+        let searchTimeout;
+        songSearch.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            
+            if (query.length < 2) {
+                searchResults.innerHTML = '<p class="text-gray-500 text-center p-4">Type at least 2 characters to search</p>';
+                return;
+            }
+            
+            searchTimeout = setTimeout(function() {
+                searchResults.innerHTML = '<p class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
+                
+                fetch(`/api/songs/search?q=${encodeURIComponent(query)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.length === 0) {
+                            searchResults.innerHTML = '<p class="text-gray-500 text-center p-4">No songs found</p>';
+                            return;
+                        }
+                        
+                        searchResults.innerHTML = '';
+                        data.forEach(song => {
+                            const isAlreadyAdded = document.getElementById('song-' + song.id) !== null;
+                            
+                            const songEl = document.createElement('div');
+                            songEl.className = 'flex items-center justify-between p-2 hover:bg-gray-100 border-b border-gray-200';
+                            songEl.innerHTML = `
+                                <div class="flex items-center">
+                                    <img src="${song.cover_url}" alt="${song.title}" class="w-12 h-12 object-cover rounded-md mr-3">
+                                    <div>
+                                        <h4 class="font-medium">${song.title}</h4>
+                                        <p class="text-sm text-gray-600">${song.artist}</p>
+                                    </div>
+                                </div>
+                                <button type="button" class="add-song-btn bg-teal-500 hover:bg-teal-600 text-white py-1 px-3 rounded text-sm ${isAlreadyAdded ? 'opacity-50 cursor-not-allowed' : ''}" 
+                                        data-id="${song.id}" data-title="${song.title}" data-artist="${song.artist}" data-year="${song.year || ''}" 
+                                        data-genre="${song.genre || ''}" data-cover="${song.cover_url}" data-preview="${song.preview_url || ''}"
+                                        ${isAlreadyAdded ? 'disabled' : ''}>
+                                    ${isAlreadyAdded ? 'Already Added' : 'Add'}
+                                </button>
+                            `;
+                            searchResults.appendChild(songEl);
+                            
+                            if (!isAlreadyAdded) {
+                                songEl.querySelector('.add-song-btn').addEventListener('click', function() {
+                                    const songData = this.dataset;
+                                    addSongToTable(songData);
+                                    this.textContent = 'Added';
+                                    this.disabled = true;
+                                    this.classList.add('opacity-50', 'cursor-not-allowed');
+                                    showToast(`Added "${songData.title}" to quiz`, 'success');
+                                });
+                            }
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error searching songs:', error);
+                        searchResults.innerHTML = '<p class="text-red-500 text-center p-4">Error searching songs</p>';
+                        showToast('Error searching for songs', 'error');
+                    });
+            }, 500);
+        });
+        
+        // Function to add a song to the table
+        function addSongToTable(songData) {
+            const newRow = document.createElement('tr');
+            const nextIndex = document.querySelectorAll('.song-row').length + 1;
+            
+            newRow.id = 'song-' + songData.id;
+            newRow.className = 'hover:bg-gray-50 song-row';
+            newRow.setAttribute('data-id', songData.id);
+            
+            newRow.innerHTML = `
+                <td class="px-4 py-3 font-medium">
+                    <span class="song-index">${nextIndex}</span>
+                    <span class="cursor-move ml-2 text-gray-400 handle"><i class="fas fa-grip-lines"></i></span>
+                </td>
+                <td class="px-4 py-3"><img src="${songData.cover}" alt="${songData.title}" class="w-16 h-16 object-cover rounded-md shadow-sm"></td>
+                <td class="px-4 py-3 font-medium">${songData.title}</td>
+                <td class="px-4 py-3">${songData.artist}</td>
+                <td class="px-4 py-3">${songData.year}</td>
+                <td class="px-4 py-3">${songData.genre}</td>
+                <td class="px-4 py-3">
+                    <audio controls class="w-full max-w-[200px]" src="${songData.preview}">Your browser does not support the audio element.</audio>
+                </td>
+                <td class="px-4 py-3">
+                    <button type="button" class="remove-song text-red-500 hover:text-red-700" data-id="${songData.id}">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            
+            songsTbody.appendChild(newRow);
+            updateSongOrder();
+            
+            // Add event listener for the new remove button
+            newRow.querySelector('.remove-song').addEventListener('click', function() {
+                if (confirm('Are you sure you want to remove this song from the quiz?')) {
+                    newRow.remove();
+                    updateSongOrder();
+                    updateSongNumbers();
+                    showToast('Song removed from quiz', 'info');
+                }
+            });
+        }
+        
+        // Handle editing the round title
+        editTitleBtn.addEventListener('click', function() {
+            editTitleForm.classList.remove('hidden');
+            quizTitleDisplay.classList.add('hidden');
+        });
+        
+        cancelEditTitle.addEventListener('click', function() {
+            editTitleForm.classList.add('hidden');
+            quizTitleDisplay.classList.remove('hidden');
+        });
+
+        // MP3 generation with AJAX
+        generateMp3Btn.addEventListener('click', function() {
+            // Show the mp3 status modal
+            mp3StatusModal.classList.remove('hidden');
+            mp3Loading.classList.remove('hidden');
+            mp3DownloadBtnContainer.classList.add('hidden');
+            mp3StatusTitle.textContent = 'Generating MP3...';
+            mp3StatusMessage.textContent = 'Please wait, this may take a few minutes.';
+            
+            // Send the AJAX request
+            fetch('{{ url_for("rounds.round_mp3", round_id=round.id) }}', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'csrf_token={{ csrf_token() }}'
+            })
+            .then(response => response.json())
+            .then(data => {
+                mp3Loading.classList.add('hidden');
+                
+                if (data.success) {
+                    mp3StatusTitle.textContent = 'MP3 Generated Successfully';
+                    mp3StatusMessage.textContent = 'Your MP3 file is ready for download.';
+                    mp3DownloadBtn.href = data.download_url;
+                    mp3DownloadBtnContainer.classList.remove('hidden');
+                    showToast('MP3 generated successfully', 'success');
+                } else {
+                    mp3StatusTitle.textContent = 'Error Generating MP3';
+                    mp3StatusMessage.textContent = data.error || 'An unknown error occurred.';
+                    showToast('Error generating MP3', 'error');
+                }
+            })
+            .catch(error => {
+                mp3Loading.classList.add('hidden');
+                mp3StatusTitle.textContent = 'Error Generating MP3';
+                mp3StatusMessage.textContent = 'An unexpected error occurred. Please try again.';
+                showToast('Error generating MP3', 'error');
+                console.error('Error:', error);
+            });
+        });
+        
+        // Close MP3 modal
+        closeMP3Modal.addEventListener('click', function() {
+            mp3StatusModal.classList.add('hidden');
+        });
+        
+        // PDF generation with AJAX
+        generatePdfBtn.addEventListener('click', function() {
+            // Show the pdf status modal
+            pdfStatusModal.classList.remove('hidden');
+            pdfLoading.classList.remove('hidden');
+            pdfDownloadBtnContainer.classList.add('hidden');
+            pdfStatusTitle.textContent = 'Generating PDF...';
+            pdfStatusMessage.textContent = 'Please wait...';
+            
+            // Send the AJAX request
+            fetch('{{ url_for("rounds.round_pdf", round_id=round.id) }}', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'csrf_token={{ csrf_token() }}'
+            })
+            .then(response => response.json())
+            .then(data => {
+                pdfLoading.classList.add('hidden');
+                
+                if (data.success) {
+                    pdfStatusTitle.textContent = 'PDF Generated Successfully';
+                    pdfStatusMessage.textContent = 'Your PDF file is ready for download.';
+                    pdfDownloadBtn.href = data.download_url;
+                    pdfDownloadBtnContainer.classList.remove('hidden');
+                    showToast('PDF generated successfully', 'success');
+                } else {
+                    pdfStatusTitle.textContent = 'Error Generating PDF';
+                    pdfStatusMessage.textContent = data.error || 'An unknown error occurred.';
+                    showToast('Error generating PDF', 'error');
+                }
+            })
+            .catch(error => {
+                pdfLoading.classList.add('hidden');
+                pdfStatusTitle.textContent = 'Error Generating PDF';
+                pdfStatusMessage.textContent = 'An unexpected error occurred. Please try again.';
+                showToast('Error generating PDF', 'error');
+                console.error('Error:', error);
+            });
+        });
+        
+        // Close PDF modal
+        closePDFModal.addEventListener('click', function() {
+            pdfStatusModal.classList.add('hidden');
+        });
+        
+        // Email sending with AJAX
+        sendEmailBtn.addEventListener('click', function() {
+            // Show a toast notification
+            showToast('Sending email...', 'info');
+            
+            // Send the AJAX request
+            fetch('{{ url_for("rounds.send_email", round_id=round.id) }}', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'csrf_token={{ csrf_token() }}'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    showToast(data.message, 'success');
+                } else if (data.error) {
+                    showToast(data.error, 'error');
+                    
+                    // Also show in the modal for more details
+                    emailStatusModal.classList.remove('hidden');
+                    emailStatusTitle.textContent = 'Email Error';
+                    emailStatusMessage.textContent = data.error;
+                }
+            })
+            .catch(error => {
+                showToast('An unexpected error occurred while sending the email', 'error');
+                console.error('Error:', error);
+            });
+        });
+        
+        // Close Email modal
+        closeEmailModal.addEventListener('click', function() {
+            emailStatusModal.classList.add('hidden');
+        });
+        
+        // Dropbox export functionality
+        exportDropboxBtn.addEventListener('click', function() {
+            // Show the correct modal instead of the status modal
+            dropboxExportModal.classList.remove('hidden');
+            
+            // Reset any previous state
+            if (exportStatus) {
+                exportStatus.classList.add('hidden');
+            }
+            if (exportSuccess) {
+                exportSuccess.classList.add('hidden');
+            }
+            if (exportError) {
+                exportError.classList.add('hidden');
+            }
+        });
+        
+        // Close Dropbox Export Modal
+        closeDropboxModalBtn.addEventListener('click', function() {
+            dropboxExportModal.classList.add('hidden');
+        });
+        
+        // Start Dropbox Export Process
+        if (startDropboxExportBtn) {
+            startDropboxExportBtn.addEventListener('click', function() {
+                const roundId = this.getAttribute('data-round-id');
+                const includeMP3s = document.getElementById('includeMP3s').checked;
+                
+                // Show loading status
+                exportStatus.classList.remove('hidden');
+                exportSuccess.classList.add('hidden');
+                exportError.classList.add('hidden');
+                
+                // Send request to export to Dropbox
+                fetch(`/rounds/${roundId}/export-to-dropbox`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: `csrf_token={{ csrf_token() }}&include_mp3s=${includeMP3s}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    exportStatus.classList.add('hidden');
+                    
+                    if (data.success) {
+                        // Show success message
+                        exportSuccess.classList.remove('hidden');
+                        
+                        // Display shared links if available
+                        if (data.shared_links) {
+                            sharedLinks.innerHTML = '<p class="text-sm font-medium text-gray-700">Shared Links:</p>';
+                            
+                            if (data.shared_links.text) {
+                                const textLink = document.createElement('div');
+                                textLink.className = 'mt-2 p-2 bg-gray-50 rounded';
+                                textLink.innerHTML = `
+                                    <p class="text-xs font-medium text-gray-600 mb-1">Text/JSON Metadata:</p>
+                                    <div class="flex">
+                                        <a href="${data.shared_links.text}" target="_blank" class="text-sm text-blue-600 hover:underline break-all flex-grow">${data.shared_links.text}</a>
+                                        <button class="ml-2 text-gray-500 hover:text-gray-700 copy-link-btn" data-link="${data.shared_links.text}">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                `;
+                                sharedLinks.appendChild(textLink);
+                                
+                                // Add click event for this specific copy button
+                                const copyBtn = textLink.querySelector('.copy-link-btn');
+                                copyBtn.addEventListener('click', function() {
+                                    const link = this.getAttribute('data-link');
+                                    navigator.clipboard.writeText(link)
+                                        .then(() => {
+                                            showToast('Link copied to clipboard', 'success');
+                                            this.innerHTML = '<i class="fas fa-check"></i>';
+                                            setTimeout(() => {
+                                                this.innerHTML = '<i class="fas fa-copy"></i>';
+                                            }, 2000);
+                                        })
+                                        .catch(() => showToast('Failed to copy link', 'error'));
+                                });
+                            }
+                            
+                            if (data.shared_links.pdf) {
+                                const pdfLink = document.createElement('div');
+                                pdfLink.className = 'mt-2 p-2 bg-gray-50 rounded';
+                                pdfLink.innerHTML = `
+                                    <p class="text-xs font-medium text-gray-600 mb-1">PDF Version:</p>
+                                    <div class="flex">
+                                        <a href="${data.shared_links.pdf}" target="_blank" class="text-sm text-blue-600 hover:underline break-all flex-grow">${data.shared_links.pdf}</a>
+                                        <button class="ml-2 text-gray-500 hover:text-gray-700 copy-link-btn" data-link="${data.shared_links.pdf}">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                `;
+                                sharedLinks.appendChild(pdfLink);
+                                
+                                // Add click event for this specific copy button
+                                const copyBtn = pdfLink.querySelector('.copy-link-btn');
+                                copyBtn.addEventListener('click', function() {
+                                    const link = this.getAttribute('data-link');
+                                    navigator.clipboard.writeText(link)
+                                        .then(() => {
+                                            showToast('Link copied to clipboard', 'success');
+                                            this.innerHTML = '<i class="fas fa-check"></i>';
+                                            setTimeout(() => {
+                                                this.innerHTML = '<i class="fas fa-copy"></i>';
+                                            }, 2000);
+                                        })
+                                        .catch(() => showToast('Failed to copy link', 'error'));
+                                });
+                            }
+                            
+                            if (data.shared_links.mp3) {
+                                const mp3Link = document.createElement('div');
+                                mp3Link.className = 'mt-2 p-2 bg-gray-50 rounded';
+                                mp3Link.innerHTML = `
+                                    <p class="text-xs font-medium text-gray-600 mb-1">MP3 File:</p>
+                                    <div class="flex">
+                                        <a href="${data.shared_links.mp3}" target="_blank" class="text-sm text-blue-600 hover:underline break-all flex-grow">${data.shared_links.mp3}</a>
+                                        <button class="ml-2 text-gray-500 hover:text-gray-700 copy-link-btn" data-link="${data.shared_links.mp3}">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                `;
+                                sharedLinks.appendChild(mp3Link);
+                                
+                                // Add click event for this specific copy button
+                                const copyBtn = mp3Link.querySelector('.copy-link-btn');
+                                copyBtn.addEventListener('click', function() {
+                                    const link = this.getAttribute('data-link');
+                                    navigator.clipboard.writeText(link)
+                                        .then(() => {
+                                            showToast('Link copied to clipboard', 'success');
+                                            this.innerHTML = '<i class="fas fa-check"></i>';
+                                            setTimeout(() => {
+                                                this.innerHTML = '<i class="fas fa-copy"></i>';
+                                            }, 2000);
+                                        })
+                                        .catch(() => showToast('Failed to copy link', 'error'));
+                                });
+                            }
+                        }
+                        
+                        // Show success toast
+                        showToast('Round successfully exported to Dropbox!', 'success');
+                    } else {
+                        // Show error message
+                        exportError.classList.remove('hidden');
+                        errorMessage.textContent = data.message || 'An unknown error occurred.';
+                        
+                        // If there's a redirect URL, provide a link
+                        if (data.redirect) {
+                            const redirectLink = document.createElement('a');
+                            redirectLink.href = data.redirect;
+                            redirectLink.className = 'text-blue-500 hover:underline mt-2 inline-block';
+                            redirectLink.textContent = 'Generate MP3 first';
+                            errorMessage.appendChild(document.createElement('br'));
+                            errorMessage.appendChild(redirectLink);
+                        }
+                        
+                        // Show error toast
+                        showToast('Error exporting to Dropbox', 'error');
+                    }
+                })
+                .catch(error => {
+                    // Hide loading status
+                    exportStatus.classList.add('hidden');
+                    
+                    // Show error message
+                    exportError.classList.remove('hidden');
+                    errorMessage.textContent = 'An unexpected error occurred. Please try again.';
+                    
+                    // Show error toast
+                    showToast('Error connecting to the server', 'error');
+                    console.error('Error:', error);
+                });
+            });
+        }
+        
+        // Delete round functionality
+        deleteRoundBtn.addEventListener('click', function() {
+            deleteConfirmationModal.classList.remove('hidden');
+        });
+        
+        cancelDeleteBtn.addEventListener('click', function() {
+            deleteConfirmationModal.classList.add('hidden');
+        });
+        
+        confirmDeleteBtn.addEventListener('click', function() {
+            // Send delete request
+            fetch('{{ url_for("rounds.delete_round", round_id=round.id) }}', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'csrf_token={{ csrf_token() }}'
+            })
+            .then(response => response.json())
+            .then(data => {
+                deleteConfirmationModal.classList.add('hidden');
+                
+                if (data.success) {
+                    showToast('Quiz deleted successfully', 'success');
+                    // Redirect to rounds list after a short delay
+                    setTimeout(() => {
+                        window.location.href = '{{ url_for("rounds.rounds_list") }}';
+                    }, 1500);
+                } else {
+                    showToast(data.error || 'Failed to delete quiz', 'error');
+                }
+            })
+            .catch(error => {
+                deleteConfirmationModal.classList.add('hidden');
+                showToast('An unexpected error occurred while deleting the quiz', 'error');
+                console.error('Error:', error);
+            });
+        });
+        
+        // Save songs form submission
+        songsForm.addEventListener('submit', function() {
+            showToast('Saving changes...', 'info');
+        });
+
+        // Show formatted song list modal
+        showFormattedListBtn.addEventListener('click', function() {
+            // Get all song rows and format each song with the requested format
+            const formattedList = Array.from(document.querySelectorAll('.song-row')).map((row, index) => {
+                const title = row.querySelector('td:nth-child(3)').textContent.trim();
+                const artist = row.querySelector('td:nth-child(4)').textContent.trim();
+                const year = row.querySelector('td:nth-child(5)').textContent.trim();
+                const genre = row.querySelector('td:nth-child(6)').textContent.trim();
+                
+                // Format: "1. The Cure - Boys Don't Cry"
+                let formattedSong = `${index + 1}. ${artist} - ${title}`;
+                
+                // Add year and genre if available (optional)
+                if (year) {
+                    formattedSong += ` (${year})`;
+                }
+                if (genre) {
+                    formattedSong += ` [${genre}]`;
+                }
+                
+                return formattedSong;
+            }).join('\n');
+            
+            // Set the formatted text in the modal
+            formattedSongs.textContent = formattedList;
+            
+            // Show the modal
+            formattedListModal.classList.remove('hidden');
+        });
+
+        // Close formatted song list modal
+        closeFormattedListModal.addEventListener('click', function() {
+            formattedListModal.classList.add('hidden');
+        });
+
+        closeFormattedList.addEventListener('click', function() {
+            formattedListModal.classList.add('hidden');
+        });
+
+        // Copy formatted song list to clipboard
+        copyToClipboardBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(formattedSongs.textContent).then(() => {
+                showToast('Formatted song list copied to clipboard', 'success');
+            }).catch(() => {
+                showToast('Failed to copy to clipboard', 'error');
+            });
+        });
+
+        // Dropbox Export Modal Functionality
+        if (copyAllLinksBtn) {
+            copyAllLinksBtn.addEventListener('click', function() {
+                // Collect all links from the shared links section
+                const links = [];
+                const linkContainers = sharedLinks.querySelectorAll('.mt-2.p-2');
+                
+                if (linkContainers.length > 0) {
+                    linkContainers.forEach(container => {
+                        const label = container.querySelector('p').textContent.trim();
+                        const link = container.querySelector('a').href;
+                        links.push(`${label} ${link}`);
+                    });
+                    
+                    // Create formatted text with all links
+                    const allLinks = links.join('\n\n');
+                    
+                    // Copy to clipboard
+                    navigator.clipboard.writeText(allLinks).then(() => {
+                        showToast('All links copied to clipboard', 'success');
+                        
+                        // Change button text temporarily
+                        const originalText = copyAllLinksBtn.innerHTML;
+                        copyAllLinksBtn.innerHTML = '<i class="fas fa-check mr-2"></i> Copied!';
+                        
+                        setTimeout(() => {
+                            copyAllLinksBtn.innerHTML = originalText;
+                        }, 2000);
+                    }).catch(error => {
+                        console.error('Failed to copy links: ', error);
+                        showToast('Failed to copy links to clipboard', 'error');
+                    });
+                } else {
+                    showToast('No links available to copy', 'warning');
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}
+
