@@ -66,11 +66,63 @@
 * [x] Add fallback handling and Dropbox access token refresh
 * [x] Log export actions and errors for transparency
 
+### Milestone 9: **"Documentation Dynamo" Release** – Comprehensive Documentation
+
+* [x] Complete user-facing documentation
+  * [x] Create step-by-step user guides with screenshots
+  * [x] Add FAQ section based on common support questions
+* [x] Developer documentation
+  * [x] API documentation with OpenAPI/Swagger spec
+  * [x] Database schema documentation with ER diagrams
+  * [x] Codebase architecture overview
+  * [x] Setup guide for local development environment
+* [x] Operations documentation
+  * [x] Deployment guide for various environments (Docker, bare metal)
+  * [x] Backup and restore procedures
+  * [x] Monitoring and alerting setup
+  * [x] Troubleshooting common issues
+* [x] Create centralized documentation portal
+  * [x] Set up MkDocs or similar documentation site
+  * [x] Implement search functionality
+  * [x] Add version control for documentation
+  * [x] Set up automated documentation deployment
+
 ---
 
 ## 🆕 Upcoming Milestones
 
-### 🎯 Milestone 9: **"Storage Sanctuary" Release** – Multi-Provider Storage
+### 🎯 Milestone 10: **"Scraper Symphony" Release** – External Music Data
+
+* [ ] Identify 2–3 public music chart sources (Billboard, Official Charts, etc.)
+* [ ] Build scraper with user-agent rotation and proxy support
+* [ ] Normalize results into song data model
+* [ ] Link scraped data to existing Spotify records
+* [ ] Review interface for admins to validate scraped data
+* [ ] Store scraper runs and log errors transparently
+* [ ] Add cron-based scheduler for scraper refresh
+
+### 🎯 Milestone 11: **"Alert Amplifier" Release** – Notifications & Emails
+
+* [ ] Email verification for new accounts
+* [ ] Notify users when round generation completes
+* [ ] Notify users of expiring OAuth tokens (Spotify, Dropbox)
+* [ ] Optional weekly usage summary for admins
+* [ ] Push notification support via browser or Telegram
+
+### 🎯 Milestone 12: **"Rhythm Roundsmith" Release** – AI-Generated Quiz Rounds
+
+* [ ] Develop AI module to generate full quiz rounds
+  * [ ] Use existing song metadata (genre, year, tempo, artist)
+  * [ ] Support different quiz formats: multiple-choice, guess-the-clip, open-ended
+  * [ ] Create quiz rounds from a playlist
+  * [ ] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
+  * [ ] Include fallback logic when metadata is sparse
+* [ ] Let users review/edit AI-generated questions before saving
+* [ ] Log prompt/response pairs for model improvement
+* [ ] Add backend abstraction to swap AI providers (OpenAI, Mistral, etc.)
+* [ ] Build tuning pipeline for prompt quality testing
+
+### 🎯 Milestone 13: **"Storage Sanctuary" Release** – Multi-Provider Storage
 
 * [ ] Implement cloud storage backend abstraction
 * [ ] Add support for AWS S3 storage
@@ -84,21 +136,7 @@
 * [ ] Add background synchronization and status tracking
 * [ ] Implement bandwidth-efficient differential uploads
 
-### 🎯 Milestone 10: **"Rhythm Roundsmith" Release** – AI-Generated Quiz Rounds
-
-* [ ] Develop AI module to generate full quiz rounds
-
-  * [ ] Use existing song metadata (genre, year, tempo, artist)
-  * [ ] Support different quiz formats: multiple-choice, guess-the-clip, open-ended
-  * [ ] Create quiz rounds from a playlist
-  * [ ] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
-  * [ ] Include fallback logic when metadata is sparse
-* [ ] Let users review/edit AI-generated questions before saving
-* [ ] Log prompt/response pairs for model improvement
-* [ ] Add backend abstraction to swap AI providers (OpenAI, Mistral, etc.)
-* [ ] Build tuning pipeline for prompt quality testing
-
-### 🎯 Milestone 11: **"Collaboration Core" Release** – Multi-User Round Sharing
+### 🎯 Milestone 14: **"Collaboration Core" Release** – Multi-User Round Sharing
 
 * [ ] Allow shared editing of rounds
 * [ ] Add collaboration roles (view, comment, edit)
@@ -108,7 +146,7 @@
 * [ ] Allow public view-only sharing links with optional expiration
 * [ ] Display access audit log (who opened/edited and when)
 
-### 🎯 Milestone 12: **"Profile Personalizer" Release** – User Preferences & Tagging
+### 🎯 Milestone 15: **"Profile Personalizer" Release** – User Preferences & Tagging
 
 * [x] User-specific intro/outro/replay MP3 fallback system
 * [x] Persistent custom user settings
@@ -117,25 +155,7 @@
 * [ ] Add filtering and sorting by tag
 * [ ] Dark mode toggle
 
-### 🎯 Milestone 13: **"Scraper Symphony" Release** – External Music Data
-
-* [ ] Identify 2–3 public music chart sources (Billboard, Official Charts, etc.)
-* [ ] Build scraper with user-agent rotation and proxy support
-* [ ] Normalize results into song data model
-* [ ] Link scraped data to existing Spotify records
-* [ ] Review interface for admins to validate scraped data
-* [ ] Store scraper runs and log errors transparently
-* [ ] Add cron-based scheduler for scraper refresh
-
-### 🎯 Milestone 14: **"Alert Amplifier" Release** – Notifications & Emails
-
-* [ ] Email verification for new accounts
-* [ ] Notify users when round generation completes
-* [ ] Notify users of expiring OAuth tokens (Spotify, Dropbox)
-* [ ] Optional weekly usage summary for admins
-* [ ] Push notification support via browser or Telegram
-
-### 🎯 Milestone 15: **"Performance Pulse" Release** – Scaling & Speed
+### 🎯 Milestone 16: **"Performance Pulse" Release** – Scaling & Speed
 
 * [ ] Index high-traffic database fields (tags, dates, users)
 * [ ] Paginate round/song lists
@@ -143,7 +163,7 @@
 * [ ] Add Redis/memory cache layer for read-heavy endpoints
 * [ ] Load test with simulated users and large playlists
 
-### 🎯 Milestone 16: **"Deployment Dynamo" Release** – CI/CD and Maintenance
+### 🎯 Milestone 17: **"Deployment Dynamo" Release** – CI/CD and Maintenance
 
 * [ ] GitHub Actions or GitLab CI/CD pipeline for builds and tests
 * [ ] Nightly backup job with status alert
@@ -161,6 +181,10 @@
 * [ ] REST API for third-party integration (e.g., with trivia bots)
 * [ ] Audio fingerprint validation for user-uploaded MP3s
 * [ ] Round analytics: usage frequency, popularity, ratings
+* [ ] Documentation enhancements:
+  * [ ] Create video tutorials for complex workflows
+  * [ ] Implement keyboard shortcuts in the application
+  * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: May 8, 2025*
+*Last updated: May 12, 2025*
 
