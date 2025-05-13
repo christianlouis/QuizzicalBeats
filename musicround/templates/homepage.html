@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block title %}Quizzical Beats - Where trivia meets the rhythm{% endblock %}
+
+{% block content %}
+    <div class="flex flex-col justify-center items-center min-h-[80vh] py-12 px-4">
+        <div class="text-center mb-10">
+            <h1 class="text-4xl md:text-5xl font-bold text-navy-800 font-montserrat mb-4">Welcome to Quizzical Beats</h1>
+            <p class="text-xl text-gray-600 max-w-2xl mx-auto">Where trivia meets the rhythm. Create unforgettable music rounds for your pub quiz or trivia night.</p>
+        </div>
+        
+        <div class="w-full max-w-md bg-white shadow-lg rounded-lg overflow-hidden mb-10">
+            <div class="bg-teal-500 text-white text-center py-4">
+                <h2 class="text-2xl font-montserrat font-semibold">Welcome, {{ user_info['display_name'] }}</h2>
+            </div>
+            <div class="p-6">
+                <ul class="space-y-3">
+                    <li class="flex border-b border-gray-100 pb-2">
+                        <span class="text-navy-800 font-semibold w-28">Username:</span>
+                        <span class="text-gray-600">{{ current_user.username }}</span>
+                    </li>
+                    <li class="flex border-b border-gray-100 pb-2">
+                        <span class="text-navy-800 font-semibold w-28">Email:</span>
+                        <span class="text-gray-600">{{ current_user.email }}</span>
+                    </li>
+                    {% if current_user.first_name or current_user.last_name %}
+                    <li class="flex border-b border-gray-100 pb-2">
+                        <span class="text-navy-800 font-semibold w-28">Name:</span>
+                        <span class="text-gray-600">{{ current_user.first_name }} {{ current_user.last_name }}</span>
+                    </li>
+                    {% endif %}
+                </ul>
+                
+                <div class="mt-6 flex flex-col space-y-3">
+                    <a href="{{ url_for('generate.build_music_round') }}" 
+                       class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-md transition-colors text-center">
+                        <i class="fas fa-music mr-2"></i> Build a Music Round
+                    </a>
+                    <a href="{{ url_for('core.view_songs') }}"
+                       class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-md transition-colors text-center">
+                        <i class="fas fa-list mr-2"></i> View Your Songs
+                    </a>
+                    <a href="{{ url_for('users.profile') }}"
+                       class="bg-navy-600 hover:bg-navy-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-center">
+                        <i class="fas fa-user mr-2"></i> My Profile
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center text-gray-600 max-w-2xl">
+            <p class="italic">"The soundtrack to your smartest guesses."</p>
+        </div>
+    </div>
+{% endblock %}
+

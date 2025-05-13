@@ -1,0 +1,832 @@
+{% extends 'base.html' %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <h2 class="text-2xl font-bold mb-6 text-navy-800">My Profile</h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="mb-4 p-3 {% if category == 'danger' %}bg-red-100 text-red-700{% elif category == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-700{% endif %} rounded">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Profile Info -->
+        <div class="md:col-span-2">
+            <div class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h3 class="text-lg font-semibold mb-3 text-navy-700">Account Information</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm text-gray-600">Username</p>
+                        <p class="font-medium">{{ current_user.username }}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Email</p>
+                        <p class="font-medium">{{ current_user.email }}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Name</p>
+                        <p class="font-medium">
+                            {% if current_user.first_name or current_user.last_name %}
+                                {{ current_user.first_name }} {{ current_user.last_name }}
+                            {% else %}
+                                <span class="text-gray-400">Not provided</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Member Since</p>
+                        <p class="font-medium">{{ current_user.created_at.strftime('%B %d, %Y') }}</p>
+                    </div>
+                    <!-- Add Admin Status -->
+                    <div>
+                        <p class="text-sm text-gray-600">Admin Status</p>
+                        <p class="font-medium">
+                            {% if current_user.is_admin() %}
+                                <span class="text-green-600">Administrator</span>
+                                <a href="{{ url_for('admin.index') }}" class="ml-2 text-xs text-blue-600 hover:underline">
+                                    Admin Dashboard
+                                </a>
+                            {% else %}
+                                <span class="text-gray-400">Regular User</span>
+                                {% if not admin_exists %}
+                                <a href="{{ url_for('users.setup') }}" class="ml-2 text-xs text-blue-600 hover:underline">
+                                    Setup Admin
+                                </a>
+                                {% endif %}
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Dropbox Export Folder</p>
+                        <p class="font-medium">
+                            {{ current_user.dropbox_export_path or '/QuizzicalBeats' }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <h3 class="text-lg font-semibold mb-3 text-navy-700">Account Actions</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <a href="{{ url_for('users.edit_profile') }}" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md text-center transition-colors">
+                    <i class="fas fa-user-edit mr-2"></i> Edit Profile
+                </a>
+                <a href="{{ url_for('users.change_password') }}" class="bg-navy-600 hover:bg-navy-700 text-white py-2 px-4 rounded-md text-center transition-colors">
+                    <i class="fas fa-key mr-2"></i> Change Password
+                </a>
+            </div>
+            
+            <!-- Spotify Connection Debug - Only for Admins -->
+            {% if current_user.is_admin() %}
+            <div class="mt-6 p-4 border border-gray-300 rounded-lg bg-gray-50">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-semibold text-navy-700">Spotify Connection Debug</h3>
+                    <button id="showSpotifyDebugBtn" class="bg-indigo-500 hover:bg-indigo-600 text-white py-1 px-3 rounded-md text-sm transition-colors">
+                        <i class="fas fa-bug mr-1"></i> Show Details
+                    </button>
+                </div>
+                
+                <div class="flex items-center text-sm">
+                    <div class="w-3 h-3 rounded-full mr-2 
+                        {% if spotify_status == 'user' %}
+                            bg-green-500
+                        {% elif spotify_status == 'system' %}
+                            bg-yellow-500
+                        {% elif spotify_status == 'bearer' %}
+                            bg-blue-500
+                        {% else %}
+                            bg-red-500
+                        {% endif %}"></div>
+                    <span>
+                        {% if spotify_status == 'user' %}
+                            Using your Spotify account
+                        {% elif spotify_status == 'system' %}
+                            Using system Spotify account
+                        {% elif spotify_status == 'bearer' %}
+                            Using manual bearer token
+                        {% else %}
+                            No Spotify connection active
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            
+            <!-- Dropbox Connection Debug - Only for Admins -->
+            <div class="mt-4 p-4 border border-gray-300 rounded-lg bg-gray-50">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-semibold text-navy-700">Dropbox Connection Debug</h3>
+                    <button id="showDropboxDebugBtn" class="bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded-md text-sm transition-colors">
+                        <i class="fas fa-bug mr-1"></i> Show Details
+                    </button>
+                </div>
+                
+                <div class="flex items-center text-sm">
+                    <div class="w-3 h-3 rounded-full mr-2 
+                        {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                            bg-green-500
+                        {% elif current_user.dropbox_token %}
+                            bg-yellow-500
+                        {% else %}
+                            bg-red-500
+                        {% endif %}"></div>
+                    <span>
+                        {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                            Active Dropbox connection
+                        {% elif current_user.dropbox_token %}
+                            Dropbox token expired or expiring soon
+                        {% else %}
+                            No Dropbox connection active
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Connected Services -->
+        <div>
+            <h3 class="text-lg font-semibold mb-4 text-navy-700">Connected Services</h3>
+            
+            <!-- Spotify Connection - Only shown for admins -->
+            {% if current_user.is_admin() %}
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">
+                <div class="flex items-center mb-3">
+                    <i class="fab fa-spotify text-[#1DB954] text-2xl mr-3"></i>
+                    <div>
+                        <h4 class="font-medium">Spotify</h4>
+                        <p class="text-sm text-gray-600">
+                            {% if current_user.spotify_token %}
+                                Connected
+                                {% if current_user.oauth_id %}
+                                    as {{ current_user.oauth_id }}
+                                {% endif %}
+                            {% else %}
+                                Not connected
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <a href="{{ url_for('users.spotify_link') }}" class="inline-block w-full bg-{% if current_user.spotify_token %}gray-200 hover:bg-gray-300{% else %}[#1DB954] hover:bg-[#1ed760]{% endif %} text-{% if current_user.spotify_token %}gray-700{% else %}white{% endif %} text-center py-1 px-3 rounded-md text-sm transition-colors">
+                    {% if current_user.spotify_token %}
+                        Manage Connection
+                    {% else %}
+                        Connect Spotify
+                    {% endif %}
+                </a>
+            </div>
+            {% endif %}
+            
+            <!-- Dropbox Connection -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">
+                <div class="flex items-center mb-3">
+                    <i class="fab fa-dropbox text-[#0061FF] text-2xl mr-3"></i>
+                    <div>
+                        <h4 class="font-medium">Dropbox</h4>
+                        <p class="text-sm text-gray-600">
+                            {% if current_user.dropbox_id %}
+                                Connected
+                                {% if current_user.dropbox_id %}
+                                    as {{ current_user.dropbox_id[:10] }}...
+                                {% endif %}
+                            {% else %}
+                                Not connected
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                {% if current_user.dropbox_id %}
+                    <div class="grid grid-cols-1 gap-2">
+                        <p class="text-xs text-gray-600">
+                            {% if current_user.dropbox_token_expiry %}
+                                Token expires: {{ current_user.dropbox_token_expiry.strftime('%Y-%m-%d %H:%M') }}
+                            {% endif %}
+                        </p>
+                        <form action="{{ url_for('users.dropbox_disconnect') }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="inline-block w-full bg-gray-200 hover:bg-gray-300 text-gray-700 text-center py-1 px-3 rounded-md text-sm transition-colors">
+                                Disconnect Dropbox
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <a href="{{ url_for('users.dropbox_auth') }}" class="inline-block w-full bg-[#0061FF] hover:bg-[#0055DF] text-white text-center py-1 px-3 rounded-md text-sm transition-colors">
+                        Connect Dropbox
+                    </a>
+                {% endif %}
+            </div>
+            
+            <!-- Manual Bearer Token Entry - Only for Admins -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">
+                <h4 class="font-medium mb-2">Direct Spotify Access</h4>
+                <p class="text-xs text-gray-600 mb-3">
+                    Enter a Spotify bearer token for direct API access. 
+                    This bypasses OAuth and allows immediate access to Spotify features.
+                </p>
+                
+                <form action="{{ url_for('users.update_bearer_token') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="mb-2">
+                        <textarea name="bearer_token" rows="2" 
+                            placeholder="BQBcQ1foQG0x14axu2kQVz..." 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">{{ session.get('access_token', '') }}</textarea>
+                        <p class="mt-1 text-xs text-gray-500">Get a token from <a href="https://developer.spotify.com/console/" target="_blank" class="text-teal-600 hover:underline">Spotify Developer Console</a></p>
+                    </div>
+                    
+                    <div class="flex gap-2">
+                        <button type="submit" class="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-md hover:bg-teal-700 transition-colors">
+                            Apply Token
+                        </button>
+                        {% if session.get('access_token') %}
+                        <button type="submit" name="clear_token" value="1" class="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-md hover:bg-gray-600 transition-colors">
+                            Clear Token
+                        </button>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Audio Settings -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">
+                <h4 class="font-medium mb-2">Audio Settings</h4>
+                <p class="text-xs text-gray-600 mb-3">
+                    Customize your audio preferences for quizzes.
+                </p>
+                <a href="{{ url_for('users.audio_settings') }}" class="inline-block w-full bg-orange-500 hover:bg-orange-600 text-white text-center py-2 px-4 rounded-md text-sm transition-colors">
+                    Manage Audio Settings
+                </a>
+            </div>
+            
+            <!-- Last Login Info -->
+            <div class="mt-6">
+                <h4 class="text-md font-medium mb-2">Last Login</h4>
+                <p class="text-sm text-gray-600">
+                    {% if current_user.last_login %}
+                        {{ current_user.last_login.strftime('%d %b %Y, %H:%M') }}
+                    {% else %}
+                        <span class="text-gray-400">No login history</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Spotify Debug Modal - Only for Admins -->
+{% if current_user.is_admin() %}
+<div id="spotifyDebugModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div class="p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-navy-800">Spotify Connection Details</h3>
+                <button id="closeSpotifyDebugBtn" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Connection Status -->
+            <div class="mb-4 p-3 rounded-lg
+                {% if spotify_status == 'user' %}
+                    bg-green-100 border border-green-300
+                {% elif spotify_status == 'system' %}
+                    bg-yellow-100 border border-yellow-300
+                {% elif spotify_status == 'bearer' %}
+                    bg-blue-100 border border-blue-300
+                {% else %}
+                    bg-red-100 border border-red-300
+                {% endif %}">
+                <div class="flex items-center font-semibold mb-2">
+                    <div class="w-4 h-4 rounded-full mr-2 
+                        {% if spotify_status == 'user' %}
+                            bg-green-500
+                        {% elif spotify_status == 'system' %}
+                            bg-yellow-500
+                        {% elif spotify_status == 'bearer' %}
+                            bg-blue-500
+                        {% else %}
+                            bg-red-500
+                        {% endif %}"></div>
+                    <span>
+                        {% if spotify_status == 'user' %}
+                            Using your Spotify account
+                        {% elif spotify_status == 'system' %}
+                            Using system Spotify account
+                        {% elif spotify_status == 'bearer' %}
+                            Using manual bearer token
+                        {% else %}
+                            No Spotify credentials available
+                        {% endif %}
+                    </span>
+                    
+                    {% if token_source %}
+                    <span class="ml-2 text-xs py-1 px-2 rounded-full bg-gray-200">
+                        Source: {{ token_source }}
+                    </span>
+                    {% endif %}
+                </div>
+                <p class="text-sm">
+                    {% if spotify_status == 'user' %}
+                        Your personal Spotify account is connected and authenticated
+                    {% elif spotify_status == 'system' %}
+                        Using the fallback system Spotify account (refresh token from settings)
+                    {% elif spotify_status == 'bearer' %}
+                        Using a manual bearer token from session
+                    {% else %}
+                        No Spotify credentials available
+                    {% endif %}
+                </p>
+                
+                {% if token_source %}
+                <p class="mt-2 text-xs text-gray-600">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    {% if token_source == 'user' %}
+                        This token was automatically generated from your user account refresh token
+                    {% elif token_source == 'system' %}
+                        This token was automatically generated from the system fallback refresh token
+                    {% else %}
+                        Token source: {{ token_source }}
+                    {% endif %}
+                </p>
+                {% endif %}
+            </div>
+            
+            <!-- Debug Information -->
+            <div class="space-y-4">
+                <!-- Personal Account Details -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Your Spotify Account</h4>
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Status:</td>
+                            <td class="py-2">
+                                {% if current_user.spotify_token %}
+                                    <span class="text-green-600">Connected</span>
+                                {% else %}
+                                    <span class="text-red-600">Not connected</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if current_user.spotify_token %}
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Spotify ID:</td>
+                            <td class="py-2">{{ current_user.oauth_id or 'Unknown' }}</td>
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Token Expiry:</td>
+                            <td class="py-2">
+                                {% if current_user.spotify_token_expiry %}
+                                    {% if current_user.spotify_token_expiry > now %}
+                                        <span class="text-green-600">{{ current_user.spotify_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                                    {% else %}
+                                        <span class="text-red-600">Expired ({{ current_user.spotify_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }})</span>
+                                    {% endif %}
+                                {% else %}
+                                    Unknown
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Has Refresh Token:</td>
+                            <td class="py-2">
+                                {% if current_user.spotify_refresh_token %}
+                                    <span class="text-green-600">Yes</span>
+                                {% else %}
+                                    <span class="text-red-600">No</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+                
+                <!-- System Account Details -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">System Spotify Account</h4>
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Has Refresh Token:</td>
+                            <td class="py-2">
+                                {% if system_refresh_token %}
+                                    <span class="text-green-600">Yes</span>
+                                {% else %}
+                                    <span class="text-red-600">No</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if system_refresh_token %}
+                        <tr>
+                            <td class="py-2 font-medium">Token Preview:</td>
+                            <td class="py-2 font-mono">{{ system_refresh_token[:10] }}...{{ system_refresh_token[-5:] }}</td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+                
+                <!-- Manual Bearer Token -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Manual Bearer Token</h4>
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Status:</td>
+                            <td class="py-2">
+                                {% if session_bearer and token_source == 'manual' %}
+                                    <span class="text-green-600">Active manual token</span>
+                                {% elif session_bearer %}
+                                    <span class="text-gray-600">Present but not active</span>
+                                {% else %}
+                                    <span class="text-gray-600">Not present</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if session_bearer %}
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Token Preview:</td>
+                            <td class="py-2 font-mono">{{ session_bearer[:10] }}...{{ session_bearer[-5:] }}</td>
+                        </tr>
+                        {% if token_source == 'manual' and active_token_expiry %}
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Estimated Expiry:</td>
+                            <td class="py-2">
+                                {% if active_token_expiry > now %}
+                                    <span class="text-green-600">{{ active_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                                    <span class="text-xs text-gray-500">(Manual tokens typically expire after 1 hour)</span>
+                                {% else %}
+                                    <span class="text-red-600">Likely expired ({{ active_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }})</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% if active_username and token_source == 'manual' %}
+                        <tr>
+                            <td class="py-2 font-medium">Associated User:</td>
+                            <td class="py-2">
+                                <div class="flex items-center">
+                                    {% if active_user_image %}
+                                    <img src="{{ active_user_image }}" alt="User" class="w-6 h-6 rounded-full mr-2">
+                                    {% endif %}
+                                    <span>{{ active_username }} ({{ active_user_id }})</span>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endif %}
+                    </table>
+                </div>
+                
+                <!-- Current Active Token -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Current Active Spotify User</h4>
+                    
+                    {% if active_username %}
+                    <div class="flex items-center mb-3">
+                        {% if active_user_image %}
+                        <img src="{{ active_user_image }}" alt="Profile" class="w-10 h-10 rounded-full mr-3">
+                        {% else %}
+                        <div class="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center mr-3">
+                            <i class="fab fa-spotify text-gray-600"></i>
+                        </div>
+                        {% endif %}
+                        
+                        <div>
+                            <p class="font-medium">{{ active_username }}</p>
+                            <p class="text-sm text-gray-600">ID: {{ active_user_id }}</p>
+                        </div>
+                    </div>
+                    {% elif token_source == 'client_credentials' %}
+                    <div class="flex items-center mb-3">
+                        <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mr-3">
+                            <i class="fab fa-spotify text-purple-600"></i>
+                        </div>
+                        <div>
+                            <p class="font-medium">App Client Credentials</p>
+                            <p class="text-sm text-gray-600">Using application's credentials (limited access)</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-gray-600 italic">No active Spotify user detected</p>
+                    {% endif %}
+                    
+                    <div class="mt-3">
+                        <h5 class="text-sm font-medium mb-1">Token Source</h5>
+                        <div class="text-sm">
+                            {% if token_source %}
+                            <span class="px-2 py-1 rounded-full text-xs
+                                {% if token_source == 'user' %}
+                                    bg-green-100 text-green-800
+                                {% elif token_source == 'system' %}
+                                    bg-yellow-100 text-yellow-800
+                                {% elif token_source == 'client_credentials' %}
+                                    bg-purple-100 text-purple-800
+                                {% else %}
+                                    bg-blue-100 text-blue-800
+                                {% endif %}">
+                                {{ token_source }}
+                            </span>
+                            
+                            {% if token_source == 'client_credentials' and client_token_expiry %}
+                            <span class="text-xs text-gray-600 ml-2">
+                                Expires: {{ client_token_expiry|timestamp_to_datetime|format_datetime }}
+                            </span>
+                            {% endif %}
+                            
+                            {% else %}
+                            <span class="text-gray-600 italic">Unknown source</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Priority Order -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Precedence</h4>
+                    <p class="text-sm mb-2">Connection priority: Manual Bearer → Your Account → Client Credentials</p>
+                    <div class="flex flex-col space-y-2 text-sm">
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 rounded-full
+                                {% if spotify_status == 'bearer' %}bg-blue-500{% else %}bg-gray-300{% endif %}
+                                mr-2"></div>
+                            <span>1. Manual Bearer Token {% if spotify_status == 'bearer' %}(active){% endif %}</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 rounded-full
+                                {% if spotify_status == 'user' %}bg-green-500{% else %}bg-gray-300{% endif %}
+                                mr-2"></div>
+                            <span>2. User Account {% if spotify_status == 'user' %}(active){% endif %}</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 rounded-full
+                                {% if spotify_status == 'client_credentials' %}bg-purple-500{% else %}bg-gray-300{% endif %}
+                                mr-2"></div>
+                            <span>3. App Client Credentials {% if spotify_status == 'client_credentials' %}(active){% endif %}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end">
+                <button id="closeModalBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded-md">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Dropbox Debug Modal - Only for Admins -->
+<div id="dropboxDebugModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div class="p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-navy-800">Dropbox Connection Details</h3>
+                <button id="closeDropboxDebugBtn" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Connection Status -->
+            <div class="mb-4 p-3 rounded-lg
+                {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                    bg-green-100 border border-green-300
+                {% elif current_user.dropbox_token %}
+                    bg-yellow-100 border border-yellow-300
+                {% else %}
+                    bg-red-100 border border-red-300
+                {% endif %}">
+                <div class="flex items-center font-semibold mb-2">
+                    <div class="w-4 h-4 rounded-full mr-2 
+                        {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                            bg-green-500
+                        {% elif current_user.dropbox_token %}
+                            bg-yellow-500
+                        {% else %}
+                            bg-red-500
+                        {% endif %}"></div>
+                    <span>
+                        {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                            Active Dropbox connection
+                        {% elif current_user.dropbox_token %}
+                            Dropbox token expired or expiring soon
+                        {% else %}
+                            No Dropbox connection
+                        {% endif %}
+                    </span>
+                </div>
+                <p class="text-sm">
+                    {% if current_user.dropbox_token and current_user.dropbox_token_expiry and current_user.dropbox_token_expiry > now %}
+                        Your Dropbox account is connected and has a valid access token
+                    {% elif current_user.dropbox_token %}
+                        Your Dropbox account is connected but the token needs to be refreshed
+                    {% else %}
+                        No Dropbox credentials available
+                    {% endif %}
+                </p>
+            </div>
+            
+            <!-- Debug Information -->
+            <div class="space-y-4">
+                <!-- Dropbox Account Details -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Your Dropbox Account</h4>
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Status:</td>
+                            <td class="py-2">
+                                {% if current_user.dropbox_id %}
+                                    <span class="text-green-600">Connected</span>
+                                {% else %}
+                                    <span class="text-red-600">Not connected</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if current_user.dropbox_id %}
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">User Info:</td>
+                            <td class="py-2">
+                                <div class="flex items-center">
+                                    {% if session.get('dropbox_user_info') and session.get('dropbox_user_info').get('picture') %}
+                                    <img src="{{ session.get('dropbox_user_info').get('picture') }}" alt="Profile" class="w-8 h-8 rounded-full mr-2">
+                                    {% else %}
+                                    <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-2">
+                                        <i class="fab fa-dropbox text-blue-600"></i>
+                                    </div>
+                                    {% endif %}
+                                    <div>
+                                        {% if session.get('dropbox_user_info') %}
+                                            <div class="font-medium">{{ session.get('dropbox_user_info').get('name') }}</div>
+                                            <div class="text-xs text-gray-500">{{ session.get('dropbox_user_info').get('email') }}</div>
+                                        {% else %}
+                                            <div class="text-gray-500 italic">User info not available</div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Dropbox ID:</td>
+                            <td class="py-2">{{ current_user.dropbox_id }}</td>
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Token Expiry:</td>
+                            <td class="py-2">
+                                {% if current_user.dropbox_token_expiry %}
+                                    {% if current_user.dropbox_token_expiry > now %}
+                                        <span class="text-green-600">{{ current_user.dropbox_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                                    {% else %}
+                                        <span class="text-red-600">Expired ({{ current_user.dropbox_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }})</span>
+                                    {% endif %}
+                                {% else %}
+                                    Unknown
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Has Refresh Token:</td>
+                            <td class="py-2">
+                                {% if current_user.dropbox_refresh_token %}
+                                    <span class="text-green-600">Yes</span>
+                                {% else %}
+                                    <span class="text-red-600">No</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+
+                <!-- Dropbox Token Details -->
+                {% if current_user.dropbox_token %}
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Token Information</h4>
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Access Token Preview:</td>
+                            <td class="py-2 font-mono">
+                                {{ current_user.dropbox_token[:10] }}...{{ current_user.dropbox_token[-5:] if current_user.dropbox_token|length > 15 else '' }}
+                            </td>
+                        </tr>
+                        {% if current_user.dropbox_refresh_token %}
+                        <tr class="border-b border-gray-200">
+                            <td class="py-2 font-medium">Refresh Token Preview:</td>
+                            <td class="py-2 font-mono">
+                                {{ current_user.dropbox_refresh_token[:10] }}...{{ current_user.dropbox_refresh_token[-5:] if current_user.dropbox_refresh_token|length > 15 else '' }}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="py-2 font-medium">Token Status:</td>
+                            <td class="py-2">
+                                {% if current_user.dropbox_token_expiry %}
+                                    {% if current_user.dropbox_token_expiry > now %}
+                                        <span class="text-green-600">Valid for {{ ((current_user.dropbox_token_expiry - now).total_seconds() / 60)|int }} more minutes</span>
+                                    {% else %}
+                                        <span class="text-red-600">Expired {{ ((now - current_user.dropbox_token_expiry).total_seconds() / 60)|int }} minutes ago</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="text-gray-600">Unknown expiry time</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                {% endif %}
+                
+                <!-- Test Actions -->
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">Connection Test</h4>
+                    <p class="text-sm text-gray-600 mb-3">
+                        The following actions can help test your Dropbox connection:
+                    </p>
+                    <div class="space-y-2">
+                        <a href="{{ url_for('users.dropbox_auth') }}" class="inline-block bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded-md text-sm transition-colors">
+                            Reconnect Dropbox
+                        </a>
+                        
+                        {% if current_user.dropbox_id %}
+                        <form action="{{ url_for('users.dropbox_disconnect') }}" method="POST" class="inline-block">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="bg-red-500 hover:bg-red-600 text-white py-1 px-3 rounded-md text-sm transition-colors">
+                                Disconnect Dropbox
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end">
+                <button id="closeDropboxModalBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded-md">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if current_user.is_admin() %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const modal = document.getElementById('spotifyDebugModal');
+        const showBtn = document.getElementById('showSpotifyDebugBtn');
+        const closeBtn = document.getElementById('closeSpotifyDebugBtn');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        
+        // Show modal
+        showBtn.addEventListener('click', function() {
+            modal.classList.remove('hidden');
+        });
+        
+        // Close modal
+        closeBtn.addEventListener('click', function() {
+            modal.classList.add('hidden');
+        });
+        
+        closeModalBtn.addEventListener('click', function() {
+            modal.classList.add('hidden');
+        });
+        
+        // Close modal when clicking outside
+        modal.addEventListener('click', function(event) {
+            if (event.target === modal) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        const dropboxModal = document.getElementById('dropboxDebugModal');
+        const showDropboxBtn = document.getElementById('showDropboxDebugBtn');
+        const closeDropboxBtn = document.getElementById('closeDropboxDebugBtn');
+        const closeDropboxModalBtn = document.getElementById('closeDropboxModalBtn');
+        
+        // Show Dropbox modal
+        showDropboxBtn.addEventListener('click', function() {
+            dropboxModal.classList.remove('hidden');
+        });
+        
+        // Close Dropbox modal
+        closeDropboxBtn.addEventListener('click', function() {
+            dropboxModal.classList.add('hidden');
+        });
+        
+        closeDropboxModalBtn.addEventListener('click', function() {
+            dropboxModal.classList.add('hidden');
+        });
+        
+        // Close Dropbox modal when clicking outside
+        dropboxModal.addEventListener('click', function(event) {
+            if (event.target === dropboxModal) {
+                dropboxModal.classList.add('hidden');
+            }
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}

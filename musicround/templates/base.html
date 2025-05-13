@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Quizzical Beats{% endblock %}</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/light/logo.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='img/light/logo.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/light/logo.png') }}">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Custom Tailwind Configuration -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'navy': {
+                            50: '#e7e8f4',
+                            100: '#c3c5e3',
+                            200: '#9b9fd1',
+                            300: '#7379bf',
+                            400: '#555cb2',
+                            500: '#3640a5',
+                            600: '#2e379e',
+                            700: '#242c8f',
+                            800: '#1A237E', // Deep Navy Blue (primary)
+                            900: '#0b0e59',
+                        },
+                        'teal': {
+                            500: '#00ACC1', // Vibrant Teal (accent)
+                            600: '#0097a7',
+                            700: '#00838f',
+                        },
+                        'orange': {
+                            500: '#FF7043', // Bright Orange (CTA)
+                            600: '#f4511e',
+                            700: '#e64a19',
+                        },
+                        'gray': {
+                            100: '#F5F5F5', // Light Gray (background)
+                            800: '#212121', // Dark Gray (text)
+                        },
+                    },
+                    fontFamily: {
+                        'montserrat': ['Montserrat', 'sans-serif'],
+                        'opensans': ['Open Sans', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Custom styles -->
+    <style type="text/tailwindcss">
+        @layer base {
+            html {
+                font-family: 'Open Sans', sans-serif;
+            }
+        }
+        
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            
+            /* Form styling to replicate Tailwind Forms plugin behavior */
+            [type='text'], [type='email'], [type='url'], [type='password'],
+            [type='number'], [type='date'], [type='datetime-local'],
+            [type='month'], [type='search'], [type='tel'],
+            [type='time'], [type='week'], [multiple], textarea, select {
+                @apply w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring focus:ring-teal-200 focus:ring-opacity-50;
+            }
+            
+            [type='checkbox'], [type='radio'] {
+                @apply rounded border-gray-300 text-teal-600 focus:ring-teal-500;
+            }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="flex flex-col min-h-screen bg-gray-100 font-opensans text-gray-800">
+    <header>
+        <nav class="bg-navy-800 text-white shadow-md">
+            <div class="container mx-auto px-4 py-3">
+                <div class="flex justify-between items-center">
+                    <a class="flex items-center text-xl font-bold" href="{{ url_for('core.index') }}">
+                        <img src="{{ url_for('static', filename='img/dark/logo.png') }}" alt="Quizzical Beats" class="h-8 mr-2">
+                        <span class="hidden sm:inline">Quizzical Beats</span>
+                    </a>
+                    <button id="menu-toggle" class="md:hidden focus:outline-none">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div id="navbar-menu" class="hidden md:flex flex-grow items-center">
+                        <ul class="flex flex-col md:flex-row space-y-2 md:space-y-0 md:ml-8 md:space-x-6 mt-4 md:mt-0">
+                            {% if current_user.is_authenticated %}
+                                <li class="group relative">
+                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                        <i class="fab fa-spotify mr-2"></i>Import Spotify <i class="fas fa-chevron-down ml-1"></i>
+                                    </button>
+                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_song') }}">Song</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_playlist') }}">Playlist</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_album') }}">Album</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('core.search') }}">Search Spotify</a></li>
+                                        <li class="border-t border-gray-200 mt-1 pt-1">
+                                            <a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import.import_official_playlists') }}">
+                                                <span class="flex items-center text-teal-600">
+                                                    <i class="fab fa-spotify mr-2"></i> Official Playlists
+                                                </span>
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </li>
+                                <li class="group relative">
+                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                        <i class="fab fa-deezer mr-2"></i>Import Deezer <i class="fas fa-chevron-down ml-1"></i>
+                                    </button>
+                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_track') }}">Song</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_playlist') }}">Playlist</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_album') }}">Album</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.deezer_search') }}">Search Deezer</a></li>
+                                        <li class="border-t border-gray-200 mt-1 pt-1">
+                                            <a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.browse_deezer_playlists') }}">
+                                                <span class="flex items-center" style="color: #00ACC1;">
+                                                    <i class="fab fa-deezer mr-2"></i> Official Playlists
+                                                </span>
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </li>
+                                <li>
+                                    <a class="text-white hover:text-teal-500" href="{{ url_for('core.view_songs') }}">View Songs</a>
+                                </li>
+                                <li>
+                                    <a class="text-white hover:text-teal-500" href="{{ url_for('generate.build_music_round') }}">Build Round</a>
+                                </li>
+                                <li>
+                                    <a class="text-white hover:text-teal-500" href="{{ url_for('rounds.rounds_list') }}">View Rounds</a>
+                                </li>
+                                {% if current_user.is_admin() %}
+                                <li class="group relative">
+                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                        <i class="fas fa-shield-alt mr-2"></i>Admin <i class="fas fa-chevron-down ml-1"></i>
+                                    </button>
+                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('admin.index') }}">
+                                            <span class="flex items-center">
+                                                <i class="fas fa-database mr-2"></i> Data Manager
+                                            </span>
+                                        </a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('users.system_settings') }}">
+                                            <span class="flex items-center">
+                                                <i class="fas fa-cogs mr-2"></i> System Settings
+                                            </span>
+                                        </a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('users.backup_manager') }}">
+                                            <span class="flex items-center">
+                                                <i class="fas fa-download mr-2"></i> Backup Manager
+                                            </span>
+                                        </a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('users.system_health') }}">
+                                            <span class="flex items-center">
+                                                <i class="fas fa-heartbeat mr-2"></i> System Health
+                                            </span>
+                                        </a></li>
+                                    </ul>
+                                </li>
+                                {% endif %}
+                            {% endif %}
+                        </ul>
+                        <div class="ml-auto">
+                            {% if current_user.is_authenticated %}
+                            <div class="flex items-center space-x-4">
+                                <a href="{{ url_for('users.profile') }}" class="text-white hover:text-teal-500 flex items-center">
+                                    <i class="fas fa-user-circle mr-1"></i> {{ current_user.username }}
+                                </a>
+                                <a href="{{ url_for('users.logout') }}" class="bg-orange-500 hover:bg-orange-600 text-white py-1 px-3 rounded">
+                                    Logout
+                                </a>
+                            </div>
+                            {% else %}
+                            <div class="flex items-center space-x-4">
+                                <a href="{{ url_for('users.login') }}" class="text-white hover:text-teal-500">
+                                    Login
+                                </a>
+                                <a href="{{ url_for('users.register') }}" class="bg-orange-500 hover:bg-orange-600 text-white py-1 px-3 rounded">
+                                    Register
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-6">
+        {% block content %}
+        {% endblock %}
+    </main>
+
+    <footer class="bg-navy-800 text-white py-4 mt-auto">
+        <div class="container mx-auto px-4 text-center">
+            <p>© 2025 Quizzical Beats | <span class="text-teal-500">{{ get_version_str() }}</span></p>
+        </div>
+    </footer>
+
+    <!-- Mobile menu script -->
+    <script>
+        document.getElementById('menu-toggle').addEventListener('click', function() {
+            const menu = document.getElementById('navbar-menu');
+            menu.classList.toggle('hidden');
+        });
+    </script>
+
+    {% block scripts %}
+    {% endblock %}
+</body>
+</html>
+

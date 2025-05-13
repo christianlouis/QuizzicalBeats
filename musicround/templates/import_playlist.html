@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Import Playlist - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-2">Import Playlist</h1>
+        <p class="text-gray-600">Create a music quiz round from a Spotify or Deezer playlist.</p>
+    </div>
+
+    <div class="bg-white shadow-md rounded-lg p-6">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-4 p-4 border-l-4 {% if category == 'error' %}border-red-500 bg-red-50 text-red-700{% else %}border-green-500 bg-green-50 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('generate.import_playlist') }}" id="importPlaylistForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="round_name">
+                    Round Name (optional)
+                </label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                       id="round_name" name="round_name" type="text" placeholder="Enter a name for this round">
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="platform">
+                    Platform
+                </label>
+                <div class="flex space-x-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" class="form-radio" name="platform" value="spotify" checked>
+                        <span class="ml-2">Spotify</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" class="form-radio" name="platform" value="deezer">
+                        <span class="ml-2">Deezer</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="playlist_url">
+                    Playlist URL or ID
+                </label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                       id="playlist_url" name="playlist_url" type="text" placeholder="Enter Spotify or Deezer playlist URL">
+                <p class="text-gray-600 text-xs italic mt-1">Example: https://open.spotify.com/playlist/37i9dQZF1DX0XUsuxWHRQd or https://www.deezer.com/en/playlist/1111111</p>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <button class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors" 
+                        type="submit" id="importButton">
+                    <i class="fas fa-cloud-download-alt mr-2"></i>Import Playlist
+                </button>
+                <a class="inline-block align-baseline font-bold text-sm text-navy-700 hover:text-navy-800" 
+                   href="{{ url_for('generate.build_music_round') }}">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Quiz Builder
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <div class="mt-8 bg-navy-50 rounded-lg p-6 border border-navy-100">
+        <h3 class="text-xl font-semibold text-navy-800 mb-3 font-montserrat">Import Tips</h3>
+        <ul class="list-disc pl-5 space-y-2 text-gray-700">
+            <li>Make sure your playlist is public or at least accessible via link</li>
+            <li>Only the first 8 songs from the playlist will be imported for the quiz</li>
+            <li>Preview URLs might not be available for all songs</li>
+            <li>Songs will be saved in our database for future use</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div id="loadingModal" class="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50 hidden">
+    <div class="bg-white p-8 rounded-lg shadow-lg text-center max-w-md w-full">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-orange-500 mx-auto mb-4"></div>
+        <h3 class="text-xl font-bold text-navy-800 mb-2">Importing Playlist...</h3>
+        <p class="text-gray-600 mb-4">This might take a moment as we fetch and process each song.</p>
+        <div class="text-sm text-gray-500">
+            <p>We're working on:</p>
+            <ul id="importSteps" class="mt-2 space-y-2 text-left px-4">
+                <li><i class="fas fa-check-circle text-green-500 hidden step-complete"></i> <i class="fas fa-spinner fa-spin text-orange-500 step-in-progress"></i> <span class="ml-2">Fetching playlist data</span></li>
+                <li><i class="fas fa-check-circle text-green-500 hidden step-complete"></i> <i class="fas fa-spinner fa-spin text-orange-500 hidden step-in-progress"></i> <span class="ml-2">Importing songs to database</span></li>
+                <li><i class="fas fa-check-circle text-green-500 hidden step-complete"></i> <i class="fas fa-spinner fa-spin text-orange-500 hidden step-in-progress"></i> <span class="ml-2">Creating quiz round</span></li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('importPlaylistForm');
+        const loadingModal = document.getElementById('loadingModal');
+        const importSteps = document.querySelectorAll('#importSteps li');
+        
+        form.addEventListener('submit', function(e) {
+            // Show loading modal when form is submitted
+            loadingModal.classList.remove('hidden');
+            
+            // Simulate progress updates (since we can't track actual backend progress)
+            setTimeout(() => {
+                // Mark first step as complete and start second step
+                importSteps[0].querySelector('.step-in-progress').classList.add('hidden');
+                importSteps[0].querySelector('.step-complete').classList.remove('hidden');
+                importSteps[1].querySelector('.step-in-progress').classList.remove('hidden');
+            }, 2000);
+            
+            setTimeout(() => {
+                // Mark second step as complete and start third step
+                importSteps[1].querySelector('.step-in-progress').classList.add('hidden');
+                importSteps[1].querySelector('.step-complete').classList.remove('hidden');
+                importSteps[2].querySelector('.step-in-progress').classList.remove('hidden');
+            }, 4000);
+            
+            // Let the form submission continue
+            return true;
+        });
+    });
+</script>
+{% endblock %}

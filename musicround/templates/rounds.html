@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block title %}Music Quizzes - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-2">Your Music Quizzes</h1>
+        <p class="text-gray-600">Browse and manage all your created music quizzes.</p>
+    </div>
+
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="p-4 bg-navy-50 border-b">
+            <div class="flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-navy-800">Saved Quizzes</h2>
+                <a href="{{ url_for('generate.build_music_round') }}" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md transition-colors text-sm font-semibold">
+                    <i class="fas fa-plus mr-1"></i> Create New Quiz
+                </a>
+            </div>
+        </div>
+        
+        <div class="overflow-x-auto">
+            <table class="w-full table-auto">
+                <thead class="bg-gray-100 text-gray-700">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-semibold">ID</th>
+                        <th class="px-4 py-3 text-left font-semibold">Name</th>
+                        <th class="px-4 py-3 text-left font-semibold">Type</th>
+                        <th class="px-4 py-3 text-left font-semibold">Criteria</th>
+                        <th class="px-4 py-3 text-left font-semibold">Created</th>
+                        <th class="px-4 py-3 text-left font-semibold">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for round in rounds %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3">{{ round.id }}</td>
+                        <td class="px-4 py-3 font-medium">{{ round.name or 'Quiz #' + round.id|string }}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full 
+                                {% if round.round_type == 'Random' %}bg-navy-100 text-navy-800
+                                {% elif round.round_type == 'Decade' %}bg-teal-100 text-teal-800
+                                {% elif round.round_type == 'Genre' %}bg-orange-100 text-orange-800
+                                {% elif round.round_type == 'Tag' %}bg-purple-100 text-purple-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ round.round_type }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">{{ round.round_criteria_used }}</td>
+                        <td class="px-4 py-3 text-gray-600 text-sm">{{ round.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="px-4 py-3">
+                            <a href="{{ url_for('rounds.round_detail', round_id=round.id) }}" 
+                               class="bg-teal-500 hover:bg-teal-600 text-white py-1.5 px-3 rounded text-sm transition-colors">
+                                <i class="fas fa-eye mr-1"></i> View
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                            <p class="mb-3">You haven't created any music quizzes yet.</p>
+                            <a href="{{ url_for('generate.build_music_round') }}" class="inline-block bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors text-sm">
+                                <i class="fas fa-plus-circle mr-1"></i> Create Your First Quiz
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="mt-8 bg-navy-50 rounded-lg p-6 border border-navy-100">
+        <h3 class="text-xl font-semibold text-navy-800 mb-3 font-montserrat">Quiz Tips</h3>
+        <ul class="list-disc pl-5 space-y-2 text-gray-700">
+            <li>Export your quizzes to PDF for easy printing of answer sheets</li>
+            <li>Generate MP3s to play your music round with consistent timing</li>
+            <li>Mix different decades and genres for a balanced challenge</li>
+            <li>Keep track of which rounds you've used to avoid repeating songs</li>
+        </ul>
+    </div>
+    
+    <div class="mt-4 flex gap-4 justify-center">
+        <a href="{{ url_for('generate.import_playlist') }}" class="inline-block bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md transition-colors text-sm font-semibold">
+            <i class="fas fa-cloud-download-alt mr-1"></i> Import Playlist
+        </a>
+    </div>
+</div>
+{% endblock %}

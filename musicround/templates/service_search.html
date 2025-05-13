@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ service_name }} Search - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="bg-navy-800 text-white px-6 py-4">
+            <h2 class="text-xl font-semibold font-montserrat">
+                {% if service_name == 'Spotify' %}
+                <i class="fab fa-spotify mr-2"></i>
+                {% elif service_name == 'Deezer' %}
+                <i class="fab fa-deezer mr-2"></i>
+                {% endif %}
+                Search {{ service_name }}
+            </h2>
+            <p class="text-sm opacity-90">Import songs directly to your music quiz library</p>
+        </div>
+        <div class="p-6">
+            <form action="{{ search_results_url }}" method="POST" class="mb-6">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="mb-3">
+                    <input type="text" class="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" 
+                           name="search_term"
+                           placeholder="Search for tracks, albums, or playlists..."
+                           aria-label="Search term" required>
+                </div>
+                <div class="text-sm text-gray-600 mb-4">
+                    Search for music on {{ service_name }} by artist, song title, album, or playlist name.
+                </div>
+                <button class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-6 rounded-md transition-colors flex items-center" type="submit">
+                    <i class="fas fa-search mr-2"></i> Search
+                </button>
+            </form>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+                <div class="border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
+                    <div class="text-center">
+                        <i class="{% if service_name == 'Spotify' %}fab fa-spotify{% elif service_name == 'Deezer' %}fab fa-deezer{% endif %} fa-3x text-navy-800 mb-4"></i>
+                        <h5 class="text-lg font-semibold text-navy-800 font-montserrat">Browse Official Playlists</h5>
+                        <p class="text-gray-600 mb-4">Discover curated collections on {{ service_name }}</p>
+                        <a href="{{ browse_playlists_url }}" class="inline-block bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md transition-colors">
+                            Browse Playlists
+                        </a>
+                    </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
+                    <div class="text-center">
+                        <i class="fas fa-link fa-3x text-navy-800 mb-4"></i>
+                        <h5 class="text-lg font-semibold text-navy-800 font-montserrat">Import by URL</h5>
+                        <p class="text-gray-600 mb-4">Enter a {{ service_name }} track, album or playlist URL</p>
+                        <button class="inline-block bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md transition-colors" type="button" data-bs-toggle="modal" data-bs-target="#{{ service_name|lower }}UrlModal">
+                            Import by URL
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center mt-8 text-sm text-gray-500">
+                <p>Looking for something specific? Try our <a href="{{ url_for('core.view_songs') }}" class="text-teal-600 hover:underline">song library</a> to see what's already in your collection.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- URL Import Modal -->
+<div class="modal fade" id="{{ service_name|lower }}UrlModal" tabindex="-1" aria-labelledby="{{ service_name|lower }}UrlModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="{{ service_name|lower }}UrlModalLabel">Import from {{ service_name }} URL</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="{{ service_name|lower }}UrlForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="mb-3">
+                        <label for="{{ service_name|lower }}Url" class="block text-sm font-medium text-gray-700 mb-1">{{ service_name }} URL</label>
+                        <input type="url" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" id="{{ service_name|lower }}Url" placeholder="{{ url_placeholder }}" required>
+                        <div class="text-sm text-gray-500 mt-1">
+                            Paste a {{ service_name }} track, album, or playlist URL
+                        </div>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors mr-2" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">Import</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('{{ service_name|lower }}UrlForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const url = document.getElementById('{{ service_name|lower }}Url').value;
+        if (!url) return;
+
+        let match;
+        let formAction;
+        let idField;
+        let idValue;
+        
+        {% if service_name == 'Spotify' %}
+        if (match = url.match(/spotify\.com\/track\/([a-zA-Z0-9]+)/)) {
+            formAction = "{{ track_import_url }}";
+            idField = "song_id";
+            idValue = match[1];
+        } else if (match = url.match(/spotify\.com\/album\/([a-zA-Z0-9]+)/)) {
+            formAction = "{{ album_import_url }}";
+            idField = "album_id";
+            idValue = match[1];
+        } else if (match = url.match(/spotify\.com\/playlist\/([a-zA-Z0-9]+)/)) {
+            formAction = "{{ playlist_import_url }}";
+            idField = "playlist_id";
+            idValue = match[1];
+        } else {
+            alert("Invalid Spotify URL. Please enter a valid track, album, or playlist URL.");
+            return;
+        }
+        {% elif service_name == 'Deezer' %}
+        if (match = url.match(/deezer\.com\/(?:..\/)?track\/(\d+)/)) {
+            formAction = "{{ track_import_url }}";
+            idField = "track_id";
+            idValue = match[1];
+        } else if (match = url.match(/deezer\.com\/(?:..\/)?album\/(\d+)/)) {
+            formAction = "{{ album_import_url }}";
+            idField = "album_id";
+            idValue = match[1];
+        } else if (match = url.match(/deezer\.com\/(?:..\/)?playlist\/(\d+)/)) {
+            formAction = "{{ playlist_import_url }}";
+            idField = "playlist_id";
+            idValue = match[1];
+        } else {
+            alert("Invalid Deezer URL. Please enter a valid track, album, or playlist URL.");
+            return;
+        }
+        {% endif %}
+        
+        // Create and submit the form
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = formAction;
+        form.style.display = 'none';
+
+        // Add CSRF token
+        const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = csrfToken;
+        form.appendChild(csrfInput);
+
+        // Add ID field
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = idField;
+        idInput.value = idValue;
+        form.appendChild(idInput);
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,430 @@
+{% extends 'base.html' %}
+
+{% block title %}Official Spotify Playlists{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-2 text-navy-800 font-montserrat">Official Spotify Playlists</h1>
+    <p class="text-gray-600 mb-6">Browse and import playlists from official Spotify accounts worldwide.</p>
+
+    <!-- Direct Token Entry/Display -->
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
+        <div class="flex flex-col md:flex-row justify-between items-start gap-4">
+            <div class="w-full md:w-2/3">
+                <h3 class="text-lg font-semibold text-navy-800 mb-2">Spotify Authentication</h3>
+                <p class="text-gray-600 mb-3 text-sm">Enter a bearer token to access the Spotify API directly, bypassing OAuth limitations.</p>
+                
+                {% if spotify_username %}
+                <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+                    <p class="text-sm text-green-700">
+                        <span class="font-medium">✓ Authenticated as:</span> {{ spotify_username }}
+                    </p>
+                </div>
+                {% endif %}
+                
+                <form action="{{ url_for('import.update_direct_token') }}" method="POST" class="flex flex-col md:flex-row gap-3 items-end">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="return_url" value="{{ request.path }}?{{ request.query_string.decode() }}"/>
+                    
+                    <div class="w-full md:w-2/3">
+                        <label for="bearer_token" class="block text-sm font-medium text-gray-700 mb-1">Bearer Token</label>
+                        <textarea name="bearer_token" id="bearer_token" rows="1" 
+                            placeholder="BQBcQ1foQG0x14axu2kQVz..." 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">{{ session_bearer_token }}</textarea>
+                        <p class="mt-1 text-xs text-gray-500">Get a token from <a href="https://developer.spotify.com/console/" target="_blank" class="text-teal-600 hover:underline">Spotify Developer Console</a></p>
+                    </div>
+                    
+                    <div class="flex gap-2">
+                        <button type="submit" class="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-md hover:bg-teal-700 transition-colors">
+                            Apply Token
+                        </button>
+                        {% if session_bearer_token %}
+                        <button type="submit" name="clear_token" value="1" class="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-md hover:bg-gray-600 transition-colors">
+                            Clear Token
+                        </button>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+            
+            <div class="w-full md:w-1/3 md:text-right bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <h4 class="font-medium text-sm text-blue-800 mb-1">Authentication Mode</h4>
+                {% if direct_mode %}
+                <p class="text-sm text-blue-700 mb-2">Currently using: <span class="font-semibold">Direct Bearer Token</span></p>
+                <a href="{{ url_for('import.import_official_playlists', **request.args) }}" class="text-sm text-blue-600 hover:underline">
+                    Switch to OAuth Authentication
+                </a>
+                {% else %}
+                <p class="text-sm text-blue-700 mb-2">Currently using: <span class="font-semibold">OAuth Authentication</span></p>
+                <a href="{{ url_for('import.direct_official_playlists', **request.args) }}" class="text-sm text-blue-600 hover:underline">
+                    Switch to Direct Bearer Token
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Filtering and Account Selection -->
+    <div class="bg-white shadow-md rounded-lg p-6 mb-8">
+        <form method="GET" action="{{ direct_mode and url_for('import.direct_official_playlists') or url_for('import.import_official_playlists') }}" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Keywords</label>
+                    <input type="text" name="filter" id="filter" value="{{ filter_keywords|join(',') }}" 
+                           placeholder="top,hits,pop,rock,etc" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                    <p class="text-xs text-gray-500 mt-1">Comma-separated keywords to search in playlist names</p>
+                </div>
+                
+                <div>
+                    <label for="account" class="block text-sm font-medium text-gray-700 mb-1">Spotify Account</label>
+                    <select name="account" id="account" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                        <option value="all" {% if selected_account == 'all' %}selected{% endif %}>All Accounts</option>
+                        {% for account in spotify_accounts %}
+                        <option value="{{ account }}" {% if selected_account == account %}selected{% endif %}>{{ account }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-between">
+                <div>
+                    <input type="checkbox" name="debug" id="debug" value="true" {% if debug_mode %}checked{% endif %}>
+                    <label for="debug" class="text-sm text-gray-700">Show Debug Info</label>
+                </div>
+                
+                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md shadow-sm transition-colors">
+                    Apply Filters
+                </button>
+            </div>
+            
+            <!-- Hidden field to persist the bearer token across requests -->
+            {% if session_bearer_token %}
+            <input type="hidden" name="bearer_token" value="{{ session_bearer_token }}">
+            {% endif %}
+        </form>
+    </div>
+
+    {% if debug_mode %}
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">Debug Information</h2>
+        
+        <!-- Summary stats -->
+        <div class="overflow-x-auto mb-6">
+            <table class="min-w-full divide-y divide-gray-300">
+                <thead>
+                    <tr>
+                        <th class="px-3 py-2 bg-gray-100 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Metric</th>
+                        <th class="px-3 py-2 bg-gray-100 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Total Playlists Fetched</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">{{ debug_info.total_fetched }}</td>
+                    </tr>
+                    <tr>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Keyword Filtered Out</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">{{ debug_info.filtered_out }}</td>
+                    </tr>
+                    <tr>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Duplicates Removed</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">{{ debug_info.duplicates_removed }}</td>
+                    </tr>
+                    <tr>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Final Count Displayed</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">{{ debug_info.total_filtered }}</td>
+                    </tr>
+                    <tr>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Total Processing Time</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">{{ debug_info.query_time_ms }}ms</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Account stats -->
+        <h3 class="text-lg font-semibold mb-2">Account Statistics</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {% for account, stats in debug_info.accounts.items() %}
+            <div class="bg-white rounded-md border border-gray-200 p-4">
+                <h4 class="font-medium mb-2">{{ account }}</h4>
+                <ul class="list-disc pl-5 text-sm">
+                    <li>Total playlists: {{ stats.total }}</li>
+                    <li>Filtered: {{ stats.filtered }}/{{ stats.fetched }}</li>
+                    <li>Processing time: {{ stats.time_ms }}ms</li>
+                </ul>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- Keyword matches -->
+        {% if debug_info.matched_keywords %}
+        <h3 class="text-lg font-semibold mb-2">Keyword Matches</h3>
+        <div class="bg-white rounded-md border border-gray-200 p-4 mb-6">
+            <ul class="list-disc pl-5 text-sm">
+                {% for keyword, count in debug_info.matched_keywords.items() %}
+                <li><span class="font-medium">"{{ keyword }}"</span>: {{ count }} matches</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Playlist grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for playlist in playlists %}
+        <div class="bg-white shadow-md rounded-lg overflow-hidden border border-gray-200">
+            {% if playlist.images and playlist.images|length > 0 %}
+            <img src="{{ playlist.images[0].url }}" class="w-full h-48 object-cover playlist-detail-trigger cursor-pointer" data-id="{{ playlist.id }}" alt="{{ playlist.name }}">
+            {% else %}
+            <div class="w-full h-48 bg-gray-200 flex items-center justify-center">
+                <span class="text-gray-500">No image</span>
+            </div>
+            {% endif %}
+            <div class="p-6">
+                <div class="flex justify-between items-start">
+                    <h5 class="text-xl font-semibold mb-2 text-navy-800 font-montserrat playlist-detail-trigger cursor-pointer" data-id="{{ playlist.id }}">{{ playlist.name }}</h5>
+                    <span class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{{ playlist.owner.id }}</span>
+                </div>
+                {% if playlist.description %}
+                <p class="text-gray-700 mb-3 text-sm">{{ playlist.description | replace('<a href="', '') | replace('">', ' - ') | replace('</a>', '') }}</p>
+                {% endif %}
+                <p class="text-gray-600 mb-4">Tracks: {{ playlist.tracks.total }}</p>
+                <div class="flex justify-between items-center">
+                    <form action="{{ url_for('import.import_official_playlists')}}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="hidden" name="playlist_id" value="{{ playlist.id }}">
+                        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                            <i class="fas fa-plus-circle mr-1"></i> Import
+                        </button>
+                    </form>
+                    <div>
+                        <a href="https://open.spotify.com/playlist/{{ playlist.id }}" target="_blank" class="text-teal-600 hover:underline text-sm mr-3">
+                            <i class="fab fa-spotify mr-1"></i> View
+                        </a>
+                        <button type="button" class="text-teal-600 hover:text-teal-800 text-sm playlist-detail-trigger" data-id="{{ playlist.id }}">
+                            <i class="fas fa-info-circle mr-1"></i> Details
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="col-span-3 p-8 text-center bg-gray-50 rounded-lg border border-gray-200">
+            <p class="text-gray-600">No playlists found matching your criteria. Try changing your filters.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Playlist Details Modal -->
+<div id="details-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-screen overflow-hidden">
+        <div class="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+            <h3 class="text-xl font-semibold text-navy-800 font-montserrat" id="modal-title">Playlist Details</h3>
+            <button id="close-modal" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+        </div>
+        <div class="overflow-y-auto p-6" style="max-height: calc(100vh - 200px);">
+            <div id="modal-content" class="flex flex-col md:flex-row gap-6">
+                <!-- Content will be loaded here -->
+                <div class="w-full md:w-1/3 flex flex-col items-center">
+                    <div class="w-full max-w-xs aspect-square bg-gray-200 rounded-lg mb-4" id="modal-image-container">
+                        <img id="modal-image" src="" alt="" class="w-full h-full object-cover rounded-lg">
+                    </div>
+                    <div id="modal-metadata" class="w-full text-center mb-4">
+                        <!-- Metadata will be loaded here -->
+                    </div>
+                </div>
+                <div class="w-full md:w-2/3">
+                    <p class="text-gray-600 mb-4" id="modal-description"></p>
+                    <h4 class="font-semibold text-navy-800 mb-2 flex items-center">
+                        <i class="fas fa-music mr-2"></i> Tracks
+                    </h4>
+                    <div id="modal-tracks-container" class="border border-gray-200 rounded-lg overflow-hidden">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Artist</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-tracks" class="bg-white divide-y divide-gray-200">
+                                <!-- Tracks will be loaded here -->
+                                <tr>
+                                    <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                        <div class="flex justify-center items-center">
+                                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+                                            <span class="ml-2">Loading tracks...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-50 px-6 py-4 flex justify-end">
+            <form action="{{ url_for('import.import_official_playlists') }}" method="POST" id="modal-import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="playlist_id" id="modal-item-id" value="">
+                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                    <i class="fas fa-plus-circle mr-1"></i> Import
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const modal = document.getElementById('details-modal');
+        const closeModal = document.getElementById('close-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalDescription = document.getElementById('modal-description');
+        const modalImage = document.getElementById('modal-image');
+        const modalMetadata = document.getElementById('modal-metadata');
+        const modalTracks = document.getElementById('modal-tracks');
+        const modalImportForm = document.getElementById('modal-import-form');
+        const modalItemId = document.getElementById('modal-item-id');
+
+        // Close modal
+        closeModal.addEventListener('click', () => {
+            modal.classList.add('hidden');
+        });
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        // Escape key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        // Format duration from milliseconds to mm:ss
+        function formatDuration(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Playlist detail functionality
+        document.querySelectorAll('.playlist-detail-trigger').forEach(trigger => {
+            trigger.addEventListener('click', (e) => {
+                const playlistId = e.target.getAttribute('data-id') || e.target.closest('.playlist-detail-trigger').getAttribute('data-id');
+                if (!playlistId) return;
+                
+                // Reset modal content
+                modalTitle.textContent = "Loading playlist details...";
+                modalDescription.textContent = "";
+                modalImage.src = "";
+                modalMetadata.innerHTML = "";
+                modalTracks.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                            <div class="flex justify-center items-center">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+                                <span class="ml-2">Loading tracks...</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                
+                // Set up import form
+                modalItemId.value = playlistId;
+                
+                // Show modal
+                modal.classList.remove('hidden');
+                
+                // Fetch playlist details
+                fetch(`/api/spotify/playlist/${playlistId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Update modal with playlist details
+                        modalTitle.textContent = data.name;
+                        
+                        if (data.description) {
+                            // Remove HTML tags from description
+                            const cleanDescription = data.description
+                                .replace(/<a href="[^"]*">/g, '')
+                                .replace(/<\/a>/g, '')
+                                .replace(/&amp;/g, '&');
+                            modalDescription.textContent = cleanDescription;
+                        }
+                        
+                        if (data.image_url) {
+                            modalImage.src = data.image_url;
+                            modalImage.alt = data.name;
+                        }
+                        
+                        // Add metadata
+                        modalMetadata.innerHTML = `
+                            <p class="font-semibold text-navy-800">By ${data.owner}</p>
+                            <p class="text-gray-600">${data.tracks.length} tracks</p>
+                            <p class="text-gray-600">Followers: ${data.followers || 'N/A'}</p>
+                        `;
+                        
+                        // Add tracks
+                        if (data.tracks && data.tracks.length > 0) {
+                            modalTracks.innerHTML = '';
+                            data.tracks.forEach((track, index) => {
+                                const row = document.createElement('tr');
+                                row.className = 'hover:bg-gray-50';
+                                
+                                row.innerHTML = `
+                                    <td class="px-4 py-2 text-sm whitespace-nowrap">${index + 1}</td>
+                                    <td class="px-4 py-2">${track.name}</td>
+                                    <td class="px-4 py-2 text-sm">${track.artist}</td>
+                                    <td class="px-4 py-2 text-sm">${track.duration ? formatDuration(track.duration) : ''}</td>
+                                `;
+                                
+                                modalTracks.appendChild(row);
+                            });
+                        } else {
+                            modalTracks.innerHTML = `
+                                <tr>
+                                    <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                        No tracks available
+                                    </td>
+                                </tr>
+                            `;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching playlist details:', error);
+                        modalTitle.textContent = "Error Loading Details";
+                        modalDescription.textContent = "There was a problem loading the playlist details.";
+                        modalTracks.innerHTML = `
+                            <tr>
+                                <td colspan="4" class="px-4 py-4 text-center text-red-500">
+                                    Failed to load tracks. Please try again later.
+                                </td>
+                            </tr>
+                        `;
+                    });
+            });
+        });
+    });
+</script>
+{% endblock %}

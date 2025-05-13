@@ -1,0 +1,566 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Profile{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <h2 class="text-2xl font-bold mb-6 text-navy-800">Edit Profile</h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="mb-4 p-3 {% if category == 'danger' %}bg-red-100 text-red-700{% elif category == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-700{% endif %} rounded">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <form method="POST" action="{{ url_for('users.edit_profile') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="username">
+                Username
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                   id="username" name="username" type="text" placeholder="Username" value="{{ current_user.username }}">
+        </div>
+        
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="email">
+                Email
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                   id="email" name="email" type="email" placeholder="Email address" value="{{ current_user.email }}">
+        </div>
+        
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="first_name">
+                First Name
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                   id="first_name" name="first_name" type="text" placeholder="First name" value="{{ current_user.first_name or '' }}">
+        </div>
+        
+        <div class="mb-6">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="last_name">
+                Last Name
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                   id="last_name" name="last_name" type="text" placeholder="Last name" value="{{ current_user.last_name or '' }}">
+        </div>
+        
+        <div class="mb-6">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="dropbox_export_path">
+                Dropbox Export Folder
+            </label>
+            <div class="flex space-x-2">
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                       id="dropbox_export_path" name="dropbox_export_path" type="text" placeholder="/QuizzicalBeats"
+                       value="{{ current_user.dropbox_export_path or '/QuizzicalBeats' }}">
+                <button type="button" id="browse-dropbox-btn" 
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded flex items-center"
+                        {% if not current_user.dropbox_token %}disabled{% endif %}>
+                    <i class="fab fa-dropbox mr-1"></i> Browse
+                </button>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Set the Dropbox folder where your exported rounds will be saved.</p>
+            {% if not current_user.dropbox_token %}
+            <p class="text-xs text-red-500 mt-1">
+                <i class="fas fa-exclamation-circle mr-1"></i>
+                <a href="{{ url_for('users.dropbox_auth') }}" class="underline">Connect your Dropbox account</a> to browse folders.
+            </p>
+            {% endif %}
+            <div id="dropbox-error-container" class="hidden mt-3 p-3 bg-red-100 text-sm rounded">
+                <div class="flex justify-between">
+                    <h4 class="font-semibold mb-1">Dropbox API Error</h4>
+                    <button id="close-error-btn" class="text-red-700">&times;</button>
+                </div>
+                <div id="dropbox-error-details"></div>
+                <div class="mt-2">
+                    <button id="dropbox-debug-btn" type="button" class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                        Show Technical Details
+                    </button>
+                    <div id="dropbox-debug-info" class="hidden mt-2 bg-gray-100 p-2 rounded font-mono text-xs overflow-x-auto"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex items-center justify-between">
+            <button class="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                Save Changes
+            </button>
+            <a class="inline-block align-baseline font-bold text-sm text-teal-500 hover:text-teal-800" href="{{ url_for('users.profile') }}">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- Dropbox Folder Browser Modal -->
+<div id="dropbox-folder-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <h3 class="text-lg font-bold text-navy-800">Select Dropbox Folder</h3>
+            <button id="close-dropbox-modal" class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="p-4 border-b border-gray-200 flex items-center bg-gray-50">
+            <div class="flex-1 flex items-center">
+                <button id="parent-folder-btn" class="bg-gray-200 hover:bg-gray-300 rounded p-1 mr-2">
+                    <i class="fas fa-arrow-up"></i>
+                </button>
+                <span id="current-path" class="text-gray-600 font-mono text-sm">/</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button id="create-folder-btn" class="bg-teal-500 hover:bg-teal-600 text-white rounded p-1 px-2 text-sm flex items-center">
+                    <i class="fas fa-folder-plus mr-1"></i> Create Folder
+                </button>
+                <button id="refresh-folders-btn" class="bg-gray-200 hover:bg-gray-300 rounded p-1">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div class="overflow-y-auto flex-1 p-2" style="max-height: 60vh;">
+            <div id="folder-list" class="space-y-1">
+                <div class="text-center p-8">
+                    <div class="animate-spin inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mb-2"></div>
+                    <p>Loading folders...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-2">
+            <button id="select-folder-btn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded">
+                Select This Folder
+            </button>
+            <button id="cancel-selection-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Create Folder Modal -->
+<div id="create-folder-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg w-full max-w-md">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-bold text-navy-800">Create New Folder</h3>
+        </div>
+        
+        <div class="p-6">
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="new-folder-name">
+                    Folder Name
+                </label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                       id="new-folder-name" type="text" placeholder="My New Folder">
+                <p id="folder-name-error" class="hidden mt-1 text-xs text-red-500"></p>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">
+                    Parent Folder
+                </label>
+                <p class="py-2 px-3 bg-gray-100 rounded text-gray-700 font-mono text-sm" id="parent-folder-path"></p>
+            </div>
+            
+            <div class="flex justify-end space-x-2 mt-6">
+                <button id="create-folder-submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded">
+                    Create
+                </button>
+                <button id="create-folder-cancel" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const browseDropboxBtn = document.getElementById('browse-dropbox-btn');
+        const dropboxFolderModal = document.getElementById('dropbox-folder-modal');
+        const closeDropboxModal = document.getElementById('close-dropbox-modal');
+        const cancelSelectionBtn = document.getElementById('cancel-selection-btn');
+        const selectFolderBtn = document.getElementById('select-folder-btn');
+        const folderList = document.getElementById('folder-list');
+        const currentPathDisplay = document.getElementById('current-path');
+        const parentFolderBtn = document.getElementById('parent-folder-btn');
+        const refreshFoldersBtn = document.getElementById('refresh-folders-btn');
+        const dropboxExportPath = document.getElementById('dropbox_export_path');
+        const createFolderBtn = document.getElementById('create-folder-btn');
+        const createFolderModal = document.getElementById('create-folder-modal');
+        const createFolderSubmit = document.getElementById('create-folder-submit');
+        const createFolderCancel = document.getElementById('create-folder-cancel');
+        const newFolderNameInput = document.getElementById('new-folder-name');
+        const folderNameError = document.getElementById('folder-name-error');
+        const parentFolderPathDisplay = document.getElementById('parent-folder-path');
+        
+        // Error display elements
+        const errorContainer = document.getElementById('dropbox-error-container');
+        const errorDetails = document.getElementById('dropbox-error-details');
+        const closeErrorBtn = document.getElementById('close-error-btn');
+        const debugBtn = document.getElementById('dropbox-debug-btn');
+        const debugInfo = document.getElementById('dropbox-debug-info');
+        
+        let currentPath = '';
+        let lastApiResponse = null;
+        
+        // Open the Dropbox folder browser modal
+        browseDropboxBtn.addEventListener('click', function() {
+            dropboxFolderModal.classList.remove('hidden');
+            // Always start at root when opening the browser
+            currentPath = '/';
+            loadFolders(currentPath);
+        });
+        
+        // Close the modal when clicking close button or cancel
+        closeDropboxModal.addEventListener('click', closeModal);
+        cancelSelectionBtn.addEventListener('click', closeModal);
+        
+        // Close modal when clicking outside
+        dropboxFolderModal.addEventListener('click', function(event) {
+            if (event.target === dropboxFolderModal) {
+                closeModal();
+            }
+        });
+        
+        // Close error display
+        closeErrorBtn.addEventListener('click', function() {
+            errorContainer.classList.add('hidden');
+        });
+        
+        // Toggle debug info
+        debugBtn.addEventListener('click', function() {
+            if (debugInfo.classList.contains('hidden')) {
+                debugInfo.classList.remove('hidden');
+                debugBtn.textContent = 'Hide Technical Details';
+            } else {
+                debugInfo.classList.add('hidden');
+                debugBtn.textContent = 'Show Technical Details';
+            }
+        });
+        
+        // Select the current folder
+        selectFolderBtn.addEventListener('click', function() {
+            dropboxExportPath.value = currentPath;
+            closeModal();
+        });
+        
+        // Navigate to parent folder
+        parentFolderBtn.addEventListener('click', function() {
+            if (currentPath === '/' || currentPath === '') {
+                return; // Already at root
+            }
+            
+            // Get parent path
+            const parts = currentPath.split('/').filter(p => p);
+            parts.pop(); // Remove last folder
+            
+            const parentPath = '/' + parts.join('/');
+            loadFolders(parentPath);
+        });
+        
+        // Refresh current folder
+        refreshFoldersBtn.addEventListener('click', function() {
+            loadFolders(currentPath);
+        });
+        
+        // Open the Create Folder modal
+        createFolderBtn.addEventListener('click', function() {
+            createFolderModal.classList.remove('hidden');
+            parentFolderPathDisplay.textContent = currentPath;
+            newFolderNameInput.value = '';
+            folderNameError.classList.add('hidden');
+            
+            // Focus the input field for better UX
+            setTimeout(() => {
+                newFolderNameInput.focus();
+            }, 100);
+        });
+
+        // Close the Create Folder modal when clicking outside
+        createFolderModal.addEventListener('click', function(event) {
+            if (event.target === createFolderModal) {
+                createFolderModal.classList.add('hidden');
+            }
+        });
+
+        // Close the Create Folder modal
+        createFolderCancel.addEventListener('click', function() {
+            createFolderModal.classList.add('hidden');
+        });
+
+        // Handle Enter key in the folder name input
+        newFolderNameInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                createFolderSubmit.click();
+            }
+        });
+
+        // Submit new folder creation
+        createFolderSubmit.addEventListener('click', function() {
+            const folderName = newFolderNameInput.value.trim();
+            if (!folderName) {
+                folderNameError.textContent = 'Folder name cannot be empty.';
+                folderNameError.classList.remove('hidden');
+                return;
+            }
+            
+            // Check for invalid characters
+            if (/[\/\\:*?"<>|]/.test(folderName)) {
+                folderNameError.textContent = 'Folder name contains invalid characters.';
+                folderNameError.classList.remove('hidden');
+                return;
+            }
+            
+            // Show loading state
+            createFolderSubmit.disabled = true;
+            createFolderSubmit.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Creating...';
+            folderNameError.classList.add('hidden');
+            
+            // Call API to create folder
+            fetch('/api/dropbox/create-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRFToken': document.querySelector('input[name="csrf_token"]').value
+                },
+                body: JSON.stringify({
+                    parent_path: currentPath,
+                    folder_name: folderName
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errorData => {
+                        throw {
+                            status: response.status,
+                            statusText: response.statusText,
+                            data: errorData
+                        };
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw {
+                        status: 500,
+                        statusText: 'Server Error',
+                        data: { error: data.error }
+                    };
+                }
+                
+                // Close modal and refresh folder list
+                createFolderModal.classList.add('hidden');
+                
+                // If the folder was created successfully, navigate to it
+                if (data.path) {
+                    loadFolders(data.path);
+                } else {
+                    // Just refresh the current folder
+                    loadFolders(currentPath);
+                }
+                
+                // Show success message
+                const successDiv = document.createElement('div');
+                successDiv.className = 'p-2 mb-3 bg-green-100 text-green-800 rounded text-sm';
+                successDiv.textContent = `Folder "${folderName}" created successfully.`;
+                successDiv.style.opacity = '1';
+                successDiv.style.transition = 'opacity 0.5s ease-in-out';
+                folderList.insertBefore(successDiv, folderList.firstChild);
+                
+                // Fade out success message after 3 seconds
+                setTimeout(() => {
+                    successDiv.style.opacity = '0';
+                    setTimeout(() => {
+                        if (successDiv.parentNode) {
+                            successDiv.parentNode.removeChild(successDiv);
+                        }
+                    }, 500);
+                }, 3000);
+            })
+            .catch(error => {
+                console.error('Error creating folder:', error);
+                
+                // Show error message in the modal
+                folderNameError.textContent = error.data?.error || 
+                                             (error.status === 409 ? 'A folder with this name already exists.' : 
+                                             error.statusText || 'Error creating folder');
+                folderNameError.classList.remove('hidden');
+                
+                // Also show detailed error in the main error display if it's a server error
+                if (error.status >= 500) {
+                    showError(error);
+                }
+            })
+            .finally(() => {
+                // Reset button state
+                createFolderSubmit.disabled = false;
+                createFolderSubmit.innerHTML = 'Create';
+            });
+        });
+
+        // Function to load folders from Dropbox
+        function loadFolders(path) {
+            // Hide any previous errors
+            errorContainer.classList.add('hidden');
+            
+            // Update UI
+            currentPath = path;
+            currentPathDisplay.textContent = path || '/';
+            
+            // Show loading indicator
+            folderList.innerHTML = `
+                <div class="text-center p-8">
+                    <div class="animate-spin inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mb-2"></div>
+                    <p>Loading folders...</p>
+                </div>
+            `;
+            
+            // Make API request to get folders
+            fetch('/api/dropbox/folders?path=' + encodeURIComponent(path))
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(errorData => {
+                            throw {
+                                status: response.status,
+                                statusText: response.statusText,
+                                data: errorData
+                            };
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Save the response for debugging
+                    lastApiResponse = data;
+                    
+                    if (data.error) {
+                        throw {
+                            status: 500,
+                            statusText: 'Server Error',
+                            data: data
+                        };
+                    }
+                    
+                    // Check if there's a warning message (returned when a path doesn't exist)
+                    if (data.warning) {
+                        // Display warning message
+                        const warningDiv = document.createElement('div');
+                        warningDiv.className = 'p-2 mb-3 bg-yellow-100 text-yellow-800 rounded text-sm';
+                        warningDiv.textContent = data.warning;
+                        folderList.innerHTML = '';
+                        folderList.appendChild(warningDiv);
+                        
+                        // Update the current path
+                        currentPath = data.path;
+                        currentPathDisplay.textContent = data.path;
+                    } else {
+                        // Clear folder list
+                        folderList.innerHTML = '';
+                    }
+                    
+                    if (data.folders.length === 0) {
+                        const emptyDiv = document.createElement('div');
+                        emptyDiv.className = 'text-center p-8 text-gray-500';
+                        emptyDiv.innerHTML = `
+                            <i class="fas fa-folder-open text-4xl mb-2"></i>
+                            <p>No folders found in this location</p>
+                        `;
+                        folderList.appendChild(emptyDiv);
+                        return;
+                    }
+                    
+                    // Sort folders alphabetically
+                    data.folders.sort((a, b) => a.name.localeCompare(b.name));
+                    
+                    // Add each folder to the list
+                    data.folders.forEach(folder => {
+                        const folderItem = document.createElement('div');
+                        folderItem.className = 'p-2 hover:bg-gray-100 rounded cursor-pointer flex items-center';
+                        folderItem.innerHTML = `
+                            <i class="fas fa-folder text-blue-500 mr-2"></i>
+                            <span>${folder.name}</span>
+                        `;
+                        
+                        folderItem.addEventListener('click', function() {
+                            loadFolders(folder.path_display);
+                        });
+                        
+                        folderList.appendChild(folderItem);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading folders:', error);
+                    
+                    // Display error in the folder list
+                    folderList.innerHTML = `
+                        <div class="text-center p-8 text-red-500">
+                            <i class="fas fa-exclamation-circle text-4xl mb-2"></i>
+                            <p>${error.data?.error || error.statusText || 'Error loading folders'}</p>
+                            <p class="text-sm mt-2">Make sure your Dropbox account is connected</p>
+                        </div>
+                    `;
+                    
+                    // Also show detailed error in the profile page
+                    showError(error);
+                });
+        }
+        
+        function showError(error) {
+            // Format and display the error information
+            errorContainer.classList.remove('hidden');
+            
+            let errorMessage = '';
+            if (error.status) {
+                errorMessage += `HTTP ${error.status}: `;
+            }
+            
+            if (error.data && error.data.error) {
+                errorMessage += error.data.error;
+            } else if (error.statusText) {
+                errorMessage += error.statusText;
+            } else {
+                errorMessage += 'Unknown error occurred';
+            }
+            
+            errorDetails.textContent = errorMessage;
+            
+            // Show technical details
+            let debugText = '';
+            if (error.data) {
+                if (error.data.details) {
+                    debugText += "Error Details:\n" + JSON.stringify(error.data.details, null, 2) + "\n\n";
+                }
+                if (error.data.traceback) {
+                    debugText += "Traceback:\n" + error.data.traceback + "\n\n";
+                }
+                if (error.data.raw_response) {
+                    debugText += "Raw Response:\n" + error.data.raw_response + "\n\n";
+                }
+            }
+            
+            if (!debugText) {
+                debugText = JSON.stringify(error, null, 2);
+            }
+            
+            debugInfo.textContent = debugText;
+        }
+        
+        function closeModal() {
+            dropboxFolderModal.classList.add('hidden');
+        }
+    });
+</script>
+{% endblock %}

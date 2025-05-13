@@ -1,0 +1,516 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ service_name }} Search Results: {{ search_term }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <h2 class="text-3xl font-bold mb-4 text-navy-800 font-montserrat">Search Results for "{{ search_term }}"</h2>
+    <p><a href="{{ search_url }}" class="inline-flex items-center bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 px-4 rounded transition-colors mb-4">
+        <i class="fas fa-arrow-left mr-2"></i> Back to Search
+    </a></p>
+
+    <div class="mb-6">
+        <form method="POST" action="{{ url_for(request.endpoint) }}" class="flex flex-col sm:flex-row gap-2 mb-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="text" class="flex-grow py-2 px-4 rounded-lg border border-gray-300 focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Search for tracks, albums, or playlists" name="search_term" value="{{ search_term }}">
+            <button class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-6 rounded-lg transition-colors" type="submit">Search</button>
+        </form>
+    </div>
+    
+    <!-- Tabs -->
+    <div class="mb-6">
+        <div class="border-b border-gray-200">
+            <nav class="flex flex-wrap -mb-px" aria-label="Tabs">
+                <button class="tab-btn inline-block p-4 text-teal-500 border-teal-500 border-b-2 rounded-t-lg active" id="tracks-tab" data-tab="tracks" type="button" role="tab">
+                    {{ tracks_label }} ({{ tracks|length }})
+                </button>
+                <button class="tab-btn inline-block p-4 text-gray-600 hover:text-gray-800 hover:border-gray-300 border-b-2 border-transparent rounded-t-lg" id="albums-tab" data-tab="albums" type="button" role="tab">
+                    Albums ({{ albums|length }})
+                </button>
+                <button class="tab-btn inline-block p-4 text-gray-600 hover:text-gray-800 hover:border-gray-300 border-b-2 border-transparent rounded-t-lg" id="playlists-tab" data-tab="playlists" type="button" role="tab">
+                    Playlists ({{ playlists|length }})
+                </button>
+            </nav>
+        </div>
+    </div>
+
+    <div class="tab-content">
+        <!-- Tracks Section -->
+        <div id="tracks" class="tab-pane block">
+            <div class="bg-white shadow-md rounded-lg mb-5">
+                <div class="p-6">
+                    {% if tracks %}
+                        <div class="overflow-x-auto">
+                            <table class="w-full table-auto">
+                                <thead class="bg-gray-100 text-gray-700">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left">Title</th>
+                                        <th class="px-4 py-3 text-left">Artist</th>
+                                        {% if has_preview %}
+                                        <th class="px-4 py-3 text-left">Preview</th>
+                                        {% else %}
+                                        <th class="px-4 py-3 text-left">Album</th>
+                                        {% endif %}
+                                        <th class="px-4 py-3 text-left">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200">
+                                    {% for track in tracks %}
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-4 py-3 flex items-center">
+                                            {% if track.image_url %}
+                                            <img src="{{ track.image_url }}" alt="Album cover" class="w-12 h-12 rounded mr-2">
+                                            {% endif %}
+                                            {{ track.name }}
+                                        </td>
+                                        <td class="px-4 py-3">{{ track.artist }}</td>
+                                        {% if has_preview %}
+                                        <td class="px-4 py-3">
+                                            {% if track.preview_url %}
+                                            <audio controls class="w-full max-w-[200px]">
+                                                <source src="{{ track.preview_url }}" type="audio/mpeg">
+                                                Your browser does not support the audio element.</audio>
+                                            {% else %}
+                                            <span class="text-gray-500">No preview available</span>
+                                            {% endif %}
+                                        </td>
+                                        {% else %}
+                                        <td class="px-4 py-3">{{ track.album }}</td>
+                                        {% endif %}
+                                        <td class="px-4 py-3">
+                                            <form action="{{ track_import_url }}" method="POST" class="inline">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                <input type="hidden" name="{{ track_id_field }}" value="{{ track.id }}">
+                                                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-1.5 px-3 rounded text-sm transition-colors">
+                                                    <i class="fas fa-plus-circle mr-1"></i> Import
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative" role="alert">No tracks found matching your search.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Albums Section -->
+        <div id="albums" class="tab-pane hidden">
+            <div class="bg-white shadow-md rounded-lg mb-5">
+                <div class="p-6">
+                    {% if albums %}
+                        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            {% for album in albums %}
+                            <div class="bg-white rounded-lg overflow-hidden shadow-md">
+                                {% if album.image_url %}
+                                <img src="{{ album.image_url }}" class="w-full h-48 object-cover album-detail-trigger cursor-pointer" data-id="{{ album.id }}" alt="{{ album.name }} cover">
+                                {% endif %}
+                                <div class="p-4">
+                                    <h5 class="text-lg font-semibold text-navy-800 album-detail-trigger cursor-pointer" data-id="{{ album.id }}">{{ album.name }}</h5>
+                                    <p class="text-gray-700">{{ album.artist }}</p>
+                                    {% if album.track_count %}
+                                    <p class="text-gray-600 text-sm">{{ album.track_count }} tracks</p>
+                                    {% endif %}
+                                </div>
+                                <div class="bg-gray-100 px-4 py-2 flex justify-between items-center">
+                                    <button type="button" class="text-teal-600 hover:text-teal-800 text-sm album-detail-trigger" data-id="{{ album.id }}">
+                                        <i class="fas fa-info-circle mr-1"></i> Details
+                                    </button>
+                                    <form action="{{ album_import_url }}" method="POST">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <input type="hidden" name="{{ album_id_field }}" value="{{ album.id }}">
+                                        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-1.5 px-3 rounded text-sm transition-colors">
+                                            <i class="fas fa-plus-circle mr-1"></i> Import
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative" role="alert">No albums found matching your search.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Playlists Section -->
+        <div id="playlists" class="tab-pane hidden">
+            <div class="bg-white shadow-md rounded-lg mb-5">
+                <div class="p-6">
+                    {% if playlists %}
+                        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            {% for playlist in playlists %}
+                            <div class="bg-white rounded-lg overflow-hidden shadow-md">
+                                {% if playlist.image_url %}
+                                <img src="{{ playlist.image_url }}" class="w-full h-48 object-cover playlist-detail-trigger cursor-pointer" data-id="{{ playlist.id }}" alt="{{ playlist.name }} cover">
+                                {% endif %}
+                                <div class="p-4">
+                                    <h5 class="text-lg font-semibold text-navy-800 playlist-detail-trigger cursor-pointer" data-id="{{ playlist.id }}">{{ playlist.name }}</h5>
+                                    <p class="text-gray-700">By {{ playlist.owner }}</p>
+                                    {% if playlist.track_count %}
+                                    <p class="text-gray-600 text-sm">{{ playlist.track_count }} tracks</p>
+                                    {% endif %}
+                                </div>
+                                <div class="bg-gray-100 px-4 py-2 flex justify-between items-center">
+                                    <button type="button" class="text-teal-600 hover:text-teal-800 text-sm playlist-detail-trigger" data-id="{{ playlist.id }}">
+                                        <i class="fas fa-info-circle mr-1"></i> Details
+                                    </button>
+                                    <form action="{{ playlist_import_url }}" method="POST">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <input type="hidden" name="{{ playlist_id_field }}" value="{{ playlist.id }}">
+                                        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-1.5 px-3 rounded text-sm transition-colors">
+                                            <i class="fas fa-plus-circle mr-1"></i> Import
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative" role="alert">No playlists found matching your search.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Album/Playlist Details Modal -->
+<div id="details-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-screen overflow-hidden">
+        <div class="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+            <h3 class="text-xl font-semibold text-navy-800 font-montserrat" id="modal-title">Details</h3>
+            <button id="close-modal" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+        </div>
+        <div class="overflow-y-auto p-6" style="max-height: calc(100vh - 200px);">
+            <div id="modal-content" class="flex flex-col md:flex-row gap-6">
+                <!-- Content will be loaded here -->
+                <div class="w-full md:w-1/3 flex flex-col items-center">
+                    <div class="w-full max-w-xs aspect-square bg-gray-200 rounded-lg mb-4" id="modal-image-container">
+                        <img id="modal-image" src="" alt="" class="w-full h-full object-cover rounded-lg">
+                    </div>
+                    <div id="modal-metadata" class="w-full text-center mb-4">
+                        <!-- Metadata will be loaded here -->
+                    </div>
+                </div>
+                <div class="w-full md:w-2/3">
+                    <p class="text-gray-600 mb-4" id="modal-description"></p>
+                    <h4 class="font-semibold text-navy-800 mb-2 flex items-center">
+                        <i class="fas fa-music mr-2"></i> Tracks
+                    </h4>
+                    <div id="modal-tracks-container" class="border border-gray-200 rounded-lg overflow-hidden">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Artist</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-tracks" class="bg-white divide-y divide-gray-200">
+                                <!-- Tracks will be loaded here -->
+                                <tr>
+                                    <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                        <div class="flex justify-center items-center">
+                                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+                                            <span class="ml-2">Loading tracks...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-50 px-6 py-4 flex justify-end">
+            <form action="" method="POST" id="modal-import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="item_id" id="modal-item-id" value="">
+                <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                    <i class="fas fa-plus-circle mr-1"></i> Import
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+        const modal = document.getElementById('details-modal');
+        const closeModal = document.getElementById('close-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalDescription = document.getElementById('modal-description');
+        const modalImage = document.getElementById('modal-image');
+        const modalMetadata = document.getElementById('modal-metadata');
+        const modalTracks = document.getElementById('modal-tracks');
+        const modalImportForm = document.getElementById('modal-import-form');
+        const modalItemId = document.getElementById('modal-item-id');
+        
+        // Tab functionality
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabId = button.getAttribute('data-tab');
+                
+                // Hide all tab panes
+                tabPanes.forEach(pane => {
+                    pane.classList.add('hidden');
+                    pane.classList.remove('block');
+                });
+                
+                // Show the selected tab pane
+                document.getElementById(tabId).classList.remove('hidden');
+                document.getElementById(tabId).classList.add('block');
+                
+                // Update active state for tab buttons
+                tabButtons.forEach(btn => {
+                    // Remove all active classes
+                    btn.classList.remove('text-teal-500', 'border-teal-500');
+                    btn.classList.add('text-gray-600', 'border-transparent');
+                });
+                
+                // Add active classes to clicked button
+                button.classList.remove('text-gray-600', 'border-transparent');
+                button.classList.add('text-teal-500', 'border-teal-500');
+            });
+        });
+
+        // Close modal
+        closeModal.addEventListener('click', () => {
+            modal.classList.add('hidden');
+        });
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        // Escape key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        // Format duration from milliseconds to mm:ss
+        function formatDuration(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Album detail functionality
+        document.querySelectorAll('.album-detail-trigger').forEach(trigger => {
+            trigger.addEventListener('click', (e) => {
+                const albumId = e.target.getAttribute('data-id');
+                
+                // Reset modal content
+                modalTitle.textContent = "Loading album details...";
+                modalDescription.textContent = "";
+                modalImage.src = "";
+                modalMetadata.innerHTML = "";
+                modalTracks.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                            <div class="flex justify-center items-center">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+                                <span class="ml-2">Loading tracks...</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                
+                // Set up import form
+                modalImportForm.action = "{{ album_import_url }}";
+                modalItemId.name = "{{ album_id_field }}";
+                modalItemId.value = albumId;
+                
+                // Show modal
+                modal.classList.remove('hidden');
+                
+                // Fetch album details
+                fetch(`/api/{{ service_name|lower }}/album/${albumId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Update modal with album details
+                        modalTitle.textContent = data.name;
+                        
+                        if (data.description) {
+                            modalDescription.textContent = data.description;
+                        } else {
+                            modalDescription.textContent = `Album by ${data.artist}`;
+                        }
+                        
+                        if (data.image_url) {
+                            modalImage.src = data.image_url;
+                            modalImage.alt = data.name;
+                        }
+                        
+                        // Add metadata
+                        modalMetadata.innerHTML = `
+                            <p class="font-semibold text-navy-800">${data.artist}</p>
+                            <p class="text-gray-600">${data.release_date || 'Release date unknown'}</p>
+                            <p class="text-gray-600">${data.tracks.length} tracks</p>
+                        `;
+                        
+                        // Add tracks
+                        if (data.tracks && data.tracks.length > 0) {
+                            modalTracks.innerHTML = '';
+                            data.tracks.forEach((track, index) => {
+                                const row = document.createElement('tr');
+                                row.className = 'hover:bg-gray-50';
+                                
+                                row.innerHTML = `
+                                    <td class="px-4 py-2 text-sm whitespace-nowrap">${index + 1}</td>
+                                    <td class="px-4 py-2">${track.name}</td>
+                                    <td class="px-4 py-2 text-sm">${track.artist}</td>
+                                    <td class="px-4 py-2 text-sm">${track.duration ? formatDuration(track.duration) : ''}</td>
+                                `;
+                                
+                                modalTracks.appendChild(row);
+                            });
+                        } else {
+                            modalTracks.innerHTML = `
+                                <tr>
+                                    <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                        No tracks available
+                                    </td>
+                                </tr>
+                            `;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching album details:', error);
+                        modalTitle.textContent = "Error Loading Details";
+                        modalDescription.textContent = "There was a problem loading the album details.";
+                        modalTracks.innerHTML = `
+                            <tr>
+                                <td colspan="4" class="px-4 py-4 text-center text-red-500">
+                                    Failed to load tracks. Please try again later.
+                                </td>
+                            </tr>
+                        `;
+                    });
+            });
+        });
+
+        // Playlist detail functionality
+        document.querySelectorAll('.playlist-detail-trigger').forEach(trigger => {
+            trigger.addEventListener('click', (e) => {
+                const playlistId = e.target.getAttribute('data-id');
+                
+                // Reset modal content
+                modalTitle.textContent = "Loading playlist details...";
+                modalDescription.textContent = "";
+                modalImage.src = "";
+                modalMetadata.innerHTML = "";
+                modalTracks.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                            <div class="flex justify-center items-center">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+                                <span class="ml-2">Loading tracks...</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                
+                // Set up import form
+                modalImportForm.action = "{{ playlist_import_url }}";
+                modalItemId.name = "{{ playlist_id_field }}";
+                modalItemId.value = playlistId;
+                
+                // Show modal
+                modal.classList.remove('hidden');
+                
+                // Fetch playlist details
+                fetch(`/api/{{ service_name|lower }}/playlist/${playlistId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Update modal with playlist details
+                        modalTitle.textContent = data.name;
+                        
+                        if (data.description) {
+                            modalDescription.textContent = data.description;
+                        }
+                        
+                        if (data.image_url) {
+                            modalImage.src = data.image_url;
+                            modalImage.alt = data.name;
+                        }
+                        
+                        // Add metadata
+                        modalMetadata.innerHTML = `
+                            <p class="font-semibold text-navy-800">By ${data.owner}</p>
+                            <p class="text-gray-600">${data.tracks.length} tracks</p>
+                            <p class="text-gray-600">Followers: ${data.followers || 'N/A'}</p>
+                        `;
+                        
+                        // Add tracks
+                        if (data.tracks && data.tracks.length > 0) {
+                            modalTracks.innerHTML = '';
+                            data.tracks.forEach((track, index) => {
+                                const row = document.createElement('tr');
+                                row.className = 'hover:bg-gray-50';
+                                
+                                row.innerHTML = `
+                                    <td class="px-4 py-2 text-sm whitespace-nowrap">${index + 1}</td>
+                                    <td class="px-4 py-2">${track.name}</td>
+                                    <td class="px-4 py-2 text-sm">${track.artist}</td>
+                                    <td class="px-4 py-2 text-sm">${track.duration ? formatDuration(track.duration) : ''}</td>
+                                `;
+                                
+                                modalTracks.appendChild(row);
+                            });
+                        } else {
+                            modalTracks.innerHTML = `
+                                <tr>
+                                    <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                        No tracks available
+                                    </td>
+                                </tr>
+                            `;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching playlist details:', error);
+                        modalTitle.textContent = "Error Loading Details";
+                        modalDescription.textContent = "There was a problem loading the playlist details.";
+                        modalTracks.innerHTML = `
+                            <tr>
+                                <td colspan="4" class="px-4 py-4 text-center text-red-500">
+                                    Failed to load tracks. Please try again later.
+                                </td>
+                            </tr>
+                        `;
+                    });
+            });
+        });
+    });
+</script>
+{% endblock %}
