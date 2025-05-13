@@ -25,8 +25,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          selection:
-            docstring_style: google
+          docstring_style: google
 
 markdown_extensions:
   - admonition
@@ -35,8 +34,8 @@ markdown_extensions:
   - pymdownx.tabbed
   - pymdownx.details
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
-      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - toc:
       permalink: true
 
