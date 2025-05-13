@@ -23,9 +23,11 @@ theme:
 plugins:
   - search
   - mkdocstrings:
+      default_handler: python
       handlers:
         python:
-          docstring_style: google
+          options:
+            docstring_style: google
 
 markdown_extensions:
   - admonition

@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # The .dockerignore file ensures we only include what's specified
 COPY musicround/ ./musicround/
 COPY migrations/ ./migrations/
-COPY run_migration.py run.py docker-entrypoint.sh LICENSE favicon.ico ./
+COPY run_migration.py run.py docker-entrypoint.sh LICENSE favicon.ico .
 
 # Make the entrypoint script executable
 RUN chmod +x docker-entrypoint.sh
@@ -31,4 +31,4 @@ ENV PYTHONPATH=/app
 ENV FLASK_APP=run.py
 
 # Use the entrypoint script
-ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["./docker-entrypoint.sh"]
