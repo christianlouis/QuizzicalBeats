@@ -7,6 +7,7 @@ import json
 import logging
 import secrets
 import string
+import traceback
 from flask import current_app, flash, session
 from flask_login import current_user
 from authlib.integrations.base_client.errors import MissingTokenError # Corrected import path
@@ -213,13 +214,50 @@ class ImportHelper:
                     'error_count': 1,
                     'errors': ["Spotify client not configured or passed correctly."]
                 }
-
             if item_type.lower() == 'track':
                 return ImportHelper.import_spotify_track(spotify_client, item_id)
             elif item_type.lower() == 'album':
-                return ImportHelper.import_spotify_album(spotify_client, item_id)
+                try:
+                    imported_songs = ImportHelper.import_spotify_album(spotify_client, item_id)
+                    if not imported_songs or len(imported_songs) == 0:
+                        current_app.logger.warning(f"Spotify album import returned empty result for album ID: {item_id}")
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"No songs found in Spotify album {item_id} or album import failed."]
+                        }
+                    return imported_songs
+                except Exception as e:
+                    current_app.logger.error(f"Exception occurred while importing Spotify album {item_id}: {str(e)}")
+                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [f"Failed to import Spotify album {item_id}: {str(e)}"]
+                    }
             elif item_type.lower() == 'playlist':
-                return ImportHelper.import_spotify_playlist(spotify_client, item_id)
+                try:
+                    imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id)
+                    if not imported_songs or len(imported_songs) == 0:
+                        current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"No songs found in Spotify playlist {item_id} or playlist import failed."]
+                        }
+                    return imported_songs
+                except Exception as e:
+                    current_app.logger.error(f"Exception occurred while importing Spotify playlist {item_id}: {str(e)}")
+                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [f"Failed to import Spotify playlist {item_id}: {str(e)}"]
+                    }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Spotify import.")
                 return {
@@ -241,30 +279,70 @@ class ImportHelper:
                     'errors': ["Deezer client not configured."]
                 }
 
-            lastfm_api_key = current_app.config.get('LASTFM_API_KEY')
-
-            if item_type.lower() == 'track':
-                song = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
+            lastfm_api_key = current_app.config.get('LASTFM_API_KEY')            if item_type.lower() == 'track':
+                song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
                 if song:
-                    return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                    if was_new:
+                        return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                    else:
+                        return {'imported_count': 0, 'skipped_count': 1, 'error_count': 0, 'errors': []}
                 else:
                     return {'imported_count': 0, 'skipped_count': 0, 'error_count': 1, 'errors': [f"Failed to import Deezer track {item_id}."]}
             elif item_type.lower() == 'album':
-                imported_songs = deezer_client.import_album(item_id, lastfm_api_key=lastfm_api_key)
-                return {
-                    'imported_count': len(imported_songs),
-                    'skipped_count': 0,
-                    'error_count': 0,
-                    'errors': []
-                }
+                try:
+                    result = deezer_client.import_album(item_id, lastfm_api_key=lastfm_api_key)
+                    imported_count = result.get('imported_count', 0)
+                    skipped_count = result.get('skipped_count', 0)
+                    
+                    if imported_count == 0 and skipped_count == 0:
+                        current_app.logger.warning(f"Deezer album import returned empty result for album ID: {item_id}")
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"No songs found in Deezer album {item_id} or album import failed."]
+                        }
+                    return {
+                        'imported_count': imported_count,
+                        'skipped_count': skipped_count,
+                        'error_count': 0,
+                        'errors': []
+                    }
+                except Exception as e:
+                    current_app.logger.error(f"Exception occurred while importing Deezer album {item_id}: {str(e)}")
+                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [f"Failed to import Deezer album {item_id}: {str(e)}"]
+                    }
             elif item_type.lower() == 'playlist':
-                imported_songs = deezer_client.import_playlist(item_id, lastfm_api_key=lastfm_api_key)
-                return {
-                    'imported_count': len(imported_songs),
-                    'skipped_count': 0,
-                    'error_count': 0,
-                    'errors': []
-                }
+                try:
+                    imported_songs = deezer_client.import_playlist(item_id, lastfm_api_key=lastfm_api_key)
+                    if not imported_songs or len(imported_songs) == 0:
+                        current_app.logger.warning(f"Deezer playlist import returned empty result for playlist ID: {item_id}")
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"No songs found in Deezer playlist {item_id} or playlist import failed."]
+                        }
+                    return {
+                        'imported_count': len(imported_songs),
+                        'skipped_count': 0,
+                        'error_count': 0,
+                        'errors': []
+                    }
+                except Exception as e:
+                    current_app.logger.error(f"Exception occurred while importing Deezer playlist {item_id}: {str(e)}")
+                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [f"Failed to import Deezer playlist {item_id}: {str(e)}"]
+                    }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Deezer import.")
                 return {

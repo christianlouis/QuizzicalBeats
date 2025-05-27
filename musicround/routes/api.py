@@ -483,29 +483,53 @@ def get_spotify_playlist(playlist_id):
         headers = {
             'Authorization': f'Bearer {access_token}'
         }
-        
-        # Get playlist details
+          # Get playlist details
         playlist_url = f'https://api.spotify.com/v1/playlists/{playlist_id}'
         playlist_response = requests.get(playlist_url, headers=headers)
         playlist_response.raise_for_status()
         playlist = playlist_response.json()
         
-        # Format tracks
+        # Format tracks with pagination support
         tracks = []
-        # Spotify API for playlist items might be paginated, this example fetches first page
-        # A more robust solution would handle pagination if necessary
-        for item in playlist['tracks']['items']:
-            if not item['track']:  # Handle cases where track might be None (e.g., local files in playlist)
-                continue
+        tracks_url = playlist['tracks']['href']  # Get the tracks URL for pagination
+        offset = 0
+        limit = 100  # Maximum limit for tracks per request
+        total_tracks = playlist['tracks']['total']
+        
+        current_app.logger.info(f"Fetching {total_tracks} tracks from playlist {playlist_id}")
+        
+        # Fetch all tracks with pagination
+        while True:
+            # Construct URL with pagination parameters
+            paginated_url = f"{tracks_url}?offset={offset}&limit={limit}"
+            current_app.logger.info(f"Fetching tracks from offset {offset}, limit {limit}")
+            
+            tracks_response = requests.get(paginated_url, headers=headers)
+            tracks_response.raise_for_status()
+            tracks_data = tracks_response.json()
+            
+            # Process tracks from this page
+            items = tracks_data.get('items', [])
+            for item in items:
+                if not item['track']:  # Handle cases where track might be None (e.g., local files in playlist)
+                    continue
+                    
+                track = item['track']
+                artist_names = [artist['name'] for artist in track['artists']]
+                tracks.append({
+                    'name': track['name'],
+                    'artist': ', '.join(artist_names),
+                    'duration': track['duration_ms'],
+                    'album': track['album']['name'] if track.get('album') else ''
+                })
+            
+            current_app.logger.info(f"Processed {len(items)} tracks, total so far: {len(tracks)}")
+              # Check if we have more pages to fetch
+            if not tracks_data.get('next') or len(items) < limit:
+                current_app.logger.info(f"Finished fetching all tracks. Total tracks: {len(tracks)}")
+                break
                 
-            track = item['track']
-            artist_names = [artist['name'] for artist in track['artists']]
-            tracks.append({
-                'name': track['name'],
-                'artist': ', '.join(artist_names),
-                'duration': track['duration_ms'],
-                'album': track['album']['name'] if track.get('album') else ''
-            })
+            offset += limit
         
         # Format playlist response
         playlist_data = {

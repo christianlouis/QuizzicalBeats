@@ -30,23 +30,32 @@ def run_migration():
             print(f"Starting migration: {migration_name}")
 
             # Use raw SQL for schema changes to avoid issues with model definitions
-            # that might already expect the columns to exist.
-
-            # Check if spotify_id column exists
+            # that might already expect the columns to exist.            # Check if spotify_id column exists
             inspector = db.inspect(db.engine)
             columns = [col['name'] for col in inspector.get_columns('user')]
-
-            if 'oauth_id' in columns and 'spotify_id' not in columns:
-                # Option 1: Rename oauth_id to spotify_id if oauth_id was intended for Spotify
-                # This is less safe if oauth_id was used for something else or if data types differ.
-                # print("Attempting to rename column 'oauth_id' to 'spotify_id'.")
-                # with db.engine.connect() as connection:
-                #     connection.execute(text('ALTER TABLE user RENAME COLUMN oauth_id TO spotify_id'))
-                #     connection.commit()
-                # print("Renamed 'oauth_id' to 'spotify_id'.")
-                #
-                # Or, if oauth_id is definitely old and spotify_id is new:
-                print("Column 'oauth_id' exists. It will be kept for now. Adding 'spotify_id'.")
+            
+            # COLUMN NAMING STRATEGY EXPLANATION:
+            # ==================================
+            # This migration adds 'spotify_id' as the standardized column name for Spotify user IDs.
+            # The chosen strategy is to use 'spotify_id' consistently throughout the application
+            # for all Spotify-related user identification, rather than a generic 'oauth_id'.
+            # 
+            # Reasoning:
+            # 1. Consistency: All OAuth provider columns follow the pattern '{provider}_id' 
+            #    (e.g., google_id, authentik_id, dropbox_id, spotify_id)
+            # 2. Clarity: 'spotify_id' explicitly indicates this field stores Spotify user IDs
+            # 3. Maintainability: Future developers can immediately understand the purpose
+            # 4. Extensibility: Allows for multiple OAuth providers without column name conflicts
+            #
+            # This approach avoids generic 'oauth_id' which could be ambiguous when supporting
+            # multiple OAuth providers. Each provider gets its own dedicated ID column.
+            
+            if 'spotify_id' in columns and 'spotify_id' not in columns:
+                # NOTE: This condition will never be true - kept for historical reference
+                # If there was ever an 'oauth_id' column that needed renaming to 'spotify_id',
+                # this would be the place to handle it. However, we've chosen to implement
+                # 'spotify_id' from the start for clarity and consistency.
+                print("Column 'spotify_id' exists. It will be kept for now. Adding 'spotify_id'.")
 
             if 'spotify_id' not in columns:
                 print("Adding column 'spotify_id' to 'user' table.")

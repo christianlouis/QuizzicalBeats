@@ -145,23 +145,22 @@ class DeezerClient:
         except Exception as e:
             self.logger.error(f"Last.fm API error: {e}")
             return ""
-    
-    def import_track(self, track_id, lastfm_api_key=None):
+      def import_track(self, track_id, lastfm_api_key=None):
         """
         Import a track from Deezer into the database
-        Returns the Song object if successful, None otherwise
+        Returns a tuple (Song object, was_new) where was_new indicates if this was a new import
         """
         track_info = self.get_track(track_id)
         
         if not track_info:
             self.logger.error(f"Could not fetch track with ID {track_id}")
-            return None
+            return None, False
             
         # Check if the track has a preview URL (required for our application)
         preview_url = track_info.get('preview')
         if not preview_url:
             self.logger.warning(f"Track {track_info.get('title')} has no preview URL")
-            return None
+            return None, False
 
         # Extract ISRC
         isrc = track_info.get('isrc')
@@ -172,7 +171,7 @@ class DeezerClient:
             existing_song = Song.query.filter_by(isrc=isrc).first()
         if not existing_song:
             existing_song = Song.query.filter_by(deezer_id=str(track_info['id'])).first()
-
+        
         if existing_song:
             self.logger.info(f"Track {track_info.get('title')} (Deezer ID: {track_info['id']}, ISRC: {isrc}) already exists in database with ID {existing_song.id}")
             # If ISRC was missing and we found it now, update the existing record
@@ -211,7 +210,7 @@ class DeezerClient:
                 except Exception as e:
                     db.session.rollback()
                     self.logger.error(f"Error refreshing metadata for existing song {existing_song.id}: {e}")
-            return existing_song
+            return existing_song, False  # Return existing song with was_new=False
             
         # Get additional artist details if needed
         artist_name = track_info.get('artist', {}).get('name', '')
@@ -268,56 +267,71 @@ class DeezerClient:
                         if aggregated_metadata.get('cover_url'):
                              new_song.cover_url = aggregated_metadata.get('cover_url')
                         if aggregated_metadata.get('preview_url'):
-                             new_song.preview_url = aggregated_metadata.get('preview_url')
-                        # Potentially update popularity if a more universal score is available
+                             new_song.preview_url = aggregated_metadata.get('preview_url')                        # Potentially update popularity if a more universal score is available
                         # new_song.popularity = aggregated_metadata.get('popularity', new_song.popularity)
                         db.session.commit()
                         self.logger.info(f"Updated new song {new_song.id} with aggregated metadata using ISRC {new_song.isrc}")
                 except Exception as e:
                     db.session.rollback()
                     self.logger.error(f"Error updating new song {new_song.id} with aggregated metadata: {e}")
-            return new_song
+            return new_song, True  # Return new song with was_new=True
         except Exception as e:
             db.session.rollback()
             self.logger.error(f"Error saving track to database: {e}")
-            return None
-    
-    def import_album(self, album_id, lastfm_api_key=None):
+            return None, False
+      def import_album(self, album_id, lastfm_api_key=None):
         """
         Import all tracks from an album
-        Returns a list of successfully imported Song objects
+        Returns a dictionary with import statistics
         """
         tracks = self.get_album_tracks(album_id)
         imported_songs = []
+        skipped_songs = []
         
         for track in tracks:
             track_id = track.get('id')
             if track_id:
-                song = self.import_track(track_id, lastfm_api_key)
+                song, was_new = self.import_track(track_id, lastfm_api_key)
                 if song:
-                    imported_songs.append(song)
+                    if was_new:
+                        imported_songs.append(song)
+                    else:
+                        skipped_songs.append(song)
                     
                 # Add a small delay to avoid overwhelming the API
                 time.sleep(0.2)
         
-        return imported_songs
-    
-    def import_playlist(self, playlist_id, lastfm_api_key=None):
+        return {
+            'imported_songs': imported_songs,
+            'skipped_songs': skipped_songs,
+            'imported_count': len(imported_songs),
+            'skipped_count': len(skipped_songs)
+        }
+      def import_playlist(self, playlist_id, lastfm_api_key=None):
         """
         Import all tracks from a playlist
-        Returns a list of successfully imported Song objects
+        Returns a dictionary with import statistics
         """
         tracks = self.get_playlist_tracks(playlist_id)
         imported_songs = []
+        skipped_songs = []
         
         for track in tracks:
             track_id = track.get('id')
             if track_id:
-                song = self.import_track(track_id, lastfm_api_key)
+                song, was_new = self.import_track(track_id, lastfm_api_key)
                 if song:
-                    imported_songs.append(song)
+                    if was_new:
+                        imported_songs.append(song)
+                    else:
+                        skipped_songs.append(song)
                     
                 # Add a small delay to avoid overwhelming the API
                 time.sleep(0.2)
         
-        return imported_songs
+        return {
+            'imported_songs': imported_songs,
+            'skipped_songs': skipped_songs,
+            'imported_count': len(imported_songs),
+            'skipped_count': len(skipped_songs)
+        }

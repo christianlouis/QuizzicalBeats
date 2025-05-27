@@ -149,12 +149,11 @@
                 <div class="flex items-center mb-3">
                     <i class="fab fa-spotify text-[#1DB954] text-2xl mr-3"></i>
                     <div>
-                        <h4 class="font-medium">Spotify</h4>
-                        <p class="text-sm text-gray-600">
+                        <h4 class="font-medium">Spotify</h4>                        <p class="text-sm text-gray-600">
                             {% if current_user.spotify_token %}
                                 Connected
-                                {% if current_user.oauth_id %}
-                                    as {{ current_user.oauth_id }}
+                                {% if current_user.spotify_id %}
+                                    as {{ current_user.spotify_id }}
                                 {% endif %}
                             {% else %}
                                 Not connected
@@ -363,10 +362,9 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% if current_user.spotify_token %}
-                        <tr class="border-b border-gray-200">
+                        {% if current_user.spotify_token %}                        <tr class="border-b border-gray-200">
                             <td class="py-2 font-medium">Spotify ID:</td>
-                            <td class="py-2">{{ current_user.oauth_id or 'Unknown' }}</td>
+                            <td class="py-2">{{ current_user.spotify_id or 'Unknown' }}</td>
                         </tr>
                         <tr class="border-b border-gray-200">
                             <td class="py-2 font-medium">Token Expiry:</td>
