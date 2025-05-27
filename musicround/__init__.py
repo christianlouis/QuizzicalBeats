@@ -335,6 +335,16 @@ def create_app(config=None):
     # Register error handlers
     from musicround.errors import register_error_handlers
     register_error_handlers(app)
+
+    # Initialize import queue and background workers
+    from musicround.helpers.import_queue import ImportQueue, ImportWorker
+    worker_count = int(os.environ.get('IMPORT_WORKER_COUNT', '2'))
+    import_queue = ImportQueue()
+    workers = [ImportWorker(app, import_queue) for _ in range(worker_count)]
+    for w in workers:
+        w.start()
+    app.config['import_queue'] = import_queue
+    app.config['import_workers'] = workers
     
     # Try to create database tables if they don't exist
     with app.app_context():
