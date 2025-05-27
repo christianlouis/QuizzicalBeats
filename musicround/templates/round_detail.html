@@ -538,17 +538,7 @@
         
         // Close toast button event
         toastCloseBtn.addEventListener('click', hideToast);
-        
-        // Process flash messages from server
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    showToast('{{ message|safe }}', '{{ category }}');
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        // Process email error if any
+          // Process email error if any
         {% if email_error %}
             showToast('{{ email_error }}', 'error');
         {% endif %}

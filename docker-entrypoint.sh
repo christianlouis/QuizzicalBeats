@@ -1,10 +1,6 @@
 #!/bin/bash
 set -e
 
-# Run the OAuth migration script first
-echo "Running database migration for OAuth providers..."
-python run_migration.py
-
 # Start the Flask application with better error reporting
 echo "Starting Flask application..."
 export PYTHONUNBUFFERED=1

@@ -4,12 +4,9 @@ Authentication helper functions for OAuth providers
 import os
 from flask import current_app, url_for, session, flash, redirect, request
 from authlib.integrations.flask_client import OAuth
-from flask_login import login_user, current_user
 from functools import wraps
 from datetime import datetime, timedelta
 import requests
-
-from musicround.models import db, User
 
 # Initialize OAuth object
 oauth = OAuth()
@@ -68,6 +65,26 @@ def init_oauth(app):
         app.logger.info("Dropbox OAuth client registered")
     else:
         app.logger.warning("Dropbox OAuth client not registered - missing app key or secret")
+      # Register Spotify OAuth client
+    if app.config.get('SPOTIFY_CLIENT_ID') and app.config.get('SPOTIFY_CLIENT_SECRET'):
+        oauth.register(
+            name='spotify',
+            client_id=app.config.get('SPOTIFY_CLIENT_ID'),
+            client_secret=app.config.get('SPOTIFY_CLIENT_SECRET'),
+            api_base_url='https://api.spotify.com/v1/',
+            authorize_url='https://accounts.spotify.com/authorize',
+            authorize_params={'show_dialog': 'true'}, # Force re-approval
+            access_token_url='https://accounts.spotify.com/api/token',
+            access_token_params=None,
+            refresh_token_url='https://accounts.spotify.com/api/token',
+            client_kwargs={
+                'scope': app.config.get('SPOTIFY_SCOPE')
+            },
+            userinfo_endpoint='https://api.spotify.com/v1/me' # Added for fetching user info
+        )
+        app.logger.info("Spotify OAuth client registered")
+    else:
+        app.logger.warning("Spotify OAuth client not registered - missing client ID or secret")
     
     return oauth
 
@@ -171,10 +188,48 @@ def get_dropbox_user_info(token):
         current_app.logger.error(f"Error getting Dropbox user info: {str(e)}")
         return None
 
+def get_spotify_user_info(token):
+    """
+    Get Spotify user info from the token
+    """
+    try:
+        # Authlib should handle token refresh automatically if configured correctly
+        # and if the token object is managed by Authlib's token session or similar mechanism.
+        
+        # Use the registered Authlib client to fetch user info
+        # The 'userinfo_endpoint' configured during registration will be used.
+        # We pass the token explicitly to ensure it's used for this request.
+        # Authlib's `oauth.spotify.get()` will prepend the base URL if 'userinfo_endpoint' is relative,
+        # but since we provided an absolute one, it should use that.
+        # The error "Invalid URL 'me'" suggests that 'me' alone was passed somewhere.
+        # Let's ensure we are calling the fully qualified endpoint via the client.
+        resp = oauth.spotify.get('https://api.spotify.com/v1/me', token=token)
+        resp.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        profile = resp.json()
+        current_app.logger.debug(f"Spotify user info response: {profile}")
+
+        user_info = {
+            'id': profile.get('id'),
+            'email': profile.get('email'), # Note: Spotify email might be private
+            'name': profile.get('display_name'),
+            'picture': profile.get('images')[0]['url'] if profile.get('images') else None,
+            # Spotify doesn't provide given_name and family_name directly
+            'given_name': profile.get('display_name', '').split(' ')[0] if profile.get('display_name') else '',
+            'family_name': ' '.join(profile.get('display_name', '').split(' ')[1:]) if profile.get('display_name') and ' ' in profile.get('display_name') else ''
+        }
+        return user_info
+    except requests.exceptions.HTTPError as http_err:
+        current_app.logger.error(f"HTTP error getting Spotify user info: {http_err} - Response: {http_err.response.text}")
+        return None
+    except Exception as e:
+        current_app.logger.error(f"Error getting Spotify user info: {str(e)}")
+        return None
+
 def find_or_create_user(user_info, auth_provider):
     """
     Find existing user or create a new one based on OAuth user info
     """
+    from musicround.models import db, User
     if not user_info:
         return None
         
@@ -185,6 +240,8 @@ def find_or_create_user(user_info, auth_provider):
         user = User.query.filter_by(authentik_id=user_info['id']).first()
     elif auth_provider == 'dropbox':
         user = User.query.filter_by(dropbox_id=user_info['id']).first()
+    elif auth_provider == 'spotify':
+        user = User.query.filter_by(spotify_id=user_info['id']).first()
     else:
         return None
         
@@ -200,6 +257,8 @@ def find_or_create_user(user_info, auth_provider):
                 user.authentik_id = user_info['id']
             elif auth_provider == 'dropbox':
                 user.dropbox_id = user_info['id']
+            elif auth_provider == 'spotify':
+                user.spotify_id = user_info['id']
                 
             db.session.commit()
             current_app.logger.info(f"Updated existing user {user.username} with {auth_provider} ID")
@@ -243,6 +302,8 @@ def find_or_create_user(user_info, auth_provider):
             user.authentik_id = user_info['id']
         elif auth_provider == 'dropbox':
             user.dropbox_id = user_info['id']
+        elif auth_provider == 'spotify':
+            user.spotify_id = user_info['id']
             
         db.session.add(user)
         try:
@@ -259,6 +320,7 @@ def update_oauth_tokens(user, tokens, auth_provider):
     """
     Update user's OAuth tokens
     """
+    from musicround.models import db
     if auth_provider == 'google':
         user.google_token = tokens.get('access_token')
         user.google_refresh_token = tokens.get('refresh_token')
@@ -270,6 +332,11 @@ def update_oauth_tokens(user, tokens, auth_provider):
         user.dropbox_refresh_token = tokens.get('refresh_token')
         if tokens.get('expires_in'):
             user.dropbox_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
+    elif auth_provider == 'spotify':
+        user.spotify_token = tokens.get('access_token')
+        user.spotify_refresh_token = tokens.get('refresh_token')
+        if tokens.get('expires_in'):
+            user.spotify_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
     user.last_login = datetime.now()
     try:
         db.session.commit()

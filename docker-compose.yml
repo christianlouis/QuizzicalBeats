@@ -41,7 +41,7 @@ services:
       - MAIL_RECIPIENT=${MAIL_RECIPIENT}
     restart: unless-stopped
     # Updated command with explicit extra-files and reload arguments
-    command: python -m flask run --host=0.0.0.0 --port=5000 --reload --extra-files ./templates:/app/templates,./static:/app/static
+    command: python -m flask run --host=0.0.0.0 --port=5000 --reload
 
   scheduler:
     image: mcuadros/ofelia:latest

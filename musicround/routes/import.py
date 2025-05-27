@@ -7,15 +7,15 @@ import random
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
 from musicround.models import Song, db
 from musicround.routes.import_songs import import_pl, import_track
+from musicround.helpers.auth_helpers import oauth  # Import the oauth object
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
 
-def fetch_all_user_playlists(sp, user_id, limit=50):
+def fetch_all_user_playlists(user_id, limit=50):  # Removed sp argument
     """
     Fetch all playlists from a specific Spotify user account with pagination
     
     Args:
-        sp: Spotify API client
         user_id: Spotify user ID to fetch playlists from
         limit: Number of playlists to fetch per request (max 50)
         
@@ -32,7 +32,8 @@ def fetch_all_user_playlists(sp, user_id, limit=50):
     while total is None or offset < total:
         try:
             # Use Spotify API to get playlists with pagination
-            results = sp.user_playlists(user_id, limit=limit, offset=offset)
+            # Use oauth.spotify instead of sp
+            results = oauth.spotify.get(f'users/{user_id}/playlists', params={'limit': limit, 'offset': offset}).json()
             
             # If first request, get the total
             if total is None:
@@ -101,13 +102,20 @@ def import_official_playlists():
     if 'access_token' not in session:
         return redirect(url_for('auth.login'))
     
-    sp = current_app.config['sp']
-    
     # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
-        import_pl(playlist_id)
-        flash('Spotify playlist imported successfully!', 'success')
+        from musicround.helpers.import_helper import ImportHelper
+        result = ImportHelper.import_item('spotify', 'playlist', playlist_id)
+
+        if result['imported_count'] > 0:
+            flash(f"Successfully imported {result['imported_count']} songs from playlist!", 'success')
+        elif result['skipped_count'] > 0 and result['error_count'] == 0:
+            flash(f"All {result['skipped_count']} songs were already in the database.", 'info')
+        elif result['error_count'] > 0:
+             flash(f"Playlist import completed with {result['imported_count']} new songs, {result['skipped_count']} skipped, and {result['error_count']} errors.", 'warning')
+        else:
+            flash('No songs were imported from the playlist. It might be empty or an issue occurred.', 'info')
         return redirect(url_for('core.view_songs'))
 
     # Get filter keywords from the query string (default to empty list)
@@ -164,7 +172,7 @@ def import_official_playlists():
             account_start = time.time()
             
             # Fetch all playlists for this account
-            account_playlists = fetch_all_user_playlists(sp, account)
+            account_playlists = fetch_all_user_playlists(account)  # Removed sp argument
             
             account_end = time.time()
             account_debug['time_ms'] = int((account_end - account_start) * 1000)

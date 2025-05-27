@@ -57,7 +57,7 @@ class User(db.Model, UserMixin):
     auth_provider = db.Column(db.String(20), default='local')  # 'local', 'google', 'authentik'
     
     # OAuth provider info - Spotify
-    oauth_id = db.Column(db.String(100))       # Spotify user ID
+    spotify_id = db.Column(db.String(100), index=True, unique=True, nullable=True) # Spotify user ID
     spotify_token = db.Column(db.Text)         # Store Spotify access token 
     spotify_refresh_token = db.Column(db.Text)  # Store Spotify refresh token
     spotify_token_expiry = db.Column(db.DateTime)

@@ -34,11 +34,11 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     
-    # Spotify API credentials
+    # Spotify API credentials    
     SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
     SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
     SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
-    SPOTIFY_SCOPE = "playlist-read-private playlist-read-collaborative user-library-read user-top-read"
+    SPOTIFY_SCOPE = "playlist-read-private playlist-read-collaborative user-library-read user-top-read user-read-private user-read-email user-read-recently-played user-follow-read playlist-modify-public playlist-modify-private"
     
     # Deezer API credentials
     DEEZER_APP_ID = os.getenv("DEEZER_APP_ID", "")

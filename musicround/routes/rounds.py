@@ -22,6 +22,7 @@ from musicround.models import Round, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from musicround.helpers.auth_helpers import oauth
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
@@ -37,7 +38,6 @@ def rounds_list():
 def round_detail(round_id):
     """Display details of a specific round"""
     rnd = Round.query.get(round_id)
-    sp = current_app.config['sp']
     
     if rnd:
         song_ids = rnd.songs.split(',')
@@ -49,14 +49,17 @@ def round_detail(round_id):
         
         email_error = session.pop('email_error', None)  # Retrieve and remove the error message from the session
         
-        # For sp.current_user(), we need to ensure we have a valid token if needed for this view
+        # For oauth.spotify, we need to ensure we have a valid token if needed for this view
         user_info = None
         try:
-            if 'access_token' in session:  # Only try to get user info if we have a token
-                user_info = sp.current_user()
-        except:
-            # If we can't get user info, continue without it
-            current_app.logger.warning("Could not get Spotify user info")
+            if current_user.is_authenticated and current_user.spotify_token:
+                # Use oauth.spotify to get user info
+                # Ensure the token is fresh or handle potential MissingTokenError
+                user_info_response = oauth.spotify.get('https://api.spotify.com/v1/me')
+                user_info_response.raise_for_status()  # Raise an exception for bad status codes
+                user_info = user_info_response.json()
+        except Exception as e:  # Catch a broader range of exceptions, including MissingTokenError
+            current_app.logger.warning(f"Could not get Spotify user info using Authlib: {str(e)}")
         
         return render_template('round_detail.html', round=rnd, songs=ordered_songs, user_info=user_info, email_error=email_error)
     else:

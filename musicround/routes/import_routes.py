@@ -4,108 +4,92 @@ Import routes for the Music Round application
 import json
 import time
 import random
+from datetime import datetime  # Add datetime import
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
+from flask_login import current_user
 from musicround.models import Song, db
 from musicround.routes.import_songs import import_pl
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.auth_helpers import oauth
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
 
-def fetch_all_user_playlists(sp, user_id, limit=50):
+def fetch_all_user_playlists(oauth_client, token, user_id, limit=50):
     """
-    Fetch all playlists from a specific Spotify user account with pagination
+    Fetch all playlists from a specific Spotify user account with pagination using Authlib.
     
     Args:
-        sp: Spotify API client
-        user_id: Spotify user ID to fetch playlists from
-        limit: Number of playlists to fetch per request (max 50)
+        oauth_client: The Authlib Spotify client (e.g., oauth.spotify).
+        token: An Authlib token object for authentication.
+        user_id: Spotify user ID to fetch playlists from.
+        limit: Number of playlists to fetch per request (max 50).
         
     Returns:
-        List of all playlists from the specified user
+        List of all playlists from the specified user.
     """
     all_playlists = []
     offset = 0
     total = None
     
     start_time = time.time()
-    current_app.logger.info(f"Started fetching playlists for user '{user_id}'")
+    current_app.logger.info(f"Started fetching playlists for user '{user_id}' using Authlib")
     
-    # Hard limit to prevent infinite loops (should never be needed if API works correctly)
-    max_loops = 100
+    max_loops = 100  # Hard limit to prevent infinite loops
     loop_count = 0
     
     while loop_count < max_loops:
         loop_count += 1
         try:
-            # Use Spotify API to get playlists with pagination
-            current_app.logger.info(f"Fetching playlists for {user_id} with offset={offset}, limit={limit}, loop={loop_count}")
-            results = sp.user_playlists(user_id, limit=limit, offset=offset)
+            api_url = f'https://api.spotify.com/v1/users/{user_id}/playlists'
+            params = {'limit': limit, 'offset': offset}
             
-            # Log raw API response for debugging (only first few characters to avoid flooding logs)
+            current_app.logger.info(f"Fetching playlists for {user_id} with offset={offset}, limit={limit}, loop={loop_count}")
+            # Use Authlib client to make the GET request
+            resp = oauth_client.get(api_url, token=token, params=params)
+            resp.raise_for_status()  # Raise an exception for HTTP errors
+            results = resp.json()
+            
             response_sample = str(results)[:500] + '...' if len(str(results)) > 500 else str(results)
             current_app.logger.debug(f"API response sample: {response_sample}")
             
-            # If first request, get and validate the total
             if total is None:
                 total = results.get('total', 0)
                 current_app.logger.info(f"User '{user_id}' has {total} playlists in total according to API")
                 if total == 0:
-                    current_app.logger.warning(f"API reported 0 total playlists for {user_id} - possible API error")
+                    current_app.logger.warning(f"API reported 0 total playlists for {user_id} - possible API error or no playlists")
             
-            # Add the current batch of playlists to our collection
             playlists_batch = results.get('items', [])
             batch_count = len(playlists_batch)
             all_playlists.extend(playlists_batch)
             
             current_app.logger.info(f"Batch for {user_id}: offset={offset}, received={batch_count} playlists")
             
-            # If we didn't get any playlists in this batch, something is wrong
-            if batch_count == 0:
-                current_app.logger.warning(f"Received 0 playlists for {user_id} at offset {offset} - possible API error")
-                if 'items' not in results:
-                    current_app.logger.warning(f"Missing 'items' key in API response for {user_id}")
+            if batch_count == 0 and offset < total:
+                current_app.logger.warning(f"Received 0 playlists for {user_id} at offset {offset} but expected more (total: {total}) - stopping.")
                 break
             
-            # Break if we received fewer items than requested (last page)
-            if batch_count < limit:
-                current_app.logger.info(f"Reached end of results for {user_id} (received {batch_count} < limit {limit})")
+            if not results.get('next'): # Spotify API uses 'next' field to indicate more pages
+                current_app.logger.info(f"No more 'next' URL for {user_id} at offset {offset}. Fetched {len(all_playlists)}/{total}.")
                 break
                 
-            # Update offset for next batch
-            offset += batch_count
+            offset += batch_count # Correctly increment offset by the number of items received
             
-            # Log progress
-            current_app.logger.info(f"Fetched {len(playlists_batch)} playlists for '{user_id}', progress: {len(all_playlists)}/{total}")
-            
-            # Break if we've reached or exceeded the total number of playlists
-            if offset >= total:
-                current_app.logger.info(f"Reached total {total} playlists for {user_id} at offset {offset}")
+            if len(all_playlists) >= total:
+                current_app.logger.info(f"Fetched all {total} playlists for {user_id}.")
                 break
-                
-            # Break if we've exhausted all playlists (next URL is None)
-            if not results.get('next'):
-                current_app.logger.info(f"No more 'next' URL for {user_id} at offset {offset}")
-                # Check if we should have more results based on 'total'
-                if offset < total:
-                    current_app.logger.warning(
-                        f"API inconsistency: 'next' is None but we've only fetched {offset} out of {total} playlists"
-                    )
-                break
-                
+
         except Exception as e:
             current_app.logger.error(f"Error fetching playlists for user '{user_id}' at offset {offset}: {str(e)}")
-            # Try to get more specific error information
             import traceback
             current_app.logger.error(f"Traceback: {traceback.format_exc()}")
             break
     
-    # Check if we hit the max loops limit
     if loop_count >= max_loops:
         current_app.logger.warning(f"Reached maximum loop count ({max_loops}) for user {user_id}")
     
     end_time = time.time()
     duration = int((end_time - start_time) * 1000)
-    current_app.logger.info(f"Completed fetching {len(all_playlists)}/{total} playlists for user '{user_id}' in {duration}ms")
+    current_app.logger.info(f"Completed fetching {len(all_playlists)}/{total if total is not None else 'unknown'} playlists for user '{user_id}' in {duration}ms")
     
     return all_playlists
 
@@ -144,15 +128,22 @@ def filter_playlists_by_keywords(playlists, keywords, debug_info=None):
 @import_bp.route('/official-playlists', methods=['GET', 'POST'])
 def import_official_playlists():
     """Display and import official Spotify playlists from multiple regional accounts"""
-    if 'access_token' not in session:
-        return redirect(url_for('users.login'))
-    
-    sp = current_app.config['sp']
+    # Ensure user is logged in and has a Spotify token in session or on their user object
+    auth_token = session.get('spotify_token')  # Attempt to get token from session
+    if not auth_token and current_user.is_authenticated and current_user.spotify_token:
+        auth_token = {
+            'access_token': current_user.spotify_token,
+            'token_type': 'Bearer',
+            'expires_at': current_user.spotify_token_expiry.timestamp() if current_user.spotify_token_expiry else None,
+            'refresh_token': current_user.spotify_refresh_token
+        }
+    elif not auth_token:
+        flash("No active Spotify session. Please connect your Spotify account.", "warning")
+        return redirect(url_for('users.spotify_link'))
     
     # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
-        # Use the new unified ImportHelper
         result = ImportHelper.import_item('spotify', 'playlist', playlist_id)
         
         if result['imported_count'] > 0:
@@ -194,58 +185,32 @@ def import_official_playlists():
         'filtered_out': 0,
         'matched_keywords': {},
         'query_time_ms': 0,
-        'duplicates_removed': 0
+        'duplicates_removed': 0,
+        'token_source': 'user_session_or_db' if auth_token.get('access_token') == session.get('spotify_token', {}).get('access_token') or (current_user.is_authenticated and auth_token.get('access_token') == current_user.spotify_token) else 'unknown'
     }
     
     # Initialize playlists list
     all_playlists = []
     
     try:
-        start_time = time.time()
+        start_query_time = time.time()
         
-        # Process each Spotify account or just the selected one
-        accounts_to_process = [selected_account] if selected_account != 'all' else spotify_accounts
+        if selected_account == 'all':
+            for acc_id in spotify_accounts:
+                current_app.logger.info(f"Fetching playlists for official account: {acc_id}")
+                playlists = fetch_all_user_playlists(oauth.spotify, auth_token, acc_id)
+                if debug_mode:
+                    debug_info['accounts'][acc_id] = {'fetched': len(playlists), 'filtered_in': 0, 'filtered_out': 0}
+                all_playlists.extend(playlists)
+                debug_info['total_fetched'] += len(playlists)
+        else:
+            current_app.logger.info(f"Fetching playlists for selected official account: {selected_account}")
+            playlists = fetch_all_user_playlists(oauth.spotify, auth_token, selected_account)
+            if debug_mode:
+                debug_info['accounts'][selected_account] = {'fetched': len(playlists), 'filtered_in': 0, 'filtered_out': 0}
+            all_playlists.extend(playlists)
+            debug_info['total_fetched'] += len(playlists)
         
-        for account in accounts_to_process:
-            if account not in spotify_accounts and account != 'all':
-                continue
-                
-            account_debug = {
-                'total': 0,
-                'fetched': 0,
-                'filtered': 0,
-                'time_ms': 0
-            }
-            
-            account_start = time.time()
-            
-            # Fetch all playlists for this account
-            account_playlists = fetch_all_user_playlists(sp, account)
-            
-            account_end = time.time()
-            account_debug['time_ms'] = int((account_end - account_start) * 1000)
-            
-            account_debug['total'] = len(account_playlists)
-            account_debug['fetched'] = len(account_playlists)
-            debug_info['total_fetched'] += len(account_playlists)
-            
-            # Apply keyword filtering if keywords provided
-            if filter_keywords:
-                filtered_playlists = filter_playlists_by_keywords(
-                    account_playlists, 
-                    filter_keywords, 
-                    debug_info
-                )
-                account_debug['filtered'] = len(filtered_playlists)
-                debug_info['filtered_out'] += (len(account_playlists) - len(filtered_playlists))
-                all_playlists.extend(filtered_playlists)
-            else:
-                # No filtering, use all playlists
-                all_playlists.extend(account_playlists)
-                account_debug['filtered'] = len(account_playlists)
-            
-            debug_info['accounts'][account] = account_debug
-            
         # Remove duplicates based on playlist ID
         unique_playlists = []
         seen_ids = set()
@@ -259,8 +224,8 @@ def import_official_playlists():
         all_playlists = unique_playlists
         debug_info['total_filtered'] = len(all_playlists)
         
-        end_time = time.time()
-        debug_info['query_time_ms'] = int((end_time - start_time) * 1000)
+        end_query_time = time.time()
+        debug_info['query_time_ms'] = int((end_query_time - start_query_time) * 1000)
         
         # Log summary
         current_app.logger.info(
@@ -496,11 +461,27 @@ def test_spotify_client():
     
     # Test spotipy implementation
     try:
-        sp = current_app.config['sp']
+        auth_token = session.get('spotify_token')
+        if not auth_token and current_user.is_authenticated and current_user.spotify_token:
+            # Attempt to build a token object compatible with Authlib from user's stored token
+            auth_token = {
+                'access_token': current_user.spotify_token,  # Assuming this is the access token string
+                'token_type': 'Bearer',  # Default token type
+                'expires_at': current_user.spotify_token_expiry.timestamp() if current_user.spotify_token_expiry else None,
+                'refresh_token': current_user.spotify_refresh_token
+            }
+            # Ensure expires_at is a Unix timestamp if present
+            if auth_token.get('expires_at') and isinstance(auth_token['expires_at'], datetime):
+                auth_token['expires_at'] = int(auth_token['expires_at'].timestamp())
+
+        if not auth_token:
+            raise Exception("Spotify token not found for current user or session.")
+
         start_time = time.time()
         
-        current_app.logger.info(f"Testing spotipy implementation for account {account}")
-        spotipy_playlists = fetch_all_user_playlists(sp, account)
+        current_app.logger.info(f"Testing Authlib Spotify implementation for account {account}")
+        # Use the fetch_all_user_playlists function which now uses oauth.spotify
+        spotipy_playlists = fetch_all_user_playlists(oauth.spotify, auth_token, account)
         
         end_time = time.time()
         duration_ms = int((end_time - start_time) * 1000)
@@ -508,12 +489,7 @@ def test_spotify_client():
         results['spotipy']['playlists'] = spotipy_playlists
         results['spotipy']['count'] = len(spotipy_playlists)
         results['spotipy']['time_ms'] = duration_ms
-        
-        # Get total from first API call if available
-        if spotipy_playlists:
-            first_result = sp.user_playlists(account, limit=1)
-            results['spotipy']['total'] = first_result.get('total', 'unknown')
-            
+
     except Exception as e:
         import traceback
         current_app.logger.error(f"Error testing spotipy: {e}")
@@ -542,11 +518,6 @@ def test_spotify_client():
             results['direct']['playlists'] = direct_playlists
             results['direct']['count'] = len(direct_playlists)
             results['direct']['time_ms'] = duration_ms
-            
-            # Get total if available from response
-            if direct_playlists and len(direct_playlists) > 0:
-                first_result = direct_client.user_playlists(account, limit=1)
-                results['direct']['total'] = first_result.get('total', 'unknown')
             
     except Exception as e:
         import traceback

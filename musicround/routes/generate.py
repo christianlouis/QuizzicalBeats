@@ -3,6 +3,8 @@ from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import current_user, login_required
 from musicround.models import Song, Round, Tag, db
+from musicround.helpers.auth_helpers import oauth
+from musicround.helpers.import_helper import ImportHelper
 
 generate_bp = Blueprint('generate', __name__)
 
@@ -330,39 +332,20 @@ def get_songs_from_deezer_playlist(playlist_id):
         deezer_client = current_app.config['deezer']
         songs_per_round = current_app.config.get('SONGS_PER_ROUND', 10)
         
-        playlist = deezer_client.get_playlist(playlist_id)
-        if not playlist:
+        imported_songs = ImportHelper.import_item(
+            item_id=playlist_id,
+            item_type='playlist',
+            source='deezer',
+            deezer_client=deezer_client
+        )
+
+        if not imported_songs:
+            current_app.logger.warning(f"No songs returned from ImportHelper.import_item for Deezer playlist {playlist_id}")
             return []
-            
-        # Use the ImportHelper static methods directly without creating an instance
-        from musicround.helpers.import_helper import ImportHelper
-        
-        songs = []
-        tracks = playlist.get('tracks', {}).get('data', [])
-        
-        for track in tracks:
-            deezer_id = str(track.get('id'))
-            if not deezer_id:
-                continue
-                
-            # Check if song already exists in our database
-            existing_song = Song.query.filter_by(deezer_id=deezer_id).first()
-            if existing_song:
-                songs.append(existing_song)
-                continue
-                
-            # Use the proper ImportHelper static method for importing
-            track_result = ImportHelper.import_deezer_track(deezer_client, deezer_id)
-            
-            # If the track was successfully imported, retrieve it from the database
-            if track_result.get('imported_count', 0) > 0:
-                imported_song = Song.query.filter_by(deezer_id=deezer_id).first()
-                if imported_song:
-                    songs.append(imported_song)
-            
-        return songs[:songs_per_round]  # Limit to songs_per_round
+
+        return imported_songs[:songs_per_round]
     except Exception as e:
-        current_app.logger.error(f"Error fetching Deezer playlist: {e}")
+        current_app.logger.error(f"Error fetching or importing Deezer playlist {playlist_id}: {e}")
         import traceback
         current_app.logger.error(traceback.format_exc())
         return []
@@ -372,42 +355,22 @@ def get_songs_from_spotify_playlist(playlist_id):
     Fetch songs from a Spotify playlist, properly import them with metadata, and return them
     """
     try:
-        sp = current_app.config['sp']
         songs_per_round = current_app.config.get('SONGS_PER_ROUND', 10)
         
-        playlist = sp.playlist_tracks(playlist_id)
-        if not playlist:
+        imported_songs = ImportHelper.import_item(
+            item_id=playlist_id,
+            item_type='playlist',
+            source='spotify',
+            oauth_spotify=oauth.spotify
+        )
+        
+        if not imported_songs:
+            current_app.logger.warning(f"No songs returned from ImportHelper.import_item for Spotify playlist {playlist_id}")
             return []
             
-        # Use the ImportHelper static methods directly without creating an instance
-        from musicround.helpers.import_helper import ImportHelper
-        
-        songs = []
-        for item in playlist.get('items', []):
-            track = item.get('track')
-            if not track or not track.get('id'):
-                continue
-                
-            spotify_id = track.get('id')
-            
-            # Check if the song already exists in our database
-            existing_song = Song.query.filter_by(spotify_id=spotify_id).first()
-            if existing_song:
-                songs.append(existing_song)
-                continue
-
-            # Use the proper ImportHelper static methods for importing
-            track_result = ImportHelper.import_spotify_track(sp, spotify_id)
-            
-            # If the track was successfully imported, retrieve it from the database
-            if track_result.get('imported_count', 0) > 0:
-                imported_song = Song.query.filter_by(spotify_id=spotify_id).first()
-                if imported_song:
-                    songs.append(imported_song)
-            
-        return songs[:songs_per_round]  # Limit to songs_per_round
+        return imported_songs[:songs_per_round]
     except Exception as e:
-        current_app.logger.error(f"Error fetching Spotify playlist: {e}")
+        current_app.logger.error(f"Error fetching or importing Spotify playlist {playlist_id}: {e}")
         import traceback
         current_app.logger.error(traceback.format_exc())
         return []
