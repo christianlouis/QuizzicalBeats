@@ -1,0 +1,142 @@
+{% extends 'base.html' %}
+
+{% block title %}Connect Spotify - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
+    <h2 class="text-2xl font-bold mb-6 text-navy-800">Connect Spotify Account</h2>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <!-- Left column: Current status -->
+        <div class="bg-gray-50 p-6 rounded-lg">
+            <h3 class="text-lg font-semibold mb-4 text-navy-700">Spotify Connection Status</h3>
+            
+            {% if current_user.spotify_token %}
+                <div class="mb-6 flex items-center">
+                    <div class="mr-4 bg-green-100 p-3 rounded-full">
+                        <i class="fab fa-spotify text-2xl text-green-600"></i>
+                    </div>
+                    <div>
+                        <p class="font-medium text-green-700">Connected to Spotify</p>
+                        <p class="text-sm text-gray-600">Your account is linked to Spotify</p>
+                        {% if spotify_user_info %}
+                            <p class="text-sm text-gray-600 mt-1">Spotify ID: {{ spotify_user_info.id }}</p>
+                            <p class="text-sm text-gray-600 mt-1">Display Name: {{ spotify_user_info.display_name }}</p>
+                            {% if spotify_user_info.email %}
+                                <p class="text-sm text-gray-600 mt-1">Email: {{ spotify_user_info.email }}</p>
+                            {% endif %}
+                            {% if spotify_user_info.images and spotify_user_info.images[0] %}
+                                <img src="{{ spotify_user_info.images[0].url }}" alt="Spotify Profile Image" class="rounded-full mt-2" style="width:64px;height:64px;">
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-md font-medium mb-2">Token Information</h4>
+                    <div class="bg-white p-4 rounded-lg border border-gray-200 text-sm">
+                        <p class="flex justify-between mb-2">
+                            <span class="font-medium">Token Status:</span>
+                            <span class="{% if current_user.spotify_token_expiry and current_user.spotify_token_expiry > now %}text-green-600{% else %}text-red-600{% endif %}">
+                                {% if current_user.spotify_token_expiry and current_user.spotify_token_expiry > now %}
+                                    Valid
+                                {% else %}
+                                    Expired
+                                {% endif %}
+                            </span>
+                        </p>
+                        {% if current_user.spotify_token_expiry %}
+                            <p class="flex justify-between">
+                                <span class="font-medium">Expires:</span>
+                                <span>{{ current_user.spotify_token_expiry.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <form method="POST" action="{{ url_for('users.spotify_disconnect') }}" class="mt-6">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-md font-medium">
+                        <i class="fas fa-unlink mr-2"></i> Disconnect Spotify
+                    </button>
+                </form>
+                
+            {% else %}
+                <div class="mb-6 flex items-center">
+                    <div class="mr-4 bg-gray-200 p-3 rounded-full">
+                        <i class="fab fa-spotify text-2xl text-gray-500"></i>
+                    </div>
+                    <div>
+                        <p class="font-medium text-gray-700">Not Connected</p>
+                        <p class="text-sm text-gray-600">Your account is not linked to Spotify</p>
+                    </div>
+                </div>
+                
+                <form method="POST" action="{{ url_for('users.spotify_link') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" class="inline-block bg-[#1DB954] hover:bg-[#1ed760] text-white font-medium py-2 px-4 rounded-md">
+                        <i class="fab fa-spotify mr-2"></i> Connect with Spotify
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+        
+        <!-- Right column: Info and benefits -->
+        <div>
+            <h3 class="text-lg font-semibold mb-4 text-navy-700">Why Connect Spotify?</h3>
+            
+            <div class="bg-teal-50 border-l-4 border-teal-500 p-4 rounded mb-6">
+                <p class="text-teal-700">
+                    Connecting your Spotify account enhances your music quiz creation experience
+                </p>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="flex">
+                    <div class="mr-3 text-teal-500">
+                        <i class="fas fa-music"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-medium">Access Your Playlists</h4>
+                        <p class="text-gray-600 text-sm">Import songs from your personal Spotify playlists</p>
+                    </div>
+                </div>
+                
+                <div class="flex">
+                    <div class="mr-3 text-teal-500">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-medium">Search the Spotify Catalog</h4>
+                        <p class="text-gray-600 text-sm">Find and import any track from Spotify's huge library</p>
+                    </div>
+                </div>
+                
+                <div class="flex">
+                    <div class="mr-3 text-teal-500">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-medium">Trending Playlists</h4>
+                        <p class="text-gray-600 text-sm">Access Spotify's official and trending playlists</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-8 bg-gray-50 p-4 rounded-lg">
+                <h4 class="font-medium mb-2">Privacy Note</h4>
+                <p class="text-sm text-gray-600">
+                    We only access your Spotify data to help you create music quizzes. 
+                    We don't share your information or post to your account.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="mt-6 pt-6 border-t border-gray-200">
+        <a href="{{ url_for('users.profile') }}" class="text-teal-600 hover:text-teal-800">
+            <i class="fas fa-arrow-left mr-2"></i> Back to Profile
+        </a>
+    </div>
+</div>
+{% endblock %}

@@ -1,22 +1,61 @@
 """
 User authentication and profile management routes
 """
-import os
-import time
-import uuid
+import uuid  # Add missing import
+import time  # Add missing import
 from datetime import datetime, timedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, session, jsonify
-from flask_login import login_user, current_user, logout_user, login_required
+from flask_login import login_user, current_user, logout_user, login_required  # Ensure flask_login is imported
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
-from spotipy.oauth2 import SpotifyOAuth
-from spotipy.exceptions import SpotifyException
 
 from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices
-from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info
+from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info
+from musicround.helpers.spotify_helper import get_spotify_token, get_current_user_spotify_token, get_spotify_user_info as spotify_helper_get_user_info
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
+
+# Helper function for processing Spotify account linking
+def _process_spotify_link(user, token_payload, spotify_user_data):
+    """Processes the linking of a Spotify account to a user."""
+    spotify_id = spotify_user_data['id']
+
+    # Check if this Spotify account is already linked to another user
+    existing_user_with_spotify_id = User.query.filter(User.spotify_id == spotify_id, User.id != user.id).first()
+    if existing_user_with_spotify_id:
+        flash(f"This Spotify account is already linked to another user ({existing_user_with_spotify_id.username}). "
+              "Please use a different Spotify account or log in with that user.", "danger")
+        return False
+
+    user.spotify_id = spotify_id
+    update_oauth_tokens(user, token_payload, 'spotify') # Saves token, refresh_token, expiry to user model
+
+    # Store comprehensive user info in session
+    session['spotify_user_info'] = spotify_user_data
+
+    db.session.commit()
+    flash('Your Spotify account has been successfully linked!', 'success')
+    current_app.logger.info(f"User {user.id} successfully linked Spotify account {spotify_id}.")
+    return True
+
+# Helper function for processing Spotify account disconnection
+def _process_spotify_disconnect(user):
+    """Processes the disconnection of a user's Spotify account."""
+    current_app.logger.info(f"User {user.id} requested Spotify disconnect.")
+    
+    user.spotify_id = None
+    user.spotify_token = None
+    user.spotify_refresh_token = None
+    user.spotify_token_expiry = None
+    
+    # Clear related session variables
+    session.pop('spotify_display_name', None) 
+    session.pop('spotify_user_info', None)
+        
+    db.session.commit()
+    flash('Your Spotify account has been disconnected.', 'success')
+    current_app.logger.info(f"User {user.id} successfully disconnected their Spotify account.")
 
 def admin_required(f):
     from functools import wraps
@@ -393,87 +432,115 @@ def profile():
     admin_exists = False
     if admin_role:
         admin_exists = admin_role.users.count() > 0
-    
-    # Get current time for token expiry checks
+      # Get current time for token expiry checks
     now = datetime.now()
     
     # Get info about current tokens
     system_refresh_token = SystemSetting.get('fallback_spotify_refresh_token', '')
-    session_bearer = session.get('access_token', '')
+    session_bearer = session.get('access_token', '') # This is the manually entered token or system token
     token_source = session.get('token_source', '')
-    client_token_expiry = session.get('client_token_expiry', 0)
+    client_token_expiry = session.get('client_token_expiry', 0) # For system client_credentials token
+    
+    # Use centralized token management to get the best available token
+    spotify_token, spotify_token_source = get_spotify_token()
     
     # Fetch user info for the active token
-    spotify_user_info = None
+    spotify_user_info = None # This is passed to the template
     active_username = None
     active_user_id = None
     active_user_image = None
     active_token_expiry = None
-    
-    # Check for an active token in the session
-    if session_bearer:
+
+    # If we have a valid token from centralized management, use it
+    if spotify_token and spotify_token_source in ['user', 'system']:
         try:
-            # Set up the Spotify client with the token
-            sp = current_app.config['sp']
-            sp.set_auth(session_bearer)
+            spotify_user_info = spotify_helper_get_user_info(spotify_token)
+            if spotify_user_info:
+                token_source = spotify_token_source
+                session['token_source'] = spotify_token_source
+                active_user_id = spotify_user_info.get('id')
+                active_username = spotify_user_info.get('display_name') or active_user_id
+                images = spotify_user_info.get('images', [])
+                if images: 
+                    active_user_image = images[0].get('url')
+                
+                # Set token expiry based on source
+                if spotify_token_source == 'user':
+                    active_token_expiry = current_user.spotify_token_expiry
+                else:  # system token
+                    system_token_expiry_str = SystemSetting.get('system_spotify_token_expiry', '')
+                    if system_token_expiry_str:
+                        try:
+                            active_token_expiry = datetime.fromisoformat(system_token_expiry_str)
+                        except ValueError:
+                            pass
+                
+                current_app.logger.debug(f"Fetched Spotify user info for {active_username} using {spotify_token_source} token.")
+        except Exception as e:
+            current_app.logger.error(f"Error fetching Spotify user info with {spotify_token_source} token: {str(e)}")
+            if spotify_token_source == 'user':
+                flash("Your Spotify connection may have expired. Please try re-linking.", "warning")
+      
+    # Priority 2: Manually entered bearer token from session (fallback)
+    if not spotify_user_info and session_bearer: # if no valid token from centralized management, check manual token
+        current_app.logger.debug(f"Attempting to use session_bearer token. Source: {token_source}")
             
-            # Client credentials don't have user context
-            if token_source != 'client_credentials':
-                try:
-                    # Use the token to get user info
-                    spotify_user_info = sp.current_user()
-                    
-                    if spotify_user_info:
+        # If token_source indicates it's a user-like token or generic 'manual'
+        if token_source in ['manual', 'user_manual', 'user']: # 'user' if somehow set without db token
+            try:
+                resp = oauth.spotify.get('https://api.spotify.com/v1/me', token={'access_token': session_bearer, 'token_type': 'Bearer'})
+                if resp.ok:
+                    spotify_user_info = resp.json()
+                    if spotify_user_info and 'id' in spotify_user_info:
                         active_user_id = spotify_user_info.get('id')
                         active_username = spotify_user_info.get('display_name') or active_user_id
-                        current_app.logger.debug(f"Found Spotify user: {active_username} (ID: {active_user_id})")
-                        
-                        # Get profile image if available
                         images = spotify_user_info.get('images', [])
-                        if images and len(images) > 0:
-                            active_user_image = images[0].get('url')
-                            
-                except Exception as user_info_error:
-                    current_app.logger.error(f"Error fetching Spotify user info: {str(user_info_error)}")
-                    
-                # For manual bearer tokens, try to determine expiry time
-                if token_source == '' or token_source not in ['user', 'client_credentials', 'system']:
-                    # This is likely a manual bearer token
-                    # Most bearer tokens are valid for 1 hour from issue
-                    # We don't know when it was issued, but we can notify the user
-                    # that these tokens typically expire after 1 hour
-                    from datetime import timedelta
-                    # Manual tokens stored in session likely were just added
-                    token_added_time = session.get('bearer_token_added', now.timestamp())
-                    typical_expiry = datetime.fromtimestamp(token_added_time) + timedelta(hours=1)
-                    active_token_expiry = typical_expiry
-                    
-                    # Mark it as a manual token for clarity
-                    token_source = 'manual'
-                    session['token_source'] = 'manual'
-            
-        except Exception as e:
-            current_app.logger.error(f"Error setting up Spotify client: {e}")
-    
-    # Determine Spotify connection status with corrected priority order
-    spotify_status = 'none'  # Default: no connection
-    
-    # Check for manually set bearer token (highest priority)
-    has_manual_bearer = 'access_token' in session and token_source == 'manual'
-    if has_manual_bearer:
-        spotify_status = 'bearer'
-    
-    # Check user's own Spotify connection (second priority)
-    elif token_source == 'user' or (current_user.spotify_token and current_user.spotify_refresh_token):
-        if current_user.spotify_token_expiry and current_user.spotify_token_expiry > now:
-            # User has valid token
-            spotify_status = 'user'
-        elif check_spotify_token(current_user):
-            # Token was refreshed successfully
-            spotify_status = 'user'
-    
-    # Check for client credentials token (third priority)
-    elif token_source == 'client_credentials':
+                        if images: active_user_image = images[0].get('url')
+                        current_app.logger.debug(f"Fetched Spotify user info for {active_username} using manual bearer token.")
+                        # Determine expiry for manual token (typically 1 hour from when it was added)
+                        token_added_time = session.get('bearer_token_added', now.timestamp())
+                        active_token_expiry = datetime.fromtimestamp(token_added_time) + timedelta(hours=1)
+                        session['token_source'] = 'user_manual' # Clarify token source
+                        token_source = 'user_manual'
+                    else: # Token worked but no user ID, or not OK
+                         current_app.logger.warning(f"Manual bearer token ({token_source}) did not return valid user info. Status: {resp.status_code}")
+                         spotify_user_info = None # Ensure it's None
+                else:
+                    current_app.logger.error(f"Error fetching Spotify user info with manual bearer token: {resp.status_code} {resp.text}")
+                    spotify_user_info = None
+                    if resp.status_code in [401, 403]: flash("Manually entered Spotify token is invalid or expired.", "warning")
+
+            except Exception as user_info_error:
+                current_app.logger.error(f"Exception fetching Spotify user info with manual bearer token: {str(user_info_error)}")
+                spotify_user_info = None
+        
+        # If token_source indicates it's client_credentials or if user fetch failed, it might be client_credentials
+        if not spotify_user_info and token_source in ['client_credentials', 'client_credentials_manual']:
+            try:
+                resp_cc = oauth.spotify.get('https://api.spotify.com/v1/browse/new-releases', params={'limit':1}, token={'access_token': session_bearer, 'token_type': 'Bearer'})
+                if resp_cc.ok:
+                    current_app.logger.info("Manual/Session token confirmed as working client credentials.")
+                    if token_source == 'client_credentials_manual':
+                        token_added_time = session.get('bearer_token_added', now.timestamp())
+                        active_token_expiry = datetime.fromtimestamp(token_added_time) + timedelta(hours=1)
+                    else: # system client_credentials
+                        active_token_expiry = datetime.fromtimestamp(client_token_expiry) if client_token_expiry else None
+                else:
+                    current_app.logger.warning(f"Manual/Session client credentials token validation failed. Status: {resp_cc.status_code}")
+                    if resp_cc.status_code in [401, 403]: flash("The client credentials token in session is invalid.", "warning")
+
+            except Exception as cc_error:
+                current_app.logger.error(f"Exception validating client credentials token from session: {str(cc_error)}")
+
+    # Determine Spotify connection status based on the findings
+    spotify_status = 'none'
+    if spotify_token_source == 'user':
+        spotify_status = 'user'
+    elif spotify_token_source == 'system':
+        spotify_status = 'system'
+    elif token_source == 'user_manual' and spotify_user_info: # Successfully used manual token as user
+        spotify_status = 'bearer' 
+    elif token_source in ['client_credentials', 'client_credentials_manual'] and session_bearer:
         spotify_status = 'client_credentials'
     
     return render_template(
@@ -688,112 +755,60 @@ The Quizzical Beats Team
 @users_bp.route('/spotify-link', methods=['GET', 'POST'])
 @login_required
 def spotify_link():
-    """Manage Spotify account connection"""
-    now = datetime.now()
-    
+    """
+    GET: Show management UI (manage_spotify.html) with current status and options.
+    POST: Trigger Spotify OAuth flow for linking/re-linking.
+    """
     if request.method == 'POST':
-        action = request.form.get('action')
-        
-        if action == 'disconnect':
-            # Disconnect Spotify account
-            current_user.spotify_token = None
-            current_user.spotify_refresh_token = None
-            current_user.spotify_token_expiry = None
-            current_user.oauth_id = None
-            
-            try:
-                db.session.commit()
-                flash('Your Spotify account has been disconnected', 'success')
-            except Exception as e:
-                db.session.rollback()
-                current_app.logger.error(f"Error disconnecting Spotify: {e}")
-                flash('An error occurred while disconnecting your Spotify account', 'danger')
+        # Only POST triggers the OAuth flow
+        if not current_app.config.get('SPOTIFY_CLIENT_ID'):
+            flash('Spotify integration is not configured.', 'danger')
+            return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+        redirect_uri = url_for('users.spotify_link_callback', _external=True)
+        return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
+
+    # GET: Show management UI
+    spotify_user_details = None 
+    if current_user.spotify_id:
+        spotify_user_details = {
+            "id": current_user.spotify_id,
+            "display_name": session.get('spotify_display_name', current_user.spotify_id) 
+        }
     
-    return render_template('users/spotify_link.html', now=now)
+    now = datetime.now()
+    spotify_user_info = session.get('spotify_user_info')
+    return render_template('users/manage_spotify.html', 
+                           spotify_user_details=spotify_user_details, 
+                           now=now, 
+                           spotify_user_info=spotify_user_info)
 
-@users_bp.route('/spotify-auth')
+@users_bp.route('/spotify-link/callback')
 @login_required
-def spotify_auth():
-    """Initiate Spotify OAuth flow"""
+def spotify_link_callback():
+    """Callback for linking Spotify to an existing user account."""
     try:
-        sp_oauth = SpotifyOAuth(
-            client_id=current_app.config['SPOTIFY_CLIENT_ID'],
-            client_secret=current_app.config['SPOTIFY_CLIENT_SECRET'],
-            redirect_uri=url_for('users.spotify_callback', _external=True),
-            scope=current_app.config['SPOTIFY_SCOPE']
-        )
-        auth_url = sp_oauth.get_authorize_url()
+        token = oauth.spotify.authorize_access_token()
+        user_info = get_spotify_user_info(token)
         
-        # Store state in session for validation
-        session['oauth_state'] = sp_oauth.state
-        
-        return redirect(auth_url)
-    except Exception as e:
-        current_app.logger.error(f"Error initiating Spotify auth: {e}")
-        flash('Error connecting to Spotify. Please try again.', 'danger')
-        return redirect(url_for('users.spotify_link'))
+        if not user_info or 'id' not in user_info:
+            flash('Failed to get user information from Spotify.', 'danger')
+            current_app.logger.error(f"Spotify link callback: Missing ID in user_info for user {current_user.id}. Info: {user_info}")
+            return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
 
-@users_bp.route('/spotify-callback')
-@login_required
-def spotify_callback():
-    """Handle Spotify OAuth callback"""
-    try:
-        # Verify state parameter
-        if request.args.get('state') != session.get('oauth_state'):
-            flash('Authentication state mismatch. Please try again.', 'danger')
-            return redirect(url_for('users.spotify_link'))
-        
-        # Get authorization code
-        code = request.args.get('code')
-        if not code:
-            flash('No authorization code received from Spotify.', 'danger')
-            return redirect(url_for('users.spotify_link'))
-        
-        # Exchange code for token
-        sp_oauth = SpotifyOAuth(
-            client_id=current_app.config['SPOTIFY_CLIENT_ID'],
-            client_secret=current_app.config['SPOTIFY_CLIENT_SECRET'],
-            redirect_uri=url_for('users.spotify_callback', _external=True),
-            scope=current_app.config['SPOTIFY_SCOPE']
-        )
-        
-        token_info = sp_oauth.get_access_token(code)
-        
-        if not token_info or 'access_token' not in token_info:
-            flash('Failed to obtain access token from Spotify.', 'danger')
-            return redirect(url_for('users.spotify_link'))
-        
-        # Save token to user
-        current_user.spotify_token = token_info['access_token']
-        current_user.spotify_refresh_token = token_info.get('refresh_token')
-        expiry = datetime.fromtimestamp(token_info['expires_at']) if 'expires_at' in token_info else None
-        current_user.spotify_token_expiry = expiry
-        
-        # Get Spotify user ID
-        try:
-            sp = current_app.config['sp']
-            sp.set_auth(token_info['access_token'])
-            user_info = sp.current_user()
-            current_user.oauth_id = user_info['id']
-        except:
-            # Continue even if we can't get the Spotify ID
-            current_app.logger.warning("Could not fetch Spotify user ID")
-        
-        # Save to database
-        try:
-            db.session.commit()
-            flash('Successfully connected to Spotify!', 'success')
-        except Exception as e:
-            db.session.rollback()
-            current_app.logger.error(f"Error saving Spotify token: {e}")
-            flash('Error saving Spotify connection.', 'danger')
-        
-        return redirect(url_for('users.spotify_link'))
-        
+        _process_spotify_link(current_user, token, user_info)
+
     except Exception as e:
-        current_app.logger.error(f"Error during Spotify callback: {e}")
-        flash('Error during Spotify authentication. Please try again.', 'danger')
-        return redirect(url_for('users.spotify_link'))
+        current_app.logger.error(f"Error in Spotify link callback for user {current_user.id}: {str(e)}")
+        flash('An error occurred while linking your Spotify account. Please try again.', 'danger')
+    
+    return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+
+@users_bp.route('/spotify/disconnect', methods=['POST'])
+@login_required
+def spotify_disconnect():
+    """Disconnect user's Spotify account."""
+    _process_spotify_disconnect(current_user)
+    return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
 
 @users_bp.route('/update-bearer-token', methods=['POST'])
 @login_required
@@ -804,6 +819,7 @@ def update_bearer_token():
         session.pop('access_token', None)
         session.pop('token_source', None)
         session.pop('bearer_token_added', None)
+        current_app.logger.info(f"User {current_user.id} cleared Spotify bearer token from session")
         flash('Spotify bearer token has been cleared', 'success')
         return redirect(url_for('users.profile'))
     
@@ -814,117 +830,58 @@ def update_bearer_token():
         return redirect(url_for('users.profile'))
     
     try:
-        # Store the token in session with timestamp and mark as manual
+        # Store the token in session with timestamp and mark as manual initially
         session['access_token'] = bearer_token
-        session['token_source'] = 'manual'
+        session['token_source'] = 'manual' # Initial assumption
         session['bearer_token_added'] = datetime.now().timestamp()
         
-        # Test the token with a simple request to validate it
-        sp = current_app.config['sp']
-        sp.set_auth(bearer_token)
+        current_app.logger.info(f"User {current_user.id} added a manual bearer token to session. Validating: {bearer_token[:10]}...")
         
-        # Try to get current user info as a test
-        user_info = sp.current_user()
-        
-        if user_info and 'id' in user_info:
-            username = user_info.get('display_name') or user_info.get('id')
-            flash(f'Successfully authenticated with Spotify as {username}', 'success')
-            
-            # Log who this token belongs to
-            current_app.logger.info(f"Manual bearer token added for Spotify user: {username} (ID: {user_info.get('id')})")
-        else:
-            flash('Token saved but validation failed. The token may be invalid or expired.', 'warning')
-    except Exception as e:
-        current_app.logger.error(f"Error validating bearer token: {e}")
-        flash(f'Token saved but error during validation: {str(e)}', 'warning')
+        try:
+            resp_me = oauth.spotify.get('https://api.spotify.com/v1/me', token={'access_token': bearer_token, 'token_type': 'Bearer'})
+            user_info = resp_me.json() if resp_me.ok else None
+
+            if user_info and 'id' in user_info:
+                # This is a user OAuth token
+                username = user_info.get('display_name') or user_info.get('id')
+                
+                # Update token source to reflect it's a user token
+                session['token_source'] = 'user_manual'
+                current_app.logger.info(f"Token identified as user OAuth token for: {username} (ID: {user_info.get('id')})")
+                flash(f'Successfully authenticated with Spotify as {username}', 'success')
+                current_app.logger.info(f"Manual bearer token added for Spotify user: {username} (ID: {user_info.get('id')})")
+            else:
+                current_app.logger.warning(f"Manual token is not a valid user token. Response: {resp_me.status_code if not resp_me.ok else 'OK, but no ID or user_info was None'}")
+                raise Exception("Not a user token or failed to fetch user info")
+
+        except Exception as user_error:
+            current_app.logger.warning(f"Validating as user token failed: {str(user_error)}. Checking if client credentials token...")
+            try:
+                resp_browse = oauth.spotify.get('https://api.spotify.com/v1/browse/new-releases', params={'limit':1}, token={'access_token': bearer_token, 'token_type': 'Bearer'})
+                browse_results = resp_browse.json() if resp_browse.ok else None
+
+                if browse_results and 'albums' in browse_results:
+                    # This looks like a client credentials token
+                    session['token_source'] = 'client_credentials_manual'
+                    current_app.logger.info("Token identified as client credentials token (manual)")
+                    flash('Token saved as client credentials token. This type of token cannot access user-specific data.', 'warning')
+                else:
+                    flash('Token saved but validation failed (cannot fetch new releases). The token may be invalid or expired.', 'warning')
+                    current_app.logger.warning(f"Manual token validation as client_credentials failed. Response: {resp_browse.status_code if not resp_browse.ok else 'OK, but no albums or browse_results was None'}")
+            except Exception as e_browse:
+                current_app.logger.error(f"Error validating bearer token as client credentials: {e_browse}")
+                flash(f'Token saved but error during client credentials validation: {str(e_browse)}', 'warning')
+    except Exception as e_main:
+        current_app.logger.error(f"Error processing bearer token: {e_main}")
+        flash(f'Error processing token: {str(e_main)}', 'warning')
     
     return redirect(url_for('users.profile'))
 
 @users_bp.route('/use-refresh-token', methods=['POST'])
 @login_required
 def use_refresh_token():
-    """Generate a new access token using the stored refresh token"""
-    # Check if user has a refresh token
-    if not current_user.spotify_refresh_token:
-        flash('No Spotify refresh token found. Please connect your Spotify account first.', 'warning')
-        return redirect(url_for('users.profile'))
-    
-    try:
-        # Create OAuth object
-        sp_oauth = SpotifyOAuth(
-            client_id=current_app.config['SPOTIFY_CLIENT_ID'],
-            client_secret=current_app.config['SPOTIFY_CLIENT_SECRET'],
-            redirect_uri=url_for('users.spotify_callback', _external=True),
-            scope=current_app.config['SPOTIFY_SCOPE']
-        )
-        
-        # Refresh the token
-        token_info = sp_oauth.refresh_access_token(current_user.spotify_refresh_token)
-        
-        if not token_info or 'access_token' not in token_info:
-            flash('Failed to refresh access token from Spotify.', 'danger')
-            return redirect(url_for('users.profile'))
-        
-        # Update user model with new token information
-        current_user.spotify_token = token_info['access_token']
-        current_user.spotify_token_expiry = datetime.fromtimestamp(token_info['expires_at']) if 'expires_at' in token_info else None
-        
-        # If we got a new refresh token (unusual but possible), store it
-        if 'refresh_token' in token_info:
-            current_user.spotify_refresh_token = token_info['refresh_token']
-        
-        # Save to database
-        db.session.commit()
-        
-        # Also set token in the session for direct API access
-        session['access_token'] = token_info['access_token']
-        
-        # Validate the token by getting user info
-        sp = current_app.config['sp']
-        sp.set_auth(token_info['access_token'])
-        user_info = sp.current_user()
-        
-        if user_info and 'id' in user_info:
-            flash(f'Successfully generated new token for {user_info.get("display_name", user_info["id"])}', 'success')
-        else:
-            flash('Token generated but validation failed.', 'warning')
-            
-    except Exception as e:
-        current_app.logger.error(f"Error refreshing token: {e}")
-        flash(f'Error refreshing token: {str(e)}', 'danger')
-    
-    return redirect(url_for('users.profile'))
-
-def check_spotify_token(user):
-    """
-    Helper function to check if user's Spotify token needs to be refreshed
-    Returns True if token is valid, False if not
-    """
-    if not user.spotify_token or not user.spotify_refresh_token or not user.spotify_token_expiry:
-        return False
-    
-    now = datetime.now()
-    
-    # If token expires in less than 5 minutes, refresh it
-    if user.spotify_token_expiry - now < timedelta(minutes=5):
-        sp_oauth = SpotifyOAuth(
-            client_id=current_app.config['SPOTIFY_CLIENT_ID'],
-            client_secret=current_app.config['SPOTIFY_CLIENT_SECRET'],
-            redirect_uri=url_for('users.spotify_callback', _external=True),
-            scope=current_app.config['SPOTIFY_SCOPE']
-        )
-        
-        try:
-            token_info = sp_oauth.refresh_access_token(user.spotify_refresh_token)
-            user.spotify_token = token_info['access_token']
-            user.spotify_token_expiry = datetime.fromtimestamp(token_info['expires_at'])
-            db.session.commit()
-            return True
-        except Exception as e:
-            current_app.logger.error(f"Error refreshing Spotify token: {e}")
-            return False
-    
-    return True
+    # This will be reviewed and updated for authlib
+    pass
 
 @users_bp.route('/setup')
 @login_required

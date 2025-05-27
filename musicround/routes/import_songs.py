@@ -3,43 +3,59 @@ import os
 import requests
 import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, flash
+from flask_login import login_required, current_user
 from musicround.models import Song, db
 from musicround.helpers.metadata import get_song_metadata_by_isrc
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.auth_helpers import oauth
 
 import_songs_bp = Blueprint('import_songs', __name__, url_prefix='/import')
 
 # Legacy function retained for backward compatibility
 def import_track(track_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    result = ImportHelper.import_item('spotify', 'track', track_id)
-    return result['imported_count'] > 0
+    result = ImportHelper.import_item(service_name='spotify', item_type='track', item_id=track_id, oauth_spotify=oauth.spotify)
+    return result.get('imported_count', 0) > 0
 
 # Legacy function retained for backward compatibility
 def import_pl(playlist_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    ImportHelper.import_item('spotify', 'playlist', playlist_id)
+    ImportHelper.import_item(service_name='spotify', item_type='playlist', item_id=playlist_id, oauth_spotify=oauth.spotify)
 
 # Legacy function retained for backward compatibility
 def import_al(album_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    ImportHelper.import_item('spotify', 'album', album_id)
+    ImportHelper.import_item(service_name='spotify', item_type='album', item_id=album_id, oauth_spotify=oauth.spotify)
 
 @import_songs_bp.route('/song', methods=['GET', 'POST'])
+@login_required
 def import_song():
-    if 'access_token' not in session:
+    if not current_user.is_authenticated:
+        flash("Please log in to import songs.", "warning")
         return redirect(url_for('users.login'))
-    
+
+    if not current_user.spotify_token:
+        flash("Please connect your Spotify account to import songs.", "warning")
+        return redirect(url_for('users.spotify_auth'))
+
     if request.method == 'POST':
-        track_id = request.form['song_id']
-        result = ImportHelper.import_item('spotify', 'track', track_id)
+        track_id = request.form.get('song_id')
+        if not track_id:
+            flash("No song ID provided for import.", "danger")
+            return redirect(request.referrer or url_for('core.search'))
+            
+        result = ImportHelper.import_item(service_name='spotify', item_type='track', item_id=track_id, oauth_spotify=oauth.spotify)
         
-        if result['imported_count'] > 0:
-            flash(f'Successfully imported {result["imported_count"]} song!', 'success')
-        elif result['skipped_count'] > 0:
+        imported_count = result.get('imported_count', 0)
+        skipped_count = result.get('skipped_count', 0)
+        errors = result.get("errors", [])
+
+        if imported_count > 0:
+            flash(f'Successfully imported {imported_count} song!', 'success')
+        elif skipped_count > 0:
             flash('Song was already in the database.', 'info')
         else:
-            flash(f'Error importing song: {", ".join(result["errors"])}', 'danger')
+            flash(f'Error importing song: {", ".join(errors) if errors else "Unknown error"}', 'danger')
             
         return redirect(url_for('core.view_songs'))
         
@@ -53,22 +69,37 @@ def import_song():
                          back_url=url_for('core.search'))
 
 @import_songs_bp.route('/playlist', methods=['GET', 'POST'])
+@login_required
 def import_playlist():
-    if 'access_token' not in session:
+    if not current_user.is_authenticated:
+        flash("Please log in to import playlists.", "warning")
         return redirect(url_for('users.login'))
+
+    if not current_user.spotify_token:
+        flash("Please connect your Spotify account to import playlists.", "warning")
+        return redirect(url_for('users.spotify_auth'))
     
     if request.method == 'POST':
-        playlist_id = request.form['playlist_id']
-        result = ImportHelper.import_item('spotify', 'playlist', playlist_id)
+        playlist_id = request.form.get('playlist_id')
+        if not playlist_id:
+            flash("No playlist ID provided for import.", "danger")
+            return redirect(request.referrer or url_for('core.search'))
+
+        result = ImportHelper.import_item(service_name='spotify', item_type='playlist', item_id=playlist_id, oauth_spotify=oauth.spotify)
         
-        if result['imported_count'] > 0:
-            flash(f'Successfully imported {result["imported_count"]} songs from playlist!', 'success')
-        elif result['skipped_count'] > 0 and result['error_count'] == 0:
-            flash(f'All {result["skipped_count"]} songs were already in the database.', 'info')
-        elif result['error_count'] > 0:
-            flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
+        imported_count = result.get('imported_count', 0)
+        skipped_count = result.get('skipped_count', 0)
+        error_count = result.get('error_count', 0)
+        errors = result.get("errors", [])
+
+        if imported_count > 0:
+            flash(f'Successfully imported {imported_count} songs from playlist! ({skipped_count} skipped, {error_count} errors).', 'success')
+        elif skipped_count > 0 and error_count == 0:
+            flash(f'All {skipped_count} songs were already in the database.', 'info')
+        elif error_count > 0:
+            flash(f'Playlist import: {imported_count} new, {skipped_count} skipped, {error_count} errors. Errors: {", ".join(errors)}', 'warning')
         else:
-            flash(f'Error importing playlist: {", ".join(result["errors"])}', 'danger')
+            flash(f'Error importing playlist: {", ".join(errors) if errors else "No songs imported, playlist might be empty or an unknown issue occurred."}', 'danger')
             
         return redirect(url_for('core.view_songs'))
         
@@ -82,22 +113,37 @@ def import_playlist():
                          back_url=url_for('core.search'))
 
 @import_songs_bp.route('/album', methods=['GET', 'POST'])
+@login_required
 def import_album():
-    if 'access_token' not in session:
+    if not current_user.is_authenticated:
+        flash("Please log in to import albums.", "warning")
         return redirect(url_for('users.login'))
+
+    if not current_user.spotify_token:
+        flash("Please connect your Spotify account to import albums.", "warning")
+        return redirect(url_for('users.spotify_auth'))
     
     if request.method == 'POST':
-        album_id = request.form['album_id']
-        result = ImportHelper.import_item('spotify', 'album', album_id)
+        album_id = request.form.get('album_id')
+        if not album_id:
+            flash("No album ID provided for import.", "danger")
+            return redirect(request.referrer or url_for('core.search'))
+            
+        result = ImportHelper.import_item(service_name='spotify', item_type='album', item_id=album_id, oauth_spotify=oauth.spotify)
         
-        if result['imported_count'] > 0:
-            flash(f'Successfully imported {result["imported_count"]} songs from album!', 'success')
-        elif result['skipped_count'] > 0 and result['error_count'] == 0:
-            flash(f'All {result["skipped_count"]} songs were already in the database.', 'info')
-        elif result['error_count'] > 0:
-            flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
+        imported_count = result.get('imported_count', 0)
+        skipped_count = result.get('skipped_count', 0)
+        error_count = result.get('error_count', 0)
+        errors = result.get("errors", [])
+
+        if imported_count > 0:
+            flash(f'Successfully imported {imported_count} songs from album! ({skipped_count} skipped, {error_count} errors).', 'success')
+        elif skipped_count > 0 and error_count == 0:
+            flash(f'All {skipped_count} songs were already in the database.', 'info')
+        elif error_count > 0:
+            flash(f'Album import: {imported_count} new, {skipped_count} skipped, {error_count} errors. Errors: {", ".join(errors)}', 'warning')
         else:
-            flash(f'Error importing album: {", ".join(result["errors"])}', 'danger')
+            flash(f'Error importing album: {", ".join(errors) if errors else "No songs imported, album might be empty or an unknown issue occurred."}', 'danger')
             
         return redirect(url_for('core.view_songs'))
         

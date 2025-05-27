@@ -6,10 +6,10 @@ from musicround.models import Song, Tag, SongTag, db, Round
 from musicround.helpers.metadata import get_song_metadata_by_isrc
 from flask_wtf.csrf import CSRFProtect
 import traceback  # Add import at the top
-import spotipy as spotify  # Changed import from spotify to spotipy as spotify
 import logging
 from sqlalchemy import or_
 from flask_login import login_required  # Add import for login_required
+import requests  # Import requests for direct API calls
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -421,15 +421,25 @@ def get_songs_by_tag(tag_id):
 def get_spotify_album(album_id):
     try:
         # Check for Spotify access token
-        if 'access_token' not in session:
-            return jsonify({'error': 'You must be logged in to access this feature'}), 401
+        if 'spotify_token' not in session:  # Assuming token will be stored as 'spotify_token' in session
+            return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
         
-        # Initialize Spotify client with access token
-        sp = spotify.Spotify(auth=session.get('access_token'))
+        access_token = session['spotify_token']
+        headers = {
+            'Authorization': f'Bearer {access_token}'
+        }
         
         # Get album details
-        album = sp.album(album_id)
-        album_tracks = sp.album_tracks(album_id, limit=50)
+        album_url = f'https://api.spotify.com/v1/albums/{album_id}'
+        album_response = requests.get(album_url, headers=headers)
+        album_response.raise_for_status()  # Raise an exception for HTTP errors
+        album = album_response.json()
+
+        # Get album tracks
+        album_tracks_url = f'https://api.spotify.com/v1/albums/{album_id}/tracks?limit=50'
+        album_tracks_response = requests.get(album_tracks_url, headers=headers)
+        album_tracks_response.raise_for_status()
+        album_tracks = album_tracks_response.json()
         
         # Format tracks
         tracks = []
@@ -454,37 +464,72 @@ def get_spotify_album(album_id):
         }
         
         return jsonify(album_data)
+    except requests.exceptions.HTTPError as http_err:
+        current_app.logger.error(f"HTTP error fetching Spotify album: {http_err} - {http_err.response.text}")
+        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify album: {str(e)}")
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Unable to fetch album details'}), 500
 
 @api_bp.route('/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_spotify_playlist(playlist_id):
     try:
         # Check for Spotify access token
-        if 'access_token' not in session:
-            return jsonify({'error': 'You must be logged in to access this feature'}), 401
+        if 'spotify_token' not in session:  # Assuming token will be stored as 'spotify_token' in session
+            return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
+
+        access_token = session['spotify_token']
+        headers = {
+            'Authorization': f'Bearer {access_token}'
+        }
+          # Get playlist details
+        playlist_url = f'https://api.spotify.com/v1/playlists/{playlist_id}'
+        playlist_response = requests.get(playlist_url, headers=headers)
+        playlist_response.raise_for_status()
+        playlist = playlist_response.json()
         
-        # Initialize Spotify client with access token
-        sp = spotify.Spotify(auth=session.get('access_token'))
-        
-        # Get playlist details
-        playlist = sp.playlist(playlist_id)
-        
-        # Format tracks
+        # Format tracks with pagination support
         tracks = []
-        for item in playlist['tracks']['items']:
-            if not item['track']:
-                continue
+        tracks_url = playlist['tracks']['href']  # Get the tracks URL for pagination
+        offset = 0
+        limit = 100  # Maximum limit for tracks per request
+        total_tracks = playlist['tracks']['total']
+        
+        current_app.logger.info(f"Fetching {total_tracks} tracks from playlist {playlist_id}")
+        
+        # Fetch all tracks with pagination
+        while True:
+            # Construct URL with pagination parameters
+            paginated_url = f"{tracks_url}?offset={offset}&limit={limit}"
+            current_app.logger.info(f"Fetching tracks from offset {offset}, limit {limit}")
+            
+            tracks_response = requests.get(paginated_url, headers=headers)
+            tracks_response.raise_for_status()
+            tracks_data = tracks_response.json()
+            
+            # Process tracks from this page
+            items = tracks_data.get('items', [])
+            for item in items:
+                if not item['track']:  # Handle cases where track might be None (e.g., local files in playlist)
+                    continue
+                    
+                track = item['track']
+                artist_names = [artist['name'] for artist in track['artists']]
+                tracks.append({
+                    'name': track['name'],
+                    'artist': ', '.join(artist_names),
+                    'duration': track['duration_ms'],
+                    'album': track['album']['name'] if track.get('album') else ''
+                })
+            
+            current_app.logger.info(f"Processed {len(items)} tracks, total so far: {len(tracks)}")
+              # Check if we have more pages to fetch
+            if not tracks_data.get('next') or len(items) < limit:
+                current_app.logger.info(f"Finished fetching all tracks. Total tracks: {len(tracks)}")
+                break
                 
-            track = item['track']
-            artist_names = [artist['name'] for artist in track['artists']]
-            tracks.append({
-                'name': track['name'],
-                'artist': ', '.join(artist_names),
-                'duration': track['duration_ms'],
-                'album': track['album']['name'] if track.get('album') else ''
-            })
+            offset += limit
         
         # Format playlist response
         playlist_data = {
@@ -498,9 +543,51 @@ def get_spotify_playlist(playlist_id):
         }
         
         return jsonify(playlist_data)
+    except requests.exceptions.HTTPError as http_err:
+        current_app.logger.error(f"HTTP error fetching Spotify playlist: {http_err} - {http_err.response.text}")
+        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify playlist: {str(e)}")
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Unable to fetch playlist details'}), 500
+
+@api_bp.route('/spotify/search', methods=['GET'])
+@login_required
+def spotify_search():
+    query = request.args.get('q', '')
+    search_type = request.args.get('type', 'track,artist,album')  # Default to searching for tracks, artists, and albums
+    limit = request.args.get('limit', 20)
+
+    if not query:
+        return jsonify({"error": "Search query cannot be empty"}), 400
+
+    if 'spotify_token' not in session:
+        return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
+
+    access_token = session['spotify_token']
+    headers = {
+        'Authorization': f'Bearer {access_token}'
+    }
+    params = {
+        'q': query,
+        'type': search_type,
+        'limit': limit
+    }
+
+    try:
+        search_url = 'https://api.spotify.com/v1/search'
+        response = requests.get(search_url, headers=headers, params=params)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        search_results = response.json()
+        return jsonify(search_results)
+
+    except requests.exceptions.HTTPError as http_err:
+        current_app.logger.error(f"HTTP error during Spotify search: {http_err} - {http_err.response.text}")
+        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+    except Exception as e:
+        current_app.logger.error(f"Error during Spotify search: {str(e)}")
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Unable to perform Spotify search'}), 500
 
 @api_bp.route('/deezer/album/<album_id>', methods=['GET'])
 def get_deezer_album(album_id):

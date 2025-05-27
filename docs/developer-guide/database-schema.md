@@ -64,7 +64,7 @@ The `User` table stores user account information and authentication details.
 | reset_token           | String(100)  | Password reset token                             |
 | reset_token_expiry    | DateTime     | Token expiration time                            |
 | auth_provider         | String(20)   | Authentication provider (local, google, etc.)    |
-| oauth_id              | String(100)  | Spotify user ID                                  |
+| spotify_id            | String(100)  | Spotify user ID                                  |
 | spotify_token         | Text         | Spotify access token                             |
 | spotify_refresh_token | Text         | Spotify refresh token                            |
 | spotify_token_expiry  | DateTime     | Spotify token expiration                         |

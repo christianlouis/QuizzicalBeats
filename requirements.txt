@@ -2,7 +2,6 @@ Flask
 Flask-WTF
 Flask-SQLAlchemy
 flask_migrate
-spotipy
 requests
 pydub
 reportlab

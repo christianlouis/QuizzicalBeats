@@ -7,19 +7,7 @@
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-2">Import Playlist</h1>
         <p class="text-gray-600">Create a music quiz round from a Spotify or Deezer playlist.</p>
-    </div>
-
-    <div class="bg-white shadow-md rounded-lg p-6">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="mb-4 p-4 border-l-4 {% if category == 'error' %}border-red-500 bg-red-50 text-red-700{% else %}border-green-500 bg-green-50 text-green-700{% endif %}">
-                        {{ message }}
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
+    </div>    <div class="bg-white shadow-md rounded-lg p-6">
         <form method="POST" action="{{ url_for('generate.import_playlist') }}" id="importPlaylistForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             

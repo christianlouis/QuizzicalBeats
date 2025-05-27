@@ -201,9 +201,23 @@
                 </div>
             </div>
         </nav>
-    </header>
-
-    <main class="flex-grow container mx-auto px-4 py-6">
+    </header>    <main class="flex-grow container mx-auto px-4 py-6">
+        <!-- Flash Messages - Global display for all pages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-6">
+                    {% for category, message in messages %}
+                        <div class="mb-4 p-3 {% if category == 'danger' %}bg-red-100 text-red-700{% elif category == 'success' %}bg-green-100 text-green-700{% elif category == 'warning' %}bg-yellow-100 text-yellow-700{% elif category == 'info' %}bg-blue-100 text-blue-700{% else %}bg-blue-100 text-blue-700{% endif %} rounded shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span>{{ message }}</span>
+                                <button onclick="this.parentElement.parentElement.style.display='none'" class="text-lg leading-none hover:opacity-75 ml-2">&times;</button>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        
         {% block content %}
         {% endblock %}
     </main>

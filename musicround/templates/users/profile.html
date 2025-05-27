@@ -6,16 +6,6 @@
 <div class="max-w-4xl mx-auto my-8 p-6 bg-white rounded-lg shadow-md">
     <h2 class="text-2xl font-bold mb-6 text-navy-800">My Profile</h2>
     
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="mb-4 p-3 {% if category == 'danger' %}bg-red-100 text-red-700{% elif category == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-700{% endif %} rounded">
-                    {{ message }}
-                </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-    
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Profile Info -->
         <div class="md:col-span-2">
@@ -159,12 +149,11 @@
                 <div class="flex items-center mb-3">
                     <i class="fab fa-spotify text-[#1DB954] text-2xl mr-3"></i>
                     <div>
-                        <h4 class="font-medium">Spotify</h4>
-                        <p class="text-sm text-gray-600">
+                        <h4 class="font-medium">Spotify</h4>                        <p class="text-sm text-gray-600">
                             {% if current_user.spotify_token %}
                                 Connected
-                                {% if current_user.oauth_id %}
-                                    as {{ current_user.oauth_id }}
+                                {% if current_user.spotify_id %}
+                                    as {{ current_user.spotify_id }}
                                 {% endif %}
                             {% else %}
                                 Not connected
@@ -373,10 +362,9 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% if current_user.spotify_token %}
-                        <tr class="border-b border-gray-200">
+                        {% if current_user.spotify_token %}                        <tr class="border-b border-gray-200">
                             <td class="py-2 font-medium">Spotify ID:</td>
-                            <td class="py-2">{{ current_user.oauth_id or 'Unknown' }}</td>
+                            <td class="py-2">{{ current_user.spotify_id or 'Unknown' }}</td>
                         </tr>
                         <tr class="border-b border-gray-200">
                             <td class="py-2 font-medium">Token Expiry:</td>
