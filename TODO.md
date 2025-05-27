@@ -91,49 +91,60 @@
 
 ## 🆕 Upcoming Milestones
 
-### 🎯 Milestone 10: **"Import Intelligent" Release** – Enhanced Song Import System
 
-* [ ] Implement parallel playlist import processing
-  * [ ] Design and implement import queue system
-  * [ ] Add background worker system for processing imports
-  * [ ] Enable multiple concurrent import jobs
-  * [ ] Implement priority system for import jobs
-* [ ] Create comprehensive import progress reporting
-  * [ ] Real-time progress indicators for active imports
-  * [ ] Detailed error reporting with recovery options
-  * [ ] Email notifications when imports complete
-* [ ] Redesign Spotify search functionality
-  * [ ] Improve search algorithm and relevance scoring
-  * [ ] Add advanced filtering options (year, genre, etc.)
-  * [ ] Implement caching for frequent searches
-  * [ ] Ensure proper pagination and performance
-* [ ] Add text-based playlist import capability
-  * [ ] Support for pasting plain text playlists
-  * [ ] Line-by-line parsing with artist/song detection
-  * [ ] Confidence scoring for matches
-  * [ ] Manual review interface for low-confidence matches
-  * [ ] Support for various text formats (CSV, plain text, etc.)
-* [ ] Build playlist scraper for "curated" Spotify playlists
-  * [ ] Web scraper for Spotify web interface
-  * [ ] Extract track names and artists from HTML/JSON
-  * [ ] Format compatibility with text-based import
-  * [ ] Handle rate limiting and detection prevention
-* [ ] Implement production-grade web server
-  * [ ] Replace Flask development server with Gunicorn/uWSGI
-  * [ ] Configure proper worker processes and threads
-  * [ ] Implement graceful shutdown and restart capabilities
-  * [ ] Add Nginx as reverse proxy with proper caching
-  * [ ] Set up proper SSL termination and security headers
-  * [ ] Optimize static file serving
-* [ ] Scale database for concurrent operations
-  * [ ] Implement connection pooling
-  * [ ] Add database query optimizations and indexing
-  * [ ] Configure database for concurrent write operations
-  * [ ] Set up monitoring for database performance
-  * [ ] Implement read/write splitting if necessary
-  * [ ] Add database migration safety for zero-downtime upgrades
+### 🎯 Milestone 10: **"Import Infrastructure" Release** – Queue & Worker Setup
 
-### 🎯 Milestone 11: **"Scraper Symphony" Release** – External Music Data
+* [ ] Implement import queue system
+* [ ] Add background worker process for playlist imports
+* [ ] Support multiple concurrent import jobs
+* [ ] Implement priority handling for import jobs
+
+### 🎯 Milestone 11: **"Progress Pulse" Release** – Import Status Tracking
+
+* [ ] Real-time progress indicators for active imports
+* [ ] Detailed error reporting with recovery options
+* [ ] Email notifications when imports complete
+
+### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
+
+* [ ] Improve search algorithm and relevance scoring
+* [ ] Add advanced filtering options (year, genre, etc.)
+* [ ] Implement caching for frequent searches
+* [ ] Ensure proper pagination and performance
+
+### 🎯 Milestone 13: **"Textual Transport" Release** – Text-Based Playlist Import
+
+* [ ] Support for pasting plain text playlists
+* [ ] Line-by-line parsing with artist/song detection
+* [ ] Confidence scoring for matches
+* [ ] Manual review interface for low-confidence matches
+* [ ] Support for various text formats (CSV, plain text, etc.)
+
+### 🎯 Milestone 14: **"Curated Collector" Release** – Playlist Scraper
+
+* [ ] Web scraper for Spotify web interface
+* [ ] Extract track names and artists from HTML/JSON
+* [ ] Format compatibility with text-based import
+* [ ] Handle rate limiting and detection prevention
+
+### 🎯 Milestone 15: **"Server Stability" Release** – Production Web Server
+
+* [ ] Replace Flask development server with Gunicorn/uWSGI
+* [ ] Configure proper worker processes and threads
+* [ ] Implement graceful shutdown and restart capabilities
+* [ ] Add Nginx as reverse proxy with proper caching
+* [ ] Set up proper SSL termination and security headers
+* [ ] Optimize static file serving
+
+### 🎯 Milestone 16: **"Database Durability" Release** – Concurrent Operations
+
+* [ ] Implement connection pooling
+* [ ] Add database query optimizations and indexing
+* [ ] Configure database for concurrent write operations
+* [ ] Set up monitoring for database performance
+* [ ] Implement read/write splitting if necessary
+* [ ] Add database migration safety for zero-downtime upgrades
+### 🎯 Milestone 17: **"Scraper Symphony" Release** – External Music Data
 
 * [ ] Identify 2–3 public music chart sources (Billboard, Official Charts, etc.)
 * [ ] Build scraper with user-agent rotation and proxy support
@@ -143,7 +154,7 @@
 * [ ] Store scraper runs and log errors transparently
 * [ ] Add cron-based scheduler for scraper refresh
 
-### 🎯 Milestone 12: **"Alert Amplifier" Release** – Notifications & Emails
+### 🎯 Milestone 18: **"Alert Amplifier" Release** – Notifications & Emails
 
 * [ ] Email verification for new accounts
 * [ ] Notify users when round generation completes
@@ -151,7 +162,7 @@
 * [ ] Optional weekly usage summary for admins
 * [ ] Push notification support via browser or Telegram
 
-### 🎯 Milestone 13: **"Rhythm Roundsmith" Release** – AI-Generated Quiz Rounds
+### 🎯 Milestone 19: **"Rhythm Roundsmith" Release** – AI-Generated Quiz Rounds
 
 * [ ] Develop AI module to generate full quiz rounds
   * [ ] Use existing song metadata (genre, year, tempo, artist)
@@ -164,7 +175,7 @@
 * [ ] Add backend abstraction to swap AI providers (OpenAI, Mistral, etc.)
 * [ ] Build tuning pipeline for prompt quality testing
 
-### 🎯 Milestone 14: **"Storage Sanctuary" Release** – Multi-Provider Storage
+### 🎯 Milestone 20: **"Storage Sanctuary" Release** – Multi-Provider Storage
 
 * [ ] Implement cloud storage backend abstraction
 * [ ] Add support for AWS S3 storage
@@ -178,7 +189,7 @@
 * [ ] Add background synchronization and status tracking
 * [ ] Implement bandwidth-efficient differential uploads
 
-### 🎯 Milestone 15: **"Collaboration Core" Release** – Multi-User Round Sharing
+### 🎯 Milestone 21: **"Collaboration Core" Release** – Multi-User Round Sharing
 
 * [ ] Allow shared editing of rounds
 * [ ] Add collaboration roles (view, comment, edit)
@@ -188,7 +199,7 @@
 * [ ] Allow public view-only sharing links with optional expiration
 * [ ] Display access audit log (who opened/edited and when)
 
-### 🎯 Milestone 16: **"Profile Personalizer" Release** – User Preferences & Tagging
+### 🎯 Milestone 22: **"Profile Personalizer" Release** – User Preferences & Tagging
 
 * [x] User-specific intro/outro/replay MP3 fallback system
 * [x] Persistent custom user settings
@@ -197,7 +208,7 @@
 * [ ] Add filtering and sorting by tag
 * [ ] Dark mode toggle
 
-### 🎯 Milestone 17: **"Performance Pulse" Release** – Scaling & Speed
+### 🎯 Milestone 23: **"Performance Pulse" Release** – Scaling & Speed
 
 * [ ] Index high-traffic database fields (tags, dates, users)
 * [ ] Paginate round/song lists
@@ -205,7 +216,7 @@
 * [ ] Add Redis/memory cache layer for read-heavy endpoints
 * [ ] Load test with simulated users and large playlists
 
-### 🎯 Milestone 18: **"Deployment Dynamo" Release** – CI/CD and Maintenance
+### 🎯 Milestone 24: **"Deployment Dynamo" Release** – CI/CD and Maintenance
 
 * [ ] GitHub Actions or GitLab CI/CD pipeline for builds and tests
 * [ ] Nightly backup job with status alert
@@ -228,5 +239,5 @@
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: May 14, 2025*
+*Last updated: May 27, 2025*
 
