@@ -722,3 +722,184 @@ def apply_retention_policy(retention_days=30):
             "deleted_count": 0,
             "deleted_backups": []
         }
+
+def upload_backup(file):
+    """
+    Upload and validate a backup file to the system
+    
+    Args:
+        file: A FileStorage object from Flask's request.files
+        
+    Returns:
+        dict: Operation status and information about the uploaded backup
+    """
+    try:
+        # Ensure backup directory exists
+        backup_dir = os.path.join('/data', 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Generate a unique filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Save the file with original filename but prefixed with timestamp
+        # This preserves the original filename but ensures uniqueness
+        secure_filename = file.filename.replace(' ', '_')
+        save_filename = f"{timestamp}_{secure_filename}"
+        save_path = os.path.join(backup_dir, save_filename)
+        
+        # Save the uploaded file
+        file.save(save_path)
+        logger.info(f"Uploaded backup saved to {save_path}")
+        
+        # Validate the backup file - check if it's a valid zip file
+        if not zipfile.is_zipfile(save_path):
+            # Clean up invalid file
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            return {
+                "status": "error",
+                "message": "Uploaded file is not a valid backup archive."
+            }
+        
+        # Basic validation of backup contents
+        with zipfile.ZipFile(save_path, 'r') as zip_ref:
+            file_list = zip_ref.namelist()
+            # Check for essential files in the backup
+            if 'database.db' not in file_list and 'song_data.db' not in file_list:
+                # Clean up invalid backup
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+                return {
+                    "status": "error",
+                    "message": "Uploaded file is not a valid Quizzical Beats backup. No database found."
+                }
+        
+        # Return success with file info
+        file_size = os.path.getsize(save_path)
+        readable_size = f"{file_size / (1024*1024):.2f} MB"
+        
+        return {
+            "status": "success",
+            "message": f"Backup uploaded successfully ({readable_size}).",
+            "filename": save_filename,
+            "path": save_path,
+            "size": file_size,
+            "upload_time": timestamp
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading backup: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error uploading backup: {str(e)}"
+        }
+
+def update_ofelia_config(retention_days=30):
+    """
+    Update the Ofelia scheduler configuration file based on current backup settings.
+    This creates or updates the config file that Ofelia uses for scheduling backups.
+    
+    Args:
+        retention_days: Number of days of backups to keep (0 = keep all)
+        
+    Returns:
+        dict: Operation status information and config details
+    """
+    try:
+        from musicround.models import SystemSetting
+        import os
+        
+        # Get backup schedule information
+        schedule_time = SystemSetting.get('backup_schedule_time', '03:00')
+        schedule_frequency = SystemSetting.get('backup_schedule_frequency', 'daily')
+        schedule_enabled = SystemSetting.get('backup_schedule_enabled', 'true') == 'true'
+        
+        # Map schedule frequency to cron expressions
+        frequency_map = {
+            'hourly': '@hourly',
+            'daily': '@daily', 
+            'weekly': '@weekly'
+        }
+        
+        schedule_cron = frequency_map.get(schedule_frequency, '@daily')
+        
+        # Determine the config file path - use environment variable or default
+        config_dir = os.environ.get('OFELIA_CONFIG_DIR', '/data/config')
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, 'ofelia.ini')
+        
+        # Create the config content
+        config_content = f"""[global]
+save-folder = /var/log/ofelia
+
+[job-exec "backup"]
+schedule = {schedule_cron}
+command = python /app/run.py backup create --auto
+user = root
+no-overlap = true
+
+[job-exec "retention"]
+schedule = @weekly
+command = python /app/run.py backup retention --days {retention_days}
+user = root
+no-overlap = true
+"""
+
+        # If backup scheduling is disabled, add a comment at the top
+        if not schedule_enabled:
+            config_content = "# AUTOMATED BACKUPS DISABLED - Enable in system settings\n# Remove this comment to enable this configuration\n\n" + config_content
+        
+        # Write the config file
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        
+        logger.info(f"Updated Ofelia configuration at {config_path}")
+        
+        # Also generate a docker-compose labels suggestion for documentation
+        docker_compose_suggestion = f"""labels:
+  ofelia.enabled: "true"
+  ofelia.job-exec.backup.schedule: "{schedule_cron}"
+  ofelia.job-exec.backup.command: "python /app/run.py backup create --auto"
+  ofelia.job-exec.backup.no-overlap: "true"
+  # Retention policy - automatically delete backups older than {retention_days} days
+  ofelia.job-exec.retention.schedule: "@weekly"
+  ofelia.job-exec.retention.command: "python /app/run.py backup retention --days {retention_days}"
+  ofelia.job-exec.retention.no-overlap: "true"
+"""
+        
+        # Generate instructions 
+        instructions = f"""To use this Ofelia configuration:
+
+1. Make sure the ofelia.ini file is accessible to the Ofelia scheduler
+2. If using Docker Compose with the Ofelia sidecar pattern, update your docker-compose.yml file
+   with the labels shown below
+3. Restart the application for changes to take effect
+
+For containerized setups:
+docker-compose down
+docker-compose up -d
+"""
+        
+        return {
+            "status": "success",
+            "message": f"Updated Ofelia configuration at {config_path}",
+            "config_path": config_path,
+            "config_content": config_content,
+            "docker_labels": docker_compose_suggestion,
+            "instructions": instructions,
+            "schedule": {
+                "enabled": schedule_enabled,
+                "frequency": schedule_frequency,
+                "time": schedule_time,
+                "retention_days": retention_days
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating Ofelia configuration: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Failed to update Ofelia configuration: {str(e)}",
+            "config_path": None,
+            "config_content": None
+        }
