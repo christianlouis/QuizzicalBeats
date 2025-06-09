@@ -352,6 +352,21 @@ def get_oauth_redirect_uri(endpoint, provider=None):
     """
     # Use Flask's url_for which respects PREFERRED_URL_SCHEME
     if provider:
-        return url_for(endpoint, provider=provider, _external=True)
+        redirect_uri = url_for(endpoint, provider=provider, _external=True)
     else:
-        return url_for(endpoint, _external=True)
+        redirect_uri = url_for(endpoint, _external=True)
+    
+    # Log details about the generated URL for debugging
+    use_https = current_app.config.get('USE_HTTPS', False)
+    preferred_scheme = current_app.config.get('PREFERRED_URL_SCHEME', 'http')
+    
+    current_app.logger.debug(
+        f"OAuth Redirect URI: {redirect_uri} | "
+        f"Endpoint: {endpoint} | "
+        f"USE_HTTPS: {use_https} | "
+        f"PREFERRED_URL_SCHEME: {preferred_scheme} | "
+        f"Request scheme: {request.scheme if request else 'N/A'} | "
+        f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto', 'N/A') if request else 'N/A'}"
+    )
+    
+    return redirect_uri

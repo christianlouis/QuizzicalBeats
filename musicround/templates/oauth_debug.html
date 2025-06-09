@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+
+{% block title %}OAuth Debug Information{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-4 text-navy-800">OAuth Debug Information</h1>
+    
+    <div class="mb-6">
+        <h2 class="text-xl font-semibold mb-2">Configuration</h2>
+        <div class="bg-white rounded-lg shadow p-4 overflow-x-auto">
+            <table class="min-w-full">
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">USE_HTTPS</td>
+                    <td class="py-2 px-4 border-b">{{ config.USE_HTTPS }}</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">PREFERRED_URL_SCHEME</td>
+                    <td class="py-2 px-4 border-b">{{ config.PREFERRED_URL_SCHEME }}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    
+    <div class="mb-6">
+        <h2 class="text-xl font-semibold mb-2">Helper-Generated URLs</h2>
+        <div class="bg-white rounded-lg shadow p-4 overflow-x-auto">
+            <table class="min-w-full">
+                <tr>
+                    <th class="py-2 px-4 border-b text-left">Endpoint</th>
+                    <th class="py-2 px-4 border-b text-left">URL</th>
+                </tr>
+                {% for name, url in helper_generated_urls.items() %}
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">{{ name }}</td>
+                    <td class="py-2 px-4 border-b break-all">{{ url }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    
+    <div class="mb-6">
+        <h2 class="text-xl font-semibold mb-2">Direct url_for URLs</h2>
+        <div class="bg-white rounded-lg shadow p-4 overflow-x-auto">
+            <table class="min-w-full">
+                <tr>
+                    <th class="py-2 px-4 border-b text-left">Endpoint</th>
+                    <th class="py-2 px-4 border-b text-left">URL</th>
+                </tr>
+                {% for name, url in direct_url_for_urls.items() %}
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">{{ name }}</td>
+                    <td class="py-2 px-4 border-b break-all">{{ url }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    
+    <div class="mb-6">
+        <h2 class="text-xl font-semibold mb-2">Request Information</h2>
+        <div class="bg-white rounded-lg shadow p-4 overflow-x-auto">
+            <table class="min-w-full">
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">URL</td>
+                    <td class="py-2 px-4 border-b break-all">{{ request_info.url }}</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">Host</td>
+                    <td class="py-2 px-4 border-b">{{ request_info.host }}</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">Scheme</td>
+                    <td class="py-2 px-4 border-b">{{ request_info.scheme }}</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-4 border-b font-medium">Headers</td>
+                    <td class="py-2 px-4 border-b">
+                        <dl>
+                            {% for header, value in request_info.headers.items() %}
+                            <dt class="font-medium">{{ header }}</dt>
+                            <dd class="pl-4 mb-2">{{ value }}</dd>
+                            {% endfor %}
+                        </dl>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    
+    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm text-yellow-700">
+                    This page shows debug information for OAuth redirect URLs. It helps verify that the proper URL scheme (HTTP/HTTPS) is being used.
+                </p>
+                <p class="text-sm text-yellow-700 mt-2">
+                    To configure HTTPS, set <code class="bg-yellow-100 px-1 rounded">USE_HTTPS=True</code> in your <code class="bg-yellow-100 px-1 rounded">.env</code> file when running behind a reverse proxy that handles SSL termination.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-navy-50 border-l-4 border-navy-400 p-4">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-navy-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clip-rule="evenodd" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm text-navy-700">
+                    <strong>Tips for debugging:</strong>
+                </p>
+                <ul class="list-disc pl-5 mt-1 text-sm text-navy-700">
+                    <li>Check if the X-Forwarded-Proto header is set to "https" by your reverse proxy</li>
+                    <li>Verify that helper-generated URLs match your expected protocol</li>
+                    <li>If running behind Traefik, ensure it's configured to set the proper headers</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

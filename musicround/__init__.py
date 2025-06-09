@@ -320,6 +320,7 @@ def create_app(config=None):
     from musicround.routes.deezer_routes import deezer_bp
     from musicround.routes.db_admin import db_admin_bp, init_admin
     from musicround.routes.auth import auth_bp
+    from musicround.routes.oauth_debug import oauth_debug_bp
     
     app.register_blueprint(core_bp)
     app.register_blueprint(users_bp)
@@ -332,6 +333,7 @@ def create_app(config=None):
     app.register_blueprint(deezer_bp)
     app.register_blueprint(db_admin_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(oauth_debug_bp)
     
     # Initialize the admin interface
     init_admin(app)
