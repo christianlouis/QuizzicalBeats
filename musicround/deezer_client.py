@@ -145,7 +145,7 @@ class DeezerClient:
         except Exception as e:
             self.logger.error(f"Last.fm API error: {e}")
             return ""
-      def import_track(self, track_id, lastfm_api_key=None):
+    def import_track(self, track_id, lastfm_api_key=None):
         """
         Import a track from Deezer into the database
         Returns a tuple (Song object, was_new) where was_new indicates if this was a new import
@@ -279,7 +279,7 @@ class DeezerClient:
             db.session.rollback()
             self.logger.error(f"Error saving track to database: {e}")
             return None, False
-      def import_album(self, album_id, lastfm_api_key=None):
+    def import_album(self, album_id, lastfm_api_key=None):
         """
         Import all tracks from an album
         Returns a dictionary with import statistics
@@ -307,7 +307,7 @@ class DeezerClient:
             'imported_count': len(imported_songs),
             'skipped_count': len(skipped_songs)
         }
-      def import_playlist(self, playlist_id, lastfm_api_key=None):
+    def import_playlist(self, playlist_id, lastfm_api_key=None):
         """
         Import all tracks from a playlist
         Returns a dictionary with import statistics

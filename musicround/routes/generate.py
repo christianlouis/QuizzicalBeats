@@ -353,22 +353,56 @@ def get_songs_from_deezer_playlist(playlist_id):
 def get_songs_from_spotify_playlist(playlist_id):
     """
     Fetch songs from a Spotify playlist, properly import them with metadata, and return them
+    Always returns the songs in the playlist, even if all already exist in the DB.
     """
     try:
         songs_per_round = current_app.config.get('SONGS_PER_ROUND', 10)
-        
-        imported_songs = ImportHelper.import_item(
+        import_result = ImportHelper.import_item(
             item_id=playlist_id,
             item_type='playlist',
-            source='spotify',
+            service_name='spotify',
             oauth_spotify=oauth.spotify
         )
-        
-        if not imported_songs:
-            current_app.logger.warning(f"No songs returned from ImportHelper.import_item for Spotify playlist {playlist_id}")
+
+        from musicround.models import Song
+
+        # If we have imported_song_ids, use them (these are DB IDs)
+        if import_result.get('imported_song_ids'):
+            song_db_ids = import_result['imported_song_ids']
+            imported_songs = Song.query.filter(Song.id.in_(song_db_ids)).all()
+            return imported_songs[:songs_per_round]
+
+        # If no imported_song_ids, fetch all Spotify IDs from the playlist and get those songs from DB
+        # Use the Spotify API directly to get the playlist track IDs
+        sp = oauth.spotify
+        # Get playlist tracks (paginated)
+        all_spotify_ids = []
+        next_url = f'playlists/{playlist_id}/tracks'
+        authlib_token = {
+            'access_token': current_user.spotify_token,
+            'refresh_token': current_user.spotify_refresh_token,
+            'token_type': 'Bearer',
+            'expires_at': int(current_user.spotify_token_expiry.timestamp()) if current_user.spotify_token_expiry else None
+        }
+        while next_url:
+            resp = sp.get(next_url, token=authlib_token)
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get('items', []):
+                track = item.get('track')
+                if track and track.get('id'):
+                    all_spotify_ids.append(track['id'])
+            next_url = data.get('next')
+            # If next_url is a full URL, convert to relative for sp.get
+            if next_url and next_url.startswith('https://api.spotify.com/v1/'):
+                next_url = next_url.replace('https://api.spotify.com/v1/', '')
+        if not all_spotify_ids:
+            current_app.logger.warning(f"No valid tracks found in Spotify playlist {playlist_id}")
             return []
-            
-        return imported_songs[:songs_per_round]
+        # Query all songs in DB with those Spotify IDs, preserving playlist order
+        songs_by_spotify_id = {s.spotify_id: s for s in Song.query.filter(Song.spotify_id.in_(all_spotify_ids)).all()}
+        ordered_songs = [songs_by_spotify_id[sid] for sid in all_spotify_ids if sid in songs_by_spotify_id]
+        return ordered_songs[:songs_per_round]
     except Exception as e:
         current_app.logger.error(f"Error fetching or importing Spotify playlist {playlist_id}: {e}")
         import traceback

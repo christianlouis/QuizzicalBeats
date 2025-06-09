@@ -323,9 +323,58 @@ class SystemSetting(db.Model):
             db.session.add(setting)
         else:
             setting.value = value
-        db.session.commit()
-
-    @staticmethod
+        db.session.commit()    @staticmethod
     def all_settings():
         return {s.key: s.value for s in SystemSetting.query.all()}
+
+
+class ImportJobRecord(db.Model):
+    """
+    Database model for tracking import jobs
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    service_name = db.Column(db.String(50), nullable=False)
+    item_type = db.Column(db.String(20), nullable=False)
+    item_id = db.Column(db.String(255), nullable=False)
+    priority = db.Column(db.Integer, nullable=False, default=10)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(20), default='pending')  # pending, processing, completed, failed
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+    error_message = db.Column(db.Text)
+    imported_count = db.Column(db.Integer, default=0)
+    skipped_count = db.Column(db.Integer, default=0)
+    
+    # Relationships
+    user = db.relationship('User', backref=db.backref('import_jobs', lazy=True))
+    
+    def __repr__(self):
+        return f"ImportJobRecord(id={self.id}, service={self.service_name}, type={self.item_type}, item_id={self.item_id}, status={self.status})"
+    
+    @property
+    def duration(self):
+        """Calculate the job duration in seconds."""
+        if self.started_at and self.completed_at:
+            return (self.completed_at - self.started_at).total_seconds()
+        return None
+
+    @property
+    def item_url(self):
+        """Generate a URL to the imported item based on service and type."""
+        if self.service_name == 'spotify':
+            if self.item_type == 'playlist':
+                return f"https://open.spotify.com/playlist/{self.item_id}"
+            elif self.item_type == 'album':
+                return f"https://open.spotify.com/album/{self.item_id}"
+            elif self.item_type == 'track':
+                return f"https://open.spotify.com/track/{self.item_id}"
+        elif self.service_name == 'deezer':
+            if self.item_type == 'playlist':
+                return f"https://www.deezer.com/playlist/{self.item_id}"
+            elif self.item_type == 'album':
+                return f"https://www.deezer.com/album/{self.item_id}"
+            elif self.item_type == 'track':
+                return f"https://www.deezer.com/track/{self.item_id}"
+        return None
 

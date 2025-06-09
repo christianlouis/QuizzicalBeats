@@ -1,7 +1,17 @@
 """
 Unified import helper for importing music content across different services.
 This module provides consistent import functionality for tracks, albums, and playlists
-from various music streaming services like Spotify and Deezer.
+from various music streaming services like Spoti                try:
+                    imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id)
+                    if not imported_songs or imported_songs.get('imported_count', 0) == 0:
+                        current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"No songs found in Spotify playlist {item_id} or playlist import failed."]
+                        }
+                    return imported_songser.
 """
 import json
 import logging
@@ -240,7 +250,7 @@ class ImportHelper:
             elif item_type.lower() == 'playlist':
                 try:
                     imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id)
-                    if not imported_songs or len(imported_songs) == 0:
+                    if not imported_songs or imported_songs.get('imported_count', 0) == 0:
                         current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
                         return {
                             'imported_count': 0,
@@ -278,8 +288,9 @@ class ImportHelper:
                     'error_count': 1,
                     'errors': ["Deezer client not configured."]
                 }
-
-            lastfm_api_key = current_app.config.get('LASTFM_API_KEY')            if item_type.lower() == 'track':
+            lastfm_api_key = current_app.config.get('LASTFM_API_KEY')
+            
+            if item_type.lower() == 'track':
                 song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
                 if song:
                     if was_new:
@@ -535,9 +546,9 @@ class ImportHelper:
                 # Fetch audio features
                 ImportHelper._fetch_audio_features_for_song(sp, song, track_id, token=authlib_token_for_request) # Pass token
                 
-                # Final commit
-                db.session.commit()
+                # Final commit                db.session.commit()
                 result['imported_count'] += 1
+                result['song_id'] = song.id  # Add the song ID to the result
                 current_app.logger.info(f"Successfully imported Spotify track {track_id} as '{song.title}' with ID {song.id}")
             else:
                 result['errors'].append(f"Failed to create song object for track {track_id}")
@@ -703,7 +714,8 @@ class ImportHelper:
             'imported_count': 0,
             'skipped_count': 0,
             'error_count': 0,
-            'errors': []
+            'errors': [],
+            'imported_song_ids': []  # Track IDs of successfully imported songs
         }
 
         if not current_user or not current_user.is_authenticated or not current_user.spotify_token:
@@ -783,8 +795,7 @@ class ImportHelper:
                         result['errors'].append(f"Found a track with no ID in playlist {playlist_id}.")
                         result['error_count'] +=1
                         continue
-                    
-                    # Call import_spotify_track. It will handle its own token.
+                      # Call import_spotify_track. It will handle its own token.
                     track_import_result = ImportHelper.import_spotify_track(sp, track_id)
                     
                     result['imported_count'] += track_import_result.get('imported_count', 0)
@@ -792,6 +803,10 @@ class ImportHelper:
                     result['error_count'] += track_import_result.get('error_count', 0)
                     if track_import_result.get('errors'):
                         result['errors'].extend(track_import_result['errors'])
+                    
+                    # Track the song ID if it was successfully imported
+                    if track_import_result.get('imported_count', 0) > 0 and track_import_result.get('song_id'):
+                        result['imported_song_ids'].append(track_import_result['song_id'])
                 
                 tracks_url = tracks_data.get('next')
                 if tracks_url:

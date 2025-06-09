@@ -6,7 +6,7 @@ import time
 import random
 from datetime import datetime  # Add datetime import
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
-from flask_login import current_user
+from flask_login import current_user, login_required
 from musicround.models import Song, db
 from musicround.routes.import_songs import import_pl
 from musicround.helpers.import_helper import ImportHelper
@@ -140,20 +140,34 @@ def import_official_playlists():
     elif not auth_token:
         flash("No active Spotify session. Please connect your Spotify account.", "warning")
         return redirect(url_for('users.spotify_link'))
-    
-    # Handle POST request for importing a playlist
+      # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
-        result = ImportHelper.import_item('spotify', 'playlist', playlist_id)
         
-        if result['imported_count'] > 0:
-            flash(f'Successfully imported {result["imported_count"]} songs from official Spotify playlist!', 'success')
-        elif result['skipped_count'] > 0 and result['error_count'] == 0:
-            flash(f'All {result["skipped_count"]} songs were already in the database.', 'info')
-        elif result['error_count'] > 0:
-            flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
-        else:
-            flash(f'Error importing playlist: {", ".join(result["errors"])}', 'danger')
+        # Check if user is authenticated for queue system
+        if not current_user.is_authenticated:
+            flash("Please log in to import playlists.", "warning")
+            return redirect(url_for('users.login'))
+        
+        # Get the import queue from app config
+        queue = current_app.config.get('import_queue')
+        if not queue:
+            flash("Import queue not initialized.", "danger")
+            return redirect(url_for('core.view_songs'))
+        
+        # Create import job and add to queue
+        from musicround.helpers.import_queue import ImportJob
+        priority = int(request.form.get('priority', 10))
+        
+        job = ImportJob(
+            priority=priority,
+            service_name='spotify',
+            item_type='playlist',
+            item_id=playlist_id,
+            user_id=current_user.id,
+        )
+        queue.add_job(job)
+        flash('Official Spotify playlist import queued successfully. You will be notified when it completes.', 'info')
             
         return redirect(url_for('core.view_songs'))
 
@@ -280,22 +294,35 @@ def direct_official_playlists():
     # Initialize direct Spotify client with bearer token
     from musicround.helpers.spotify_direct import SpotifyDirectClient
     direct_client = SpotifyDirectClient(bearer_token=bearer_token)
-    
-    # Handle POST request for importing a playlist
+      # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
-        # Use the new unified ImportHelper
-        result = ImportHelper.import_item('spotify', 'playlist', playlist_id)
         
-        if result['imported_count'] > 0:
-            flash(f'Successfully imported {result["imported_count"]} songs from official Spotify playlist!', 'success')
-        elif result['skipped_count'] > 0 and result['error_count'] == 0:
-            flash(f'All {result["skipped_count"]} songs were already in the database.', 'info')
-        elif result['error_count'] > 0:
-            flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
-        else:
-            flash(f'Error importing playlist: {", ".join(result["errors"])}', 'danger')
-            
+        # Check if user is authenticated for queue system
+        if not current_user.is_authenticated:
+            flash("Please log in to import playlists.", "warning")
+            return redirect(url_for('users.login'))
+        
+        # Get the import queue from app config
+        queue = current_app.config.get('import_queue')
+        if not queue:
+            flash("Import queue not initialized.", "danger")
+            return redirect(url_for('core.view_songs'))
+        
+        # Create import job and add to queue
+        from musicround.helpers.import_queue import ImportJob
+        priority = int(request.form.get('priority', 10))
+        
+        job = ImportJob(
+            priority=priority,
+            service_name='spotify',
+            item_type='playlist',
+            item_id=playlist_id,
+            user_id=current_user.id,
+        )
+        queue.add_job(job)
+        flash('Direct Spotify playlist import queued successfully. You will be notified when it completes.', 'info')
+        
         return redirect(url_for('core.view_songs'))
 
     # Get filter keywords from the query string (default to empty list)
@@ -714,3 +741,94 @@ def update_direct_token():
         flash(f'Error validating token: {str(e)}', 'error')
     
     return redirect(return_url)
+
+
+@import_bp.route('/queue-status')
+@login_required
+def queue_status():
+    """
+    Display real-time status of the import queue for administrators
+    """
+    # Check if user is an admin
+    if not current_user.is_admin():
+        flash('Admin access required for Import Queue view.', 'danger')
+        return redirect(url_for('core.index'))
+        
+    # Helper function to get current time
+    from datetime import datetime
+    def now():
+        return datetime.utcnow()
+    
+    # Get the import queue from app config
+    queue = current_app.config.get('import_queue')
+    if not queue:
+        flash("Import queue not initialized.", "danger")
+        return redirect(url_for('core.view_songs'))
+    
+    # Access queue internals for display - this won't modify the queue
+    queue_size = queue._queue.qsize()
+    
+    # Extract information about jobs in the queue (without removing them)
+    # This is a bit of a hack but necessary to see what's in the PriorityQueue
+    # without removing items
+    queue_snapshot = []
+    if hasattr(queue._queue, 'queue'):
+        # Make a copy of the internal queue list
+        with queue._lock:  # Ensure thread safety while accessing the queue
+            queue_items = list(queue._queue.queue)
+            
+            for priority, counter, job in queue_items:
+                queue_snapshot.append({
+                    'priority': priority,
+                    'counter': counter,
+                    'service': job.service_name,
+                    'type': job.item_type,
+                    'item_id': job.item_id,
+                    'user_id': job.user_id
+                })
+    
+    # Get active and recent jobs from database if available
+    active_jobs = []
+    recent_jobs = []
+    
+    # Check if ImportJobRecord is defined
+    try:
+        from musicround.models import ImportJobRecord
+        
+        # Get last 50 jobs from the database, sorted by most recent first
+        recent_jobs = ImportJobRecord.query.order_by(ImportJobRecord.created_at.desc()).limit(50).all()
+        
+        # Get the active jobs (status='processing')
+        active_jobs = ImportJobRecord.query.filter_by(status='processing').all()
+    except (ImportError, AttributeError):
+        # ImportJobRecord might not be defined yet, handle this case
+        pass
+    
+    # Get some basic stats
+    stats = {
+        'queue_size': queue_size,
+        'active_jobs': len(active_jobs),
+        'completed_today': 0,
+        'failed_today': 0
+    }
+    
+    # If we have ImportJobRecord, get some stats
+    if recent_jobs:
+        import datetime
+        today = datetime.datetime.utcnow().date()
+        for job in recent_jobs:
+            if job.completed_at and job.completed_at.date() == today:
+                if job.status == 'completed':
+                    stats['completed_today'] += 1
+                elif job.status == 'failed':
+                    stats['failed_today'] += 1
+
+    return render_template(
+        'import_queue_status.html',
+        stats=stats,
+        active_jobs=active_jobs,
+        recent_jobs=recent_jobs,
+        queue_snapshot=queue_snapshot,
+        queue=queue,
+        now=now
+    )
