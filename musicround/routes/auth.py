@@ -9,7 +9,7 @@ from musicround.models import User, db
 from datetime import datetime
 import requests
 import secrets
-from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_spotify_user_info
+from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_spotify_user_info, get_oauth_redirect_uri
 
 # Create blueprint
 auth_bp = Blueprint('auth', __name__)
@@ -37,7 +37,7 @@ def login_with_spotify():
         return redirect(url_for('users.login'))
 
     # The redirect URI should point to *this* blueprint's callback
-    redirect_uri = url_for('auth.callback', _external=True)
+    redirect_uri = get_oauth_redirect_uri('auth.callback')
     
     # Ensure 'show_dialog': 'true' is part of authorize_params in auth_helpers.py
     # when registering the Spotify client.

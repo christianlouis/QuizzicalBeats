@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices
-from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info
+from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.spotify_helper import get_spotify_token, get_current_user_spotify_token, get_spotify_user_info as spotify_helper_get_user_info
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
@@ -72,14 +72,12 @@ def admin_required(f):
 def google_login():
     """Initiate Google OAuth login flow"""
     if current_user.is_authenticated:
-        return redirect(url_for('core.index'))
-
-    # Google login is disabled if client ID is not set
+        return redirect(url_for('core.index'))    # Google login is disabled if client ID is not set
     if not current_app.config.get('GOOGLE_CLIENT_ID'):
         flash('Google login is not configured.', 'danger')
         return redirect(url_for('users.login'))
     
-    redirect_uri = url_for('users.google_callback', _external=True)
+    redirect_uri = get_oauth_redirect_uri('users.google_callback')
     return oauth.google.authorize_redirect(redirect_uri)
 
 @users_bp.route('/login/google/callback')
@@ -128,14 +126,12 @@ def google_callback():
 def authentik_login():
     """Initiate Authentik OAuth login flow"""
     if current_user.is_authenticated:
-        return redirect(url_for('core.index'))
-
-    # Authentik login is disabled if client ID is not set
+        return redirect(url_for('core.index'))    # Authentik login is disabled if client ID is not set
     if not current_app.config.get('AUTHENTIK_CLIENT_ID'):
         flash('Authentik login is not configured.', 'danger')
         return redirect(url_for('users.login'))
     
-    redirect_uri = url_for('users.authentik_callback', _external=True)
+    redirect_uri = get_oauth_redirect_uri('users.authentik_callback')
     return oauth.authentik.authorize_redirect(redirect_uri)
 
 @users_bp.route('/login/authentik/callback')
@@ -756,15 +752,14 @@ The Quizzical Beats Team
 @login_required
 def spotify_link():
     """
-    GET: Show management UI (manage_spotify.html) with current status and options.
-    POST: Trigger Spotify OAuth flow for linking/re-linking.
+    GET: Show management UI (manage_spotify.html) with current status and options.    POST: Trigger Spotify OAuth flow for linking/re-linking.
     """
     if request.method == 'POST':
         # Only POST triggers the OAuth flow
         if not current_app.config.get('SPOTIFY_CLIENT_ID'):
             flash('Spotify integration is not configured.', 'danger')
             return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
-        redirect_uri = url_for('users.spotify_link_callback', _external=True)
+        redirect_uri = get_oauth_redirect_uri('users.spotify_link_callback')
         return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
 
     # GET: Show management UI

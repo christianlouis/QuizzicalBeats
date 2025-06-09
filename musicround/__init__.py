@@ -111,6 +111,10 @@ def create_app(config=None):
     # Configure the app
     app.config.from_object(Config)
     
+    # Set preferred URL scheme for reverse proxy support
+    if app.config.get('USE_HTTPS'):
+        app.config['PREFERRED_URL_SCHEME'] = 'https'
+    
     # Explicitly set the database URI to ensure correct path
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
     

@@ -71,5 +71,9 @@ class Config:
     # Automation settings
     AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN", "change-this-token-in-production")
 
+    # Reverse proxy settings
+    USE_HTTPS = os.getenv("USE_HTTPS", "False") == "True"  # Force HTTPS URL generation
+    PREFERRED_URL_SCHEME = 'https' if USE_HTTPS else 'http'
+
 
 

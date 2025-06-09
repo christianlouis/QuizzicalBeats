@@ -2,6 +2,7 @@
 Helpers for Dropbox API integration
 """
 from flask import current_app, url_for, redirect, session
+from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 import requests
 import json
 import os
@@ -11,7 +12,7 @@ from flask_login import current_user
 def get_dropbox_auth_url():
     """Get the authorization URL for Dropbox OAuth flow"""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
-    redirect_uri = url_for('users.dropbox_callback', _external=True)
+    redirect_uri = get_oauth_redirect_uri('users.dropbox_callback')
     
     # Add the required scopes for our application
     scopes = ["files.content.read", "files.content.write", "sharing.write","account_info.read"]
@@ -23,7 +24,7 @@ def exchange_code_for_token(code):
     """Exchange the authorization code for an access token"""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
     app_secret = current_app.config.get('DROPBOX_APP_SECRET')
-    redirect_uri = url_for('users.dropbox_callback', _external=True)
+    redirect_uri = get_oauth_redirect_uri('users.dropbox_callback')
     
     data = {
         'code': code,

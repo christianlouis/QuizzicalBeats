@@ -345,3 +345,13 @@ def update_oauth_tokens(user, tokens, auth_provider):
         db.session.rollback()
         current_app.logger.error(f"Error updating {auth_provider} tokens: {str(e)}")
         return False
+
+def get_oauth_redirect_uri(endpoint, provider=None):
+    """
+    Generate OAuth redirect URI with proper scheme handling for reverse proxy environments
+    """
+    # Use Flask's url_for which respects PREFERRED_URL_SCHEME
+    if provider:
+        return url_for(endpoint, provider=provider, _external=True)
+    else:
+        return url_for(endpoint, _external=True)
