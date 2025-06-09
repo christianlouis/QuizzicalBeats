@@ -18,10 +18,19 @@ def debug_oauth_urls():
     Formats:
     - HTML: Default view with pretty UI
     - JSON: Add ?format=json or use Accept: application/json header
-    """
-    # Get config settings
+    """    # Get config settings
     use_https = current_app.config.get('USE_HTTPS', False)
     preferred_scheme = current_app.config.get('PREFERRED_URL_SCHEME', 'http')
+    static_oauth_urls = current_app.config.get('STATIC_OAUTH_URLS', False)
+    
+    # Get all static URL configurations
+    static_urls = {
+        'OAUTH_SPOTIFY_AUTH_URL': current_app.config.get('OAUTH_SPOTIFY_AUTH_URL'),
+        'OAUTH_SPOTIFY_LINK_URL': current_app.config.get('OAUTH_SPOTIFY_LINK_URL'),
+        'OAUTH_GOOGLE_URL': current_app.config.get('OAUTH_GOOGLE_URL'),
+        'OAUTH_AUTHENTIK_URL': current_app.config.get('OAUTH_AUTHENTIK_URL'),
+        'OAUTH_DROPBOX_URL': current_app.config.get('OAUTH_DROPBOX_URL')
+    }
     
     # Generate all OAuth callback URLs using the helper function
     oauth_urls = {

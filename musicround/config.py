@@ -69,11 +69,17 @@ class Config:
     MAIL_RECIPIENT = os.getenv("MAIL_RECIPIENT", "admin@example.com")
     
     # Automation settings
-    AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN", "change-this-token-in-production")
-
-    # Reverse proxy settings
+    AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN", "change-this-token-in-production")    # Reverse proxy settings
     USE_HTTPS = os.getenv("USE_HTTPS", "False") == "True"  # Force HTTPS URL generation
-    PREFERRED_URL_SCHEME = 'https' if USE_HTTPS else 'http'
+    PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", 'https' if USE_HTTPS else 'http')
+    
+    # Static OAuth URL configuration (for production environments)
+    STATIC_OAUTH_URLS = os.getenv("STATIC_OAUTH_URLS", "False") == "True"
+    OAUTH_SPOTIFY_AUTH_URL = os.getenv("OAUTH_SPOTIFY_AUTH_URL")
+    OAUTH_SPOTIFY_LINK_URL = os.getenv("OAUTH_SPOTIFY_LINK_URL")
+    OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")
+    OAUTH_AUTHENTIK_URL = os.getenv("OAUTH_AUTHENTIK_URL")
+    OAUTH_DROPBOX_URL = os.getenv("OAUTH_DROPBOX_URL")
 
 
 

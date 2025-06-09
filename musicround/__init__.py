@@ -100,12 +100,24 @@ def create_app(config=None):
     # Configure ProxyFix for reverse proxy (e.g., Nginx)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     
+    # Create custom HTTPS middleware (will be applied below if USE_HTTPS is True)
+    class ForceHTTPSMiddleware:
+        """Middleware to force HTTPS scheme regardless of request headers"""
+        def __init__(self, app):
+            self.app = app
+            
+        def __call__(self, environ, start_response):
+            # Force the wsgi.url_scheme to be https
+            environ['wsgi.url_scheme'] = 'https'
+            # Also override X-Forwarded-Proto if present
+            environ['HTTP_X_FORWARDED_PROTO'] = 'https'
+            return self.app(environ, start_response)
+    
     # Create data directory if it doesn't exist
     data_dir = '/data'
     if not os.path.exists(data_dir):
         os.makedirs(data_dir, exist_ok=True)
-    
-    # Set the database file path in the data directory
+      # Set the database file path in the data directory
     db_path = os.path.join(data_dir, 'song_data.db')
 
     # Configure the app
@@ -114,6 +126,9 @@ def create_app(config=None):
     # Set preferred URL scheme for reverse proxy support
     if app.config.get('USE_HTTPS'):
         app.config['PREFERRED_URL_SCHEME'] = 'https'
+        # Apply the HTTPS middleware when USE_HTTPS is True
+        app.wsgi_app = ForceHTTPSMiddleware(app.wsgi_app)
+        app.logger.info("Applying ForceHTTPSMiddleware - all URLs will use HTTPS scheme regardless of headers")
     
     # Explicitly set the database URI to ensure correct path
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
