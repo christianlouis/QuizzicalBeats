@@ -606,9 +606,16 @@
             
             searchTimeout = setTimeout(function() {
                 searchResults.innerHTML = '<p class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
-                
-                fetch(`/api/songs/search?q=${encodeURIComponent(query)}`)
-                    .then(response => response.json())
+                      fetch(`/api/songs/search?q=${encodeURIComponent(query)}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            if (response.status === 401) {
+                                throw new Error('You need to log in to search for songs');
+                            }
+                            throw new Error('Error searching for songs');
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         if (data.length === 0) {
                             searchResults.innerHTML = '<p class="text-gray-500 text-center p-4">No songs found</p>';
@@ -649,11 +656,21 @@
                                 });
                             }
                         });
-                    })
-                    .catch(error => {
+                    })                    .catch(error => {
                         console.error('Error searching songs:', error);
-                        searchResults.innerHTML = '<p class="text-red-500 text-center p-4">Error searching songs</p>';
-                        showToast('Error searching for songs', 'error');
+                        searchResults.innerHTML = `<p class="text-red-500 text-center p-4">${error.message}</p>`;
+                        showToast(error.message, 'error');
+                        
+                        // If unauthorized, suggest logging in again
+                        if (error.message.includes('log in')) {
+                            searchResults.innerHTML += `
+                                <div class="text-center p-4">
+                                    <a href="{{ url_for('users.login') }}" class="text-blue-500 hover:underline">
+                                        Click here to log in again
+                                    </a>
+                                </div>
+                            `;
+                        }
                     });
             }, 500);
         });

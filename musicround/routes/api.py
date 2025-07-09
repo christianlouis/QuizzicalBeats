@@ -8,7 +8,7 @@ from flask_wtf.csrf import CSRFProtect
 import traceback  # Add import at the top
 import logging
 from sqlalchemy import or_
-from flask_login import login_required  # Add import for login_required
+from flask_login import login_required, current_user
 import requests  # Import requests for direct API calls
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -658,14 +658,14 @@ def get_deezer_playlist(playlist_id):
         return jsonify({'error': 'Unable to fetch playlist details'}), 500
 
 @api_bp.route('/songs/search')
+@login_required
 def search_songs():
     """Search for songs by title or artist"""
-    if 'access_token' not in session:
-        return jsonify({'error': 'Authentication required'}), 401
-        
     query = request.args.get('q', '')
     if not query or len(query) < 2:
         return jsonify([])
+    
+    current_app.logger.info(f"User {current_user.username} searching for songs with query: {query}")
         
     # Search for songs by title or artist
     songs = Song.query.filter(
