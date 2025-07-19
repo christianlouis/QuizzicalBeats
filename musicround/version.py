@@ -5,10 +5,10 @@ This module provides version details that can be displayed in both CLI and UI.
 
 # Version information
 VERSION_INFO = {
-    "version": "1.9.0",
-    "release_name": "Documentation Dynamo",
-    "release_date": "2025-05-12",
-    "build_number": "20250512001"
+    "version": "1.10.0",
+    "release_name": "Import Infrastructure",
+    "release_date": "2025-05-27",
+    "build_number": "20250527001"
 }
 
 def get_version_str(include_build=False):
