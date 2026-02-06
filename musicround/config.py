@@ -17,7 +17,9 @@ class Config:
     # Debug settings
     DEBUG = os.getenv("DEBUG", "True") == "True"
     DEBUG2 = os.getenv("DEBUG2", "False") == "True"
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-please-change')
+    SECRET_KEY = os.getenv('SECRET_KEY')
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY environment variable must be set. Generate a secure key with: python -c 'import secrets; print(secrets.token_hex(32))'")
     
     # API Keys
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -69,7 +71,9 @@ class Config:
     MAIL_RECIPIENT = os.getenv("MAIL_RECIPIENT", "admin@example.com")
     
     # Automation settings
-    AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN", "change-this-token-in-production")    # Reverse proxy settings
+    AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN")
+    if not AUTOMATION_TOKEN:
+        raise ValueError("AUTOMATION_TOKEN environment variable must be set. Generate a secure token with: python -c 'import secrets; print(secrets.token_urlsafe(32))'")    # Reverse proxy settings
     USE_HTTPS = os.getenv("USE_HTTPS", "False") == "True"  # Force HTTPS URL generation
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", 'https' if USE_HTTPS else 'http')
     
