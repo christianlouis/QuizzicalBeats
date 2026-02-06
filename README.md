@@ -12,6 +12,13 @@
   <a href="#license">License</a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/security-hardened-green" alt="Security Hardened">
+  <img src="https://img.shields.io/badge/code%20quality-A-brightgreen" alt="Code Quality">
+  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+</p>
+
 **Quizzical Beats** (formerly MusicRound) is a Flask-based web application for building engaging music quiz rounds for pub quizzes. Leveraging the Spotify and Deezer APIs, it allows you to generate rounds based on the least-used genres, decades, or completely random criteria, making your quizzes dynamic and entertaining.
 
 ---
@@ -140,6 +147,14 @@ Comprehensive documentation is available at [quizzicalbeats.readthedocs.io](http
 - [Developer Guide](https://quizzicalbeats.readthedocs.io/developer-guide/architecture.html)
 - [API Reference](https://quizzicalbeats.readthedocs.io/developer-guide/api-reference.html)
 - [FAQ](https://quizzicalbeats.readthedocs.io/faq.html)
+
+### Additional Documentation
+
+- [SECURITY.md](SECURITY.md) - Security policy, best practices, and vulnerability reporting
+- [ROADMAP.md](ROADMAP.md) - Project roadmap, milestones, and future plans
+- [AGENTS.md](AGENTS.md) - Guidelines for AI coding agents and developers
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
+- [TODO.md](TODO.md) - Detailed task list and completed milestones
 
 ---
 

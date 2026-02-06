@@ -1,0 +1,59 @@
+name: Security Vulnerability
+description: Report a security vulnerability (private disclosure)
+title: "[Security]: "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ SECURITY NOTICE
+        
+        **DO NOT** report security vulnerabilities in public issues!
+        
+        Please report security issues privately via email to:
+        **christian@kaufdeinquiz.com**
+        
+        See [SECURITY.md](https://github.com/christianlouis/QuizzicalBeats/blob/main/SECURITY.md) for our full security policy.
+        
+        ---
+        
+        This issue template is for non-critical security improvements or discussions only.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Security Concern Description
+      description: Describe the security improvement or concern (not a vulnerability)
+      placeholder: I noticed that...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this concern?
+      options:
+        - Low (security improvement suggestion)
+        - Medium (potential security issue)
+        - High (security vulnerability - REPORT VIA EMAIL!)
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential Impact
+      description: What could happen if this is not addressed?
+      placeholder: This could lead to...
+    validations:
+      required: false
+
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: What steps should be taken to address this?
+      placeholder: I recommend...
+    validations:
+      required: false
