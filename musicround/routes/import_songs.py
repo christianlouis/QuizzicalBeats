@@ -85,22 +85,23 @@ def import_playlist():
             flash("No playlist ID provided for import.", "danger")
             return redirect(request.referrer or url_for('core.search'))
 
-        result = ImportHelper.import_item(service_name='spotify', item_type='playlist', item_id=playlist_id, oauth_spotify=oauth.spotify)
-        
-        imported_count = result.get('imported_count', 0)
-        skipped_count = result.get('skipped_count', 0)
-        error_count = result.get('error_count', 0)
-        errors = result.get("errors", [])
+        priority = int(request.form.get('priority', 10))
+        queue = current_app.config.get('import_queue')
+        if not queue:
+            flash("Import queue not initialized.", "danger")
+            return redirect(url_for('core.view_songs'))
 
-        if imported_count > 0:
-            flash(f'Successfully imported {imported_count} songs from playlist! ({skipped_count} skipped, {error_count} errors).', 'success')
-        elif skipped_count > 0 and error_count == 0:
-            flash(f'All {skipped_count} songs were already in the database.', 'info')
-        elif error_count > 0:
-            flash(f'Playlist import: {imported_count} new, {skipped_count} skipped, {error_count} errors. Errors: {", ".join(errors)}', 'warning')
-        else:
-            flash(f'Error importing playlist: {", ".join(errors) if errors else "No songs imported, playlist might be empty or an unknown issue occurred."}', 'danger')
-            
+        from musicround.helpers.import_queue import ImportJob
+
+        job = ImportJob(
+            priority=priority,
+            service_name='spotify',
+            item_type='playlist',
+            item_id=playlist_id,
+            user_id=current_user.id,
+        )
+        queue.add_job(job)
+        flash('Playlist import queued.', 'info')
         return redirect(url_for('core.view_songs'))
         
     return render_template('service_import.html',
