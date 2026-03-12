@@ -23,8 +23,56 @@ env:
 
 
 jobs:
-  build:
+  ci:
+    name: Tests & Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          # Stop the build on syntax errors or undefined names
+          flake8 musicround/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Warn on style issues (exit-zero means the step won't fail on style warnings)
+          flake8 musicround/ --count --exit-zero --statistics
+
+      - name: Run tests with coverage
+        env:
+          FLASK_ENV: testing
+          SECRET_KEY: ci-test-secret-key
+          AUTOMATION_TOKEN: ci-test-automation-token
+        run: |
+          pytest tests/ -v --cov=musicround --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
+
+  build:
+    needs: [ci]
     runs-on: ubuntu-latest
     permissions:
       contents: read
