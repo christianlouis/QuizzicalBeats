@@ -4,6 +4,11 @@ from flask_admin.contrib.sqla import ModelView
 from flask_admin.contrib.fileadmin import FileAdmin
 from flask_admin.menu import MenuLink
 from flask_admin.actions import action
+try:
+    from flask_admin.theme import Bootstrap4Theme
+    _FLASK_ADMIN_V2 = True
+except ImportError:
+    _FLASK_ADMIN_V2 = False
 from flask_login import current_user, login_required
 from musicround.models import Song, Tag, SongTag, Round, User, Role, UserPreferences, SystemSetting, db
 from functools import wraps
@@ -154,12 +159,20 @@ def init_admin(app):
     app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'  # Use a Bootstrap swatch theme
     
     # Create admin interface
-    admin = Admin(
-        app, 
-        name='MusicRound Admin', 
-        template_mode='bootstrap3',
-        url='/admin'
-    )
+    if _FLASK_ADMIN_V2:
+        admin = Admin(
+            app,
+            name='MusicRound Admin',
+            theme=Bootstrap4Theme(swatch='cerulean'),
+            url='/admin'
+        )
+    else:
+        admin = Admin(
+            app,
+            name='MusicRound Admin',
+            template_mode='bootstrap3',
+            url='/admin'
+        )
     
     # Add model views
     # Data models
