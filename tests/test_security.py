@@ -3,6 +3,7 @@ import pytest
 import os
 import re
 import importlib
+import musicround.config
 
 
 class TestSecurityConfiguration:
@@ -17,7 +18,6 @@ class TestSecurityConfiguration:
         
         try:
             # Force module reload to re-evaluate class-level checks
-            import musicround.config
             with pytest.raises(ValueError, match="SECRET_KEY environment variable must be set"):
                 importlib.reload(musicround.config)
         finally:
@@ -36,7 +36,6 @@ class TestSecurityConfiguration:
         
         try:
             # Force module reload to re-evaluate class-level checks
-            import musicround.config
             with pytest.raises(ValueError, match="AUTOMATION_TOKEN environment variable must be set"):
                 importlib.reload(musicround.config)
         finally:

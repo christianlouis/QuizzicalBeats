@@ -62,7 +62,10 @@ class Config:
     DROPBOX_REDIRECT_URI = os.getenv("DROPBOX_REDIRECT_URI", "http://localhost:5000/users/dropbox/callback")
     
     MAIL_HOST = os.getenv("MAIL_HOST", "localhost")
-    MAIL_PORT = int(os.getenv("MAIL_PORT", "25"))
+    try:
+        MAIL_PORT = int(os.getenv("MAIL_PORT", "25"))
+    except (ValueError, TypeError):
+        MAIL_PORT = 25
     MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "False") == "True"
     MAIL_USE_SSL = os.getenv("MAIL_USE_SSL", "False") == "True"
     MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
