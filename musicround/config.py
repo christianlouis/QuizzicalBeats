@@ -62,7 +62,7 @@ class Config:
     DROPBOX_REDIRECT_URI = os.getenv("DROPBOX_REDIRECT_URI", "http://localhost:5000/users/dropbox/callback")
     
     MAIL_HOST = os.getenv("MAIL_HOST", "localhost")
-    MAIL_PORT = os.getenv("MAIL_PORT", 25)
+    MAIL_PORT = int(os.getenv("MAIL_PORT", "25"))
     MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "False") == "True"
     MAIL_USE_SSL = os.getenv("MAIL_USE_SSL", "False") == "True"
     MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
@@ -73,7 +73,9 @@ class Config:
     # Automation settings
     AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN")
     if not AUTOMATION_TOKEN:
-        raise ValueError("AUTOMATION_TOKEN environment variable must be set. Generate a secure token with: python -c 'import secrets; print(secrets.token_urlsafe(32))'")    # Reverse proxy settings
+        raise ValueError("AUTOMATION_TOKEN environment variable must be set. Generate a secure token with: python -c 'import secrets; print(secrets.token_urlsafe(32))'")
+
+    # Reverse proxy settings
     USE_HTTPS = os.getenv("USE_HTTPS", "False") == "True"  # Force HTTPS URL generation
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", 'https' if USE_HTTPS else 'http')
     

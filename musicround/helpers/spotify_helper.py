@@ -26,7 +26,7 @@ def refresh_spotify_token(refresh_token):
         'client_secret': client_secret
     }
     
-    response = requests.post('https://accounts.spotify.com/api/token', data=data)
+    response = requests.post('https://accounts.spotify.com/api/token', data=data, timeout=10)
     
     if response.status_code == 200:
         return response.json()
@@ -181,7 +181,7 @@ def get_spotify_user_info(access_token):
     }
     
     try:
-        response = requests.get('https://api.spotify.com/v1/me', headers=headers)
+        response = requests.get('https://api.spotify.com/v1/me', headers=headers, timeout=10)
         
         if response.status_code == 200:
             return response.json()

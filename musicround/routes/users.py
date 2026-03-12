@@ -61,7 +61,7 @@ def admin_required(f):
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin():
+        if not current_user.is_authenticated or not current_user.is_admin:
             flash('Admin access required.', 'danger')
             return redirect(url_for('users.profile'))
         return f(*args, **kwargs)
@@ -882,7 +882,7 @@ def use_refresh_token():
 @login_required
 def setup():
     """One-time setup route to promote the current user to admin"""
-    if current_user.is_admin():
+    if current_user.is_admin:
         flash('You are already an administrator.', 'info')
         return redirect(url_for('users.profile'))
     
@@ -1264,7 +1264,7 @@ def create_backup():
     if automation_token == current_app.config.get('AUTOMATION_TOKEN'):
         # Allow the request without authentication for automation
         pass
-    elif not current_user.is_authenticated or not current_user.is_admin():
+    elif not current_user.is_authenticated or not current_user.is_admin:
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
     
     # Get custom backup name if provided

@@ -2,6 +2,7 @@
 import pytest
 import os
 import re
+import importlib
 
 
 class TestSecurityConfiguration:
@@ -14,14 +15,17 @@ class TestSecurityConfiguration:
         if secret_key:
             del os.environ['SECRET_KEY']
         
-        # Import should fail if SECRET_KEY not set
-        with pytest.raises(ValueError, match="SECRET_KEY environment variable must be set"):
-            from musicround.config import Config
-            _ = Config.SECRET_KEY
-        
-        # Restore environment
-        if secret_key:
-            os.environ['SECRET_KEY'] = secret_key
+        try:
+            # Force module reload to re-evaluate class-level checks
+            import musicround.config
+            with pytest.raises(ValueError, match="SECRET_KEY environment variable must be set"):
+                importlib.reload(musicround.config)
+        finally:
+            # Restore environment
+            if secret_key:
+                os.environ['SECRET_KEY'] = secret_key
+                # Reload with correct env so other tests work
+                importlib.reload(musicround.config)
     
     def test_automation_token_required(self):
         """Test that AUTOMATION_TOKEN must be set."""
@@ -30,14 +34,17 @@ class TestSecurityConfiguration:
         if token:
             del os.environ['AUTOMATION_TOKEN']
         
-        # Import should fail if AUTOMATION_TOKEN not set
-        with pytest.raises(ValueError, match="AUTOMATION_TOKEN environment variable must be set"):
-            from musicround.config import Config
-            _ = Config.AUTOMATION_TOKEN
-        
-        # Restore environment
-        if token:
-            os.environ['AUTOMATION_TOKEN'] = token
+        try:
+            # Force module reload to re-evaluate class-level checks
+            import musicround.config
+            with pytest.raises(ValueError, match="AUTOMATION_TOKEN environment variable must be set"):
+                importlib.reload(musicround.config)
+        finally:
+            # Restore environment
+            if token:
+                os.environ['AUTOMATION_TOKEN'] = token
+                # Reload with correct env so other tests work
+                importlib.reload(musicround.config)
     
     def test_no_credentials_in_code(self):
         """Test that no credentials are hardcoded in Python files."""

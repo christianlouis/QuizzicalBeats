@@ -504,7 +504,7 @@ def get_deezer_data(isrc, app=None):
         
         if not deezer_client:
             # If no client in app context, make direct API call
-            response = requests.get(f"https://api.deezer.com/track/isrc:{isrc}")
+            response = requests.get(f"https://api.deezer.com/track/isrc:{isrc}", timeout=10)
             if response.status_code == 200:
                 track = response.json()
             else:
@@ -539,7 +539,7 @@ def get_deezer_data(isrc, app=None):
                 if deezer_client:
                     album = deezer_client.get_album(album_id)
                 else:
-                    album_response = requests.get(f"https://api.deezer.com/album/{album_id}")
+                    album_response = requests.get(f"https://api.deezer.com/album/{album_id}", timeout=10)
                     album = album_response.json() if album_response.status_code == 200 else None
                 
                 if album and not album.get('error'):
@@ -591,7 +591,7 @@ def get_lastfm_data(artist_name, track_title, app=None):
             'format': 'json'
         }
         
-        response = requests.get(url=url, params=params)
+        response = requests.get(url=url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
             
@@ -753,7 +753,7 @@ def get_acrcloud_data(isrc, app=None):
             'include_works': 1  # Include additional work metadata
         }
         
-        response = requests.get(url, headers=headers, params=params)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         if response.status_code != 200:
             app.logger.warning(f"ACRCloud API error: {response.status_code} - {response.text}")
             return result
