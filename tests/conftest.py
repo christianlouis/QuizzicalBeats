@@ -1,19 +1,66 @@
 """Pytest configuration and fixtures for Quizzical Beats tests."""
 import os
 import sys
+import tempfile
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
+def _make_app():
+    """
+    Create a Flask application instance suitable for testing.
+
+    The standard create_app() tries to access /data which may not be writable
+    in CI environments.  We redirect that path to a temporary directory during
+    app creation and then reconfigure SQLAlchemy to use an in-memory database
+    for the actual test session.
+    """
+    # Set required environment variables before importing the app so that config
+    # defaults are populated correctly.  Use setdefault so that values provided
+    # by the test runner (e.g. SECRET_KEY=test pytest …) are not overridden.
+    os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
+    os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
+
+    from musicround import create_app, db
+
+    tmpdir = tempfile.mkdtemp()
+
+    _orig_join = os.path.join
+    _orig_exists = os.path.exists
+    _orig_makedirs = os.makedirs
+
+    def _join(*args):
+        result = _orig_join(*args)
+        if result == '/data/song_data.db':
+            return os.path.join(tmpdir, 'test.db')
+        return result
+
+    def _exists(path):
+        if path == '/data':
+            return True
+        return _orig_exists(path)
+
+    def _makedirs(path, **kwargs):
+        if path == '/data':
+            return
+        return _orig_makedirs(path, **kwargs)
+
+    with patch('os.path.join', side_effect=_join), \
+         patch('os.path.exists', side_effect=_exists), \
+         patch('os.makedirs', side_effect=_makedirs):
+        app = create_app()
+
+    return app, db
+
+
 @pytest.fixture
 def app():
     """Create a test Flask application instance."""
-    from musicround import create_app, db
-    
-    # Create app in testing mode
+    app, db = _make_app()
+
     test_config = {
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
@@ -22,10 +69,8 @@ def app():
         'AUTOMATION_TOKEN': 'test-automation-token-for-testing',
         'WTF_CSRF_ENABLED': False,  # Disable CSRF for testing
     }
-    
-    app = create_app()
     app.config.update(test_config)
-    
+
     with app.app_context():
         db.create_all()
         yield app
