@@ -1,0 +1,10 @@
+[flake8]
+max-line-length = 100
+# Hard errors only (syntax errors and undefined names) are enforced in CI.
+# Style warnings are reported with --exit-zero.
+exclude =
+    .git,
+    __pycache__,
+    migrations,
+    .venv,
+    venv
