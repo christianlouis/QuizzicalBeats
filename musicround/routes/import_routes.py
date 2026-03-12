@@ -750,7 +750,7 @@ def queue_status():
     Display real-time status of the import queue for administrators
     """
     # Check if user is an admin
-    if not current_user.is_admin():
+    if not current_user.is_admin:
         flash('Admin access required for Import Queue view.', 'danger')
         return redirect(url_for('core.index'))
         

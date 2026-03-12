@@ -145,7 +145,7 @@
                                 <li>
                                     <a class="text-white hover:text-teal-500" href="{{ url_for('rounds.rounds_list') }}">View Rounds</a>
                                 </li>
-                                {% if current_user.is_admin() %}
+                                {% if current_user.is_admin %}
                                 <li class="group relative">
                                     <button class="peer flex items-center text-white hover:text-teal-500">
                                         <i class="fas fa-shield-alt mr-2"></i>Admin <i class="fas fa-chevron-down ml-1"></i>

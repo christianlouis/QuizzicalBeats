@@ -100,6 +100,8 @@ class User(db.Model, UserMixin):
 
     def check_password(self, password):
         """Check if provided password matches the hash"""
+        if not self.password_hash:
+            return False
         return check_password_hash(self.password_hash, password)
         
     def set_token(self):
@@ -111,8 +113,8 @@ class User(db.Model, UserMixin):
         """Check if user has a specific role"""
         return any(role.name == role_name for role in self.roles)
 
-    def is_admin(self):
-        """Check if user is an admin"""
+    def is_admin_by_role(self):
+        """Check if user is an admin via role assignment"""
         return self.has_role('admin')
         
     def __repr__(self):
@@ -323,7 +325,9 @@ class SystemSetting(db.Model):
             db.session.add(setting)
         else:
             setting.value = value
-        db.session.commit()    @staticmethod
+        db.session.commit()
+
+    @staticmethod
     def all_settings():
         return {s.key: s.value for s in SystemSetting.query.all()}
 

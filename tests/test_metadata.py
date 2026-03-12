@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 import dotenv
+import pytest
 from unittest.mock import patch, MagicMock
 
 # Add the project root to Python path for imports
@@ -91,7 +92,7 @@ class TestMetadataHelper(unittest.TestCase):
             "genre": ["Rock", "Hard Rock"],
             "spotify_id": "2zYzyRzz6pRmhPzyfMEC8s",
             "deezer_id": "89077521",
-            "preview_url": "https://audio-ssl.spotify.com/preview/track1234.mp3"
+            "spotify_preview_url": "https://audio-ssl.spotify.com/preview/track1234.mp3"
         }
         
         # Call function with test ISRC
@@ -203,6 +204,7 @@ class TestMetadataHelper(unittest.TestCase):
             self.assertEqual(metadata["year"], "1979")
             self.assertEqual(metadata["genre"], "hard rock")  # First tag from tag-list
 
+    @pytest.mark.skip(reason="Integration test requiring live API credentials. Run manually when needed.")
     def test_real_api_calls(self):
         """
         Test actual API calls with AC/DC's Highway to Hell.

@@ -85,7 +85,10 @@ def import_playlist():
             flash("No playlist ID provided for import.", "danger")
             return redirect(request.referrer or url_for('core.search'))
 
-        priority = int(request.form.get('priority', 10))
+        try:
+            priority = int(request.form.get('priority', 10))
+        except (ValueError, TypeError):
+            priority = 10
         queue = current_app.config.get('import_queue')
         if not queue:
             flash("Import queue not initialized.", "danger")

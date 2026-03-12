@@ -302,7 +302,10 @@ def serve_user_audio(filepath):
     """
     Serve user custom audio files from the data directory
     """
-    if '..' in filepath:
+    # Resolve the real path to prevent path traversal attacks
+    base_dir = os.path.realpath('/data')
+    requested_path = os.path.realpath(os.path.join('/data', filepath))
+    if not requested_path.startswith(base_dir + os.sep) and requested_path != base_dir:
         abort(404)
         
     if 'custommp3/' in filepath:

@@ -18,7 +18,7 @@ def admin_required(view_func):
         if not current_user.is_authenticated:
             return redirect(url_for('users.login'))
         
-        if not current_user.is_admin():
+        if not current_user.is_admin:
             flash('Admin access required.', 'danger')
             return redirect(url_for('core.index'))
             
@@ -37,7 +37,7 @@ def raw_db_access():
 # Base model view with authentication
 class AuthModelView(ModelView):
     def is_accessible(self):
-        return current_user.is_authenticated and current_user.is_admin()
+        return current_user.is_authenticated and current_user.is_admin
     
     def inaccessible_callback(self, name, **kwargs):
         if not current_user.is_authenticated:

@@ -82,7 +82,7 @@ def send_email(recipient, subject, body_text, attachments=None):
 
     try:
         current_app.logger.info(f"Attempting to send email to {recipient} via {mail_host}:{mail_port}")
-        with smtplib.SMTP(mail_host, mail_port) as server:
+        with smtplib.SMTP(mail_host, mail_port, timeout=30) as server:
             server.starttls()
             current_app.logger.debug("STARTTLS established")
             server.login(mail_username, mail_password)
