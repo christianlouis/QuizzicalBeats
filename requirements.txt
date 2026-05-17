@@ -17,6 +17,7 @@ Flask-Mail
 Flask-Session
 authlib>=1.6.5
 Flask-Caching
+gunicorn
 psutil
 
 # Testing dependencies

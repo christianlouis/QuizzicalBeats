@@ -23,7 +23,18 @@ case "${FLASK_DEBUG,,}" in
     exec python -m flask run --host=0.0.0.0 --port=5000 --reload --debug
     ;;
   *)
-    echo "Starting Flask application server..."
-    exec python run.py
+    : "${GUNICORN_BIND:=0.0.0.0:5000}"
+    : "${GUNICORN_WORKERS:=2}"
+    : "${GUNICORN_THREADS:=4}"
+    : "${GUNICORN_TIMEOUT:=120}"
+    echo "Starting Gunicorn application server..."
+    exec gunicorn \
+      --bind "$GUNICORN_BIND" \
+      --workers "$GUNICORN_WORKERS" \
+      --threads "$GUNICORN_THREADS" \
+      --timeout "$GUNICORN_TIMEOUT" \
+      --access-logfile - \
+      --error-logfile - \
+      wsgi:app
     ;;
 esac

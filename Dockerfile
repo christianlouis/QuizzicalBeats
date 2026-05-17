@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # The .dockerignore file ensures we only include what's specified
 COPY musicround/ ./musicround/
 COPY migrations/ ./migrations/
-COPY run_migration.py run.py docker-entrypoint.sh LICENSE favicon.ico .
+COPY run_migration.py run.py wsgi.py docker-entrypoint.sh LICENSE favicon.ico .
 
 # Make the entrypoint script executable
 RUN chmod +x docker-entrypoint.sh
