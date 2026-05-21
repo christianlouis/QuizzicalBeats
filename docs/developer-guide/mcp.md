@@ -13,6 +13,16 @@ pip install -r requirements.txt
 python -m musicround.mcp_server
 ```
 
+For a production streamable HTTP endpoint, run the authenticated ASGI entrypoint:
+
+```bash
+MCP_BEARER_TOKEN=... uvicorn musicround.mcp_http:app --host 0.0.0.0 --port 8000
+```
+
+If `MCP_BEARER_TOKEN` is not set, the HTTP entrypoint falls back to
+`AUTOMATION_TOKEN`. Set `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` when the
+server is exposed behind a reverse proxy or ingress.
+
 The server uses the normal Quizzical Beats Flask configuration. Set the same
 environment variables you use for the web app, including `SECRET_KEY`,
 `AUTOMATION_TOKEN`, database configuration, mail settings, and any Spotify,
