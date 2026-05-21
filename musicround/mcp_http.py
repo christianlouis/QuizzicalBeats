@@ -11,6 +11,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from musicround.mcp_server import mcp
 
 
+_BASE_ALLOWED_HOSTS = tuple(mcp.settings.transport_security.allowed_hosts)
+_BASE_ALLOWED_ORIGINS = tuple(mcp.settings.transport_security.allowed_origins)
+
+
 class BearerAuthMiddleware:
     """Require a bearer token for MCP HTTP traffic."""
 
@@ -38,9 +42,11 @@ class BearerAuthMiddleware:
         authorization = headers.get(b"authorization", b"").decode("latin1")
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not compare_digest(token.strip(), expected):
-            await JSONResponse({"error": "Unauthorized."}, status_code=401)(
-                scope, receive, send
-            )
+            await JSONResponse(
+                {"error": "Unauthorized."},
+                headers={"WWW-Authenticate": "Bearer"},
+                status_code=401,
+            )(scope, receive, send)
             return
 
         await self.app(scope, receive, send)
@@ -65,11 +71,9 @@ def _configure_server() -> None:
         if value.strip()
     ]
     security = mcp.settings.transport_security
-    security.allowed_hosts.extend(
-        host for host in allowed_hosts if host not in security.allowed_hosts
-    )
-    security.allowed_origins.extend(
-        origin for origin in allowed_origins if origin not in security.allowed_origins
+    security.allowed_hosts = list(dict.fromkeys([*_BASE_ALLOWED_HOSTS, *allowed_hosts]))
+    security.allowed_origins = list(
+        dict.fromkeys([*_BASE_ALLOWED_ORIGINS, *allowed_origins])
     )
 
 
