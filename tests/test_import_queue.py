@@ -2,7 +2,10 @@
 import pytest
 import threading
 import time
-from musicround.helpers.import_queue import ImportJob, ImportQueue
+from unittest.mock import patch
+
+from musicround.helpers.import_queue import ImportJob, ImportQueue, ImportWorker
+from musicround.models import User, db
 
 
 class TestImportJob:
@@ -154,3 +157,46 @@ class TestImportQueue:
 
         assert not errors
         assert len(results) == 5
+
+
+class TestImportWorker:
+    """Tests for ImportWorker job processing."""
+
+    def test_process_job_imports_as_user(self, app):
+        """Test that _process_job logs in the target user and imports the item."""
+        with app.app_context():
+            user = User(username='workeruser', email='worker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=user.id,
+            )
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                worker._process_job(job)
+
+            mock_import.assert_called_once_with('deezer', 'track', '123')
+
+    def test_process_job_unknown_user_does_not_import(self, app):
+        """Test that jobs for missing users are ignored."""
+        with app.app_context():
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=999,
+            )
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                worker._process_job(job)
+
+            mock_import.assert_not_called()
