@@ -37,6 +37,12 @@ The MCP server exposes these tools:
 | --- | --- |
 | `find_songs` | Search the existing Quizzical Beats catalog before adding duplicates. |
 | `add_song` | Add or update a catalog song, including platform IDs and tags. |
+| `datastore_schema` | Describe all mapped datastore object types, columns, and primary keys. |
+| `list_datastore_objects` | List persisted objects with optional exact-match filters, ordering, limit, and offset. |
+| `get_datastore_object` | Fetch one persisted object by primary key. |
+| `create_datastore_object` | Create one persisted object from scalar column fields. |
+| `update_datastore_object` | Update scalar column fields on one persisted object. |
+| `delete_datastore_object` | Delete one persisted object by primary key. |
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
@@ -46,6 +52,15 @@ The MCP server exposes these tools:
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
 | `send_round_email` | Generate assets and email the finished round bundle. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
+
+`find_songs` includes `used_count`, `usage_frequency`, and `last_used` for each
+result so agents can see how often songs have already appeared in rounds.
+
+The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
+`song`, `round`, `tag`, `song_tag`, `user`, `role`, `user_preferences`,
+`round_export`, `system_setting`, and `import_job_record`. Read results redact
+fields whose names contain `password`, `token`, or `secret` unless
+`include_sensitive` is explicitly set.
 
 ## Intended Workflow
 
