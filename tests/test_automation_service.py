@@ -7,7 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from musicround.models import Song, User, db
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only")
+os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+
+from musicround.models import Song, SongTag, Tag, User, db
 from musicround.services import automation
 
 
@@ -31,12 +34,20 @@ class TestSongAutomation:
 
     def test_find_songs_by_query(self, app):
         with app.app_context():
-            _create_song(title="Blue Monday", artist="New Order", genre="Synthpop")
+            _create_song(
+                title="Blue Monday",
+                artist="New Order",
+                genre="Synthpop",
+                used_count=3,
+            )
 
             result = automation.find_songs(query="blue")
 
             assert result["count"] == 1
             assert result["songs"][0]["title"] == "Blue Monday"
+            assert result["songs"][0]["used_count"] == 3
+            assert result["songs"][0]["usage_frequency"] == 3
+            assert "last_used" in result["songs"][0]
 
     def test_add_song_reuses_existing_by_isrc_and_adds_tags(self, app):
         with app.app_context():
@@ -127,3 +138,74 @@ class TestTTSAutomation:
 
             assert result["path"] == "custommp3/agentuser/intro.mp3"
             assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/intro.mp3"
+
+
+class TestDatastoreCrudAutomation:
+    """Tests for generic datastore CRUD operations exposed through MCP."""
+
+    def test_datastore_schema_lists_mapped_models(self, app):
+        with app.app_context():
+            schema = automation.datastore_schema()
+
+            assert "song" in schema["object_types"]
+            assert "round" in schema["object_types"]
+            assert "user" in schema["object_types"]
+            song_schema = next(
+                item for item in schema["objects"] if item["object_type"] == "song"
+            )
+            assert song_schema["primary_key"] == ["id"]
+            assert any(column["name"] == "title" for column in song_schema["columns"])
+
+    def test_crud_lifecycle_for_single_primary_key_object(self, app):
+        with app.app_context():
+            created = automation.create_datastore_object("tag", {"name": "warmup"})
+            tag_id = created["object"]["id"]
+
+            listed = automation.list_datastore_objects(
+                "tag", filters={"name": "warmup"}, order_by="id"
+            )
+            fetched = automation.get_datastore_object("tag", tag_id)
+            updated = automation.update_datastore_object(
+                "tag", tag_id, {"name": "opener"}
+            )
+            deleted = automation.delete_datastore_object("tag", tag_id)
+
+            assert created["object_type"] == "tag"
+            assert listed["total"] == 1
+            assert fetched["object"]["name"] == "warmup"
+            assert updated["object"]["name"] == "opener"
+            assert deleted["deleted"] is True
+            assert Tag.query.get(tag_id) is None
+
+    def test_crud_supports_composite_primary_keys(self, app):
+        with app.app_context():
+            song = _create_song(title="Composite", artist="Key")
+            tag = Tag(name="linked")
+            db.session.add(tag)
+            db.session.commit()
+
+            created = automation.create_datastore_object(
+                "song_tag", {"song_id": song.id, "tag_id": tag.id}
+            )
+            fetched = automation.get_datastore_object(
+                "song_tag", {"song_id": song.id, "tag_id": tag.id}
+            )
+            deleted = automation.delete_datastore_object(
+                "song_tag", {"song_id": song.id, "tag_id": tag.id}
+            )
+
+            assert created["object"]["song_id"] == song.id
+            assert fetched["object"]["tag_id"] == tag.id
+            assert deleted["deleted"] is True
+            assert SongTag.query.count() == 0
+
+    def test_user_sensitive_fields_are_redacted_by_default(self, app):
+        with app.app_context():
+            user = _create_user()
+            user.spotify_token = "secret-token"
+            db.session.commit()
+
+            result = automation.get_datastore_object("user", user.id)
+
+            assert result["object"]["spotify_token"] == "[redacted]"
+            assert result["object"]["password_hash"] == "[redacted]"

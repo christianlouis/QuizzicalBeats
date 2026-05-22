@@ -88,6 +88,90 @@ def add_song(
 
 
 @mcp.tool()
+def datastore_schema() -> dict[str, Any]:
+    """Describe every datastore object type available to generic CRUD tools."""
+    return _with_app_context(automation.datastore_schema)
+
+
+@mcp.tool()
+def list_datastore_objects(
+    object_type: str,
+    filters: dict[str, Any] | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    order_by: str | None = None,
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """List datastore objects such as songs, rounds, users, tags, exports, and settings."""
+    return _with_app_context(
+        automation.list_datastore_objects,
+        object_type=object_type,
+        filters=filters,
+        limit=limit,
+        offset=offset,
+        order_by=order_by,
+        include_sensitive=include_sensitive,
+    )
+
+
+@mcp.tool()
+def get_datastore_object(
+    object_type: str,
+    object_id: Any,
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Fetch one datastore object by primary key."""
+    return _with_app_context(
+        automation.get_datastore_object,
+        object_type=object_type,
+        object_id=object_id,
+        include_sensitive=include_sensitive,
+    )
+
+
+@mcp.tool()
+def create_datastore_object(
+    object_type: str,
+    fields: dict[str, Any],
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Create one datastore object from scalar column fields."""
+    return _with_app_context(
+        automation.create_datastore_object,
+        object_type=object_type,
+        fields=fields,
+        include_sensitive=include_sensitive,
+    )
+
+
+@mcp.tool()
+def update_datastore_object(
+    object_type: str,
+    object_id: Any,
+    fields: dict[str, Any],
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Update scalar column fields on one datastore object."""
+    return _with_app_context(
+        automation.update_datastore_object,
+        object_type=object_type,
+        object_id=object_id,
+        fields=fields,
+        include_sensitive=include_sensitive,
+    )
+
+
+@mcp.tool()
+def delete_datastore_object(object_type: str, object_id: Any) -> dict[str, Any]:
+    """Delete one datastore object by primary key."""
+    return _with_app_context(
+        automation.delete_datastore_object,
+        object_type=object_type,
+        object_id=object_id,
+    )
+
+
+@mcp.tool()
 def import_catalog_item(
     service_name: str,
     item_type: str,

@@ -10,12 +10,14 @@ from typing import Any, Iterable
 from flask import current_app
 from flask_login import login_user, logout_user
 from pydub import AudioSegment
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
 
 from musicround import db
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.utils import generate_tts_mp3
+from musicround import models as datastore_models
 from musicround.models import Round, RoundExport, Song, Tag, User
 
 
@@ -36,6 +38,9 @@ def _song_summary(song: Song) -> dict[str, Any]:
         "spotify_id": data["spotify_id"],
         "deezer_id": data["deezer_id"],
         "isrc": data["isrc"],
+        "used_count": data["used_count"] or 0,
+        "usage_frequency": data["used_count"] or 0,
+        "last_used": data["last_used"],
         "tags": data["tags"],
     }
 
@@ -112,6 +117,297 @@ def _attach_tags(song: Song, tag_names: Iterable[str] | None) -> None:
             db.session.flush()
         if tag not in song.tags:
             song.tags.append(tag)
+
+
+def _snake_case(value: str) -> str:
+    value = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", value)
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    return value.lower()
+
+
+def _model_registry() -> dict[str, type[db.Model]]:
+    registry: dict[str, type[db.Model]] = {}
+    for value in vars(datastore_models).values():
+        if not isinstance(value, type):
+            continue
+        if value is db.Model or not issubclass(value, db.Model):
+            continue
+        mapper = sa_inspect(value, raiseerr=False)
+        if mapper is None or getattr(value, "__table__", None) is None:
+            continue
+        canonical = _snake_case(value.__name__)
+        registry[canonical] = value
+        registry[value.__name__] = value
+        registry[value.__name__.lower()] = value
+        registry[value.__tablename__] = value
+    return registry
+
+
+def _canonical_model_key(model: type[db.Model]) -> str:
+    return _snake_case(model.__name__)
+
+
+def _get_model(object_type: str) -> type[db.Model]:
+    if not object_type:
+        raise AutomationError("object_type is required.")
+    model = _model_registry().get(object_type)
+    if not model:
+        allowed = sorted({_canonical_model_key(model) for model in _model_registry().values()})
+        raise AutomationError(f"Unknown object_type '{object_type}'. Allowed values: {allowed}")
+    return model
+
+
+def _column_map(model: type[db.Model]) -> dict[str, Any]:
+    return {column.key: column for column in sa_inspect(model).columns}
+
+
+def _primary_key_columns(model: type[db.Model]) -> list[Any]:
+    return list(sa_inspect(model).primary_key)
+
+
+def _is_sensitive_field(field_name: str) -> bool:
+    lowered = field_name.lower()
+    return any(marker in lowered for marker in ("password", "token", "secret"))
+
+
+def _json_value(value: Any, *, sensitive: bool = False, include_sensitive: bool = False) -> Any:
+    if sensitive and value is not None and not include_sensitive:
+        return "[redacted]"
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _serialize_model(instance: db.Model, *, include_sensitive: bool = False) -> dict[str, Any]:
+    data = {}
+    for column in sa_inspect(instance.__class__).columns:
+        value = getattr(instance, column.key)
+        data[column.key] = _json_value(
+            value,
+            sensitive=_is_sensitive_field(column.key),
+            include_sensitive=include_sensitive,
+        )
+    return data
+
+
+def _coerce_column_value(column: Any, value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        python_type = column.type.python_type
+    except NotImplementedError:
+        return value
+
+    if python_type is datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            normalized = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized)
+        raise AutomationError(f"{column.key} must be an ISO datetime string.")
+    if python_type is bool and isinstance(value, str):
+        lowered = value.lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+    if python_type in {int, float, str, bool} and not isinstance(value, python_type):
+        return python_type(value)
+    return value
+
+
+def _identity_for_object(model: type[db.Model], object_id: Any) -> Any:
+    primary_key = _primary_key_columns(model)
+    if not primary_key:
+        raise AutomationError(f"{_canonical_model_key(model)} does not have a primary key.")
+
+    if isinstance(object_id, dict):
+        missing = [column.key for column in primary_key if column.key not in object_id]
+        if missing:
+            raise AutomationError(f"Missing primary key field(s): {missing}")
+        values = [_coerce_column_value(column, object_id[column.key]) for column in primary_key]
+    elif len(primary_key) == 1:
+        values = [_coerce_column_value(primary_key[0], object_id)]
+    elif isinstance(object_id, list):
+        if len(object_id) != len(primary_key):
+            raise AutomationError(
+                f"Composite primary key requires {len(primary_key)} values in order."
+            )
+        values = [
+            _coerce_column_value(column, object_id[index])
+            for index, column in enumerate(primary_key)
+        ]
+    else:
+        names = [column.key for column in primary_key]
+        raise AutomationError(f"Composite primary key requires an object with keys {names}.")
+
+    return values[0] if len(values) == 1 else tuple(values)
+
+
+def _get_datastore_instance(model: type[db.Model], object_id: Any) -> db.Model:
+    instance = db.session.get(model, _identity_for_object(model, object_id))
+    if not instance:
+        raise AutomationError(f"{_canonical_model_key(model)} {object_id} was not found.")
+    return instance
+
+
+def _apply_datastore_filters(query: Any, model: type[db.Model], filters: dict[str, Any] | None) -> Any:
+    columns = _column_map(model)
+    for field_name, raw_value in (filters or {}).items():
+        column = columns.get(field_name)
+        if column is None:
+            raise AutomationError(f"Unknown filter field '{field_name}'.")
+        query = query.filter(getattr(model, field_name) == _coerce_column_value(column, raw_value))
+    return query
+
+
+def _assign_datastore_fields(instance: db.Model, fields: dict[str, Any], *, creating: bool) -> None:
+    if not fields:
+        raise AutomationError("fields must not be empty.")
+
+    model = instance.__class__
+    columns = _column_map(model)
+    primary_keys = {column.key for column in _primary_key_columns(model)}
+    for field_name, raw_value in fields.items():
+        column = columns.get(field_name)
+        if column is None:
+            raise AutomationError(f"Unknown field '{field_name}'.")
+        if not creating and field_name in primary_keys:
+            raise AutomationError("Primary key fields cannot be updated.")
+        setattr(instance, field_name, _coerce_column_value(column, raw_value))
+
+
+def datastore_schema() -> dict[str, Any]:
+    """Describe datastore objects available through generic MCP CRUD tools."""
+    models_by_key = {
+        _canonical_model_key(model): model for model in _model_registry().values()
+    }
+    objects = []
+    for object_type, model in sorted(models_by_key.items()):
+        mapper = sa_inspect(model)
+        objects.append(
+            {
+                "object_type": object_type,
+                "table": model.__tablename__,
+                "primary_key": [column.key for column in mapper.primary_key],
+                "columns": [
+                    {
+                        "name": column.key,
+                        "type": str(column.type),
+                        "nullable": column.nullable,
+                        "primary_key": column.primary_key,
+                        "sensitive": _is_sensitive_field(column.key),
+                    }
+                    for column in mapper.columns
+                ],
+            }
+        )
+    return {"object_types": [item["object_type"] for item in objects], "objects": objects}
+
+
+def list_datastore_objects(
+    object_type: str,
+    filters: dict[str, Any] | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    order_by: str | None = None,
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """List persisted rows for a mapped datastore object."""
+    if limit < 1 or limit > 500:
+        raise AutomationError("limit must be between 1 and 500.")
+    if offset < 0:
+        raise AutomationError("offset must not be negative.")
+
+    model = _get_model(object_type)
+    query = _apply_datastore_filters(model.query, model, filters)
+    total = query.count()
+
+    if order_by:
+        descending = order_by.startswith("-")
+        field_name = order_by[1:] if descending else order_by
+        if field_name not in _column_map(model):
+            raise AutomationError(f"Unknown order_by field '{field_name}'.")
+        column = getattr(model, field_name)
+        query = query.order_by(column.desc() if descending else column.asc())
+    else:
+        primary_key = _primary_key_columns(model)
+        if primary_key:
+            query = query.order_by(*[getattr(model, column.key).asc() for column in primary_key])
+
+    rows = query.offset(offset).limit(limit).all()
+    return {
+        "object_type": _canonical_model_key(model),
+        "count": len(rows),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "objects": [_serialize_model(row, include_sensitive=include_sensitive) for row in rows],
+    }
+
+
+def get_datastore_object(
+    object_type: str,
+    object_id: Any,
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Fetch a single persisted datastore object by primary key."""
+    model = _get_model(object_type)
+    instance = _get_datastore_instance(model, object_id)
+    return {
+        "object_type": _canonical_model_key(model),
+        "object": _serialize_model(instance, include_sensitive=include_sensitive),
+    }
+
+
+def create_datastore_object(
+    object_type: str,
+    fields: dict[str, Any],
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Create a persisted datastore object from scalar column fields."""
+    model = _get_model(object_type)
+    instance = model()
+    _assign_datastore_fields(instance, fields, creating=True)
+    db.session.add(instance)
+    db.session.commit()
+    return {
+        "created": True,
+        "object_type": _canonical_model_key(model),
+        "object": _serialize_model(instance, include_sensitive=include_sensitive),
+    }
+
+
+def update_datastore_object(
+    object_type: str,
+    object_id: Any,
+    fields: dict[str, Any],
+    include_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Update scalar column fields for a persisted datastore object."""
+    model = _get_model(object_type)
+    instance = _get_datastore_instance(model, object_id)
+    _assign_datastore_fields(instance, fields, creating=False)
+    db.session.commit()
+    return {
+        "updated": True,
+        "object_type": _canonical_model_key(model),
+        "object": _serialize_model(instance, include_sensitive=include_sensitive),
+    }
+
+
+def delete_datastore_object(object_type: str, object_id: Any) -> dict[str, Any]:
+    """Delete a persisted datastore object by primary key."""
+    model = _get_model(object_type)
+    instance = _get_datastore_instance(model, object_id)
+    serialized = _serialize_model(instance)
+    db.session.delete(instance)
+    db.session.commit()
+    return {
+        "deleted": True,
+        "object_type": _canonical_model_key(model),
+        "object": serialized,
+    }
 
 
 def add_song(
