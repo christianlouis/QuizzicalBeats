@@ -124,6 +124,30 @@ class TestDependencySecurity:
         assert 'authlib>=1.6.5' in content, \
             "authlib should be pinned to >= 1.6.5 to fix known vulnerabilities"
 
+    def test_pyjwt_version(self):
+        """Test that PyJWT is at least version 2.10.1."""
+        requirements_path = os.path.join(
+            os.path.dirname(__file__), '..', 'requirements.txt'
+        )
+
+        with open(requirements_path, 'r') as f:
+            content = f.read()
+
+        assert 'PyJWT>=2.10.1' in content, \
+            "PyJWT should be pinned to >= 2.10.1 to fix known vulnerabilities"
+
+    def test_idna_version(self):
+        """Test that idna is at least version 3.11."""
+        requirements_path = os.path.join(
+            os.path.dirname(__file__), '..', 'requirements.txt'
+        )
+
+        with open(requirements_path, 'r') as f:
+            content = f.read()
+
+        assert 'idna>=3.11' in content, \
+            "idna should be pinned to >= 3.11 to fix known vulnerabilities"
+
 
 class TestInputValidation:
     """Test that user input is properly validated."""

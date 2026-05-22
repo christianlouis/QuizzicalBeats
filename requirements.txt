@@ -5,7 +5,8 @@ flask_migrate
 requests
 pydub
 reportlab
-PyJWT
+PyJWT>=2.10.1
+idna>=3.11
 python-dotenv
 deezer-python
 Flask-Assets
