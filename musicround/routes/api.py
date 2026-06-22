@@ -120,10 +120,10 @@ def song_detail(song_id):
     elif request.method == 'DELETE':
         # Check for exact membership in the comma-separated round song list without
         # loading every Round row into Python.
-        song_id_token = str(song_id)
+        song_id_token = str(song.id)
         rounds_with_song = [
             round_id for (round_id,) in Round.query.with_entities(Round.id).filter(
-                db.or_(
+                or_(
                     Round.songs == song_id_token,
                     Round.songs.like(f'{song_id_token},%'),
                     Round.songs.like(f'%,{song_id_token},%'),
