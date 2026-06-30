@@ -118,13 +118,19 @@ def song_detail(song_id):
         })
         
     elif request.method == 'DELETE':
-        # Check if the song is used in any rounds before deleting
-        rounds_with_song = []
-        
-        for round_obj in Round.query.all():
-            song_ids = round_obj.songs.split(',')
-            if str(song_id) in song_ids:
-                rounds_with_song.append(round_obj.id)
+        # Check for exact membership in the comma-separated round song list without
+        # loading every Round row into Python.
+        song_id_token = str(song.id)
+        rounds_with_song = [
+            round_id for (round_id,) in Round.query.with_entities(Round.id).filter(
+                or_(
+                    Round.songs == song_id_token,
+                    Round.songs.like(f'{song_id_token},%'),
+                    Round.songs.like(f'%,{song_id_token},%'),
+                    Round.songs.like(f'%,{song_id_token}'),
+                )
+            ).all()
+        ]
         
         if rounds_with_song:
             # The song is used in rounds, return error
