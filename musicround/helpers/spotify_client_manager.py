@@ -3,7 +3,7 @@ Updated core.py with improved Spotify OAuth handling
 """
 import logging
 import datetime
-from flask import current_app, redirect, url_for, flash, session
+from flask import redirect, url_for, flash, session
 from flask_login import current_user
 from musicround.helpers.spotify_debug import DebugSpotifyClient
 from musicround.models import db

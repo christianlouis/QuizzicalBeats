@@ -107,26 +107,25 @@ def get_least_used_songs(genre=None, decade=None):
     Returns songs that have never been used in a round.
     Can filter by genre or decade.
     """
-    least_used_songs = []
-    all_songs = Song.query.all()
+    song_query = Song.query
+    if genre:
+        song_query = song_query.filter_by(genre=genre)
+    if decade:
+        try:
+            decade_start = int(decade)
+        except (TypeError, ValueError):
+            return []
+        song_query = song_query.filter(Song.year >= decade_start, Song.year < decade_start + 10)
 
-    # gather round_criteria_used for rounds of type 'song'
-    used_song_ids = []
-    for rnd in Round.query.all():
-        if rnd.round_type == 'song':
-            used_song_ids.append(rnd.round_criteria_used)
+    used_song_ids = {
+        spotify_id
+        for (spotify_id,) in Round.query.with_entities(Round.round_criteria_used)
+        .filter_by(round_type='song')
+        .all()
+    }
 
     # If a song's spotify_id never appears in used_song_ids => "least used"
-    for song in all_songs:
-        if song.spotify_id not in used_song_ids:
-            least_used_songs.append(song)
-
-    # Filter by genre or decade if passed
-    if genre:
-        least_used_songs = [s for s in least_used_songs if s.genre == genre]
-    if decade:
-        least_used_songs = [s for s in least_used_songs if s.year and str(s.year)[:3] + '0' == decade]
-    return least_used_songs
+    return [song for song in song_query.all() if song.spotify_id not in used_song_ids]
 
 def get_non_overused_songs(genre=None, decade=None):
     """
