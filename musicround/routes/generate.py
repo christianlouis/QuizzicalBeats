@@ -118,14 +118,15 @@ def get_least_used_songs(genre=None, decade=None):
         song_query = song_query.filter(Song.year >= decade_start, Song.year < decade_start + 10)
 
     used_song_ids = {
-        spotify_id
-        for (spotify_id,) in Round.query.with_entities(Round.round_criteria_used)
-        .filter_by(round_type='song')
-        .all()
+        int(song_id)
+        for (songs_csv,) in Round.query.with_entities(Round.songs).all()
+        for song_id in songs_csv.split(',')
+        if song_id
     }
 
-    # If a song's spotify_id never appears in used_song_ids => "least used"
-    return [song for song in song_query.all() if song.spotify_id not in used_song_ids]
+    if used_song_ids:
+        song_query = song_query.filter(~Song.id.in_(used_song_ids))
+    return song_query.all()
 
 def get_non_overused_songs(genre=None, decade=None):
     """
