@@ -297,6 +297,10 @@ class RoundExport(db.Model):
     include_mp3s = db.Column(db.Boolean, default=False)  # Whether MP3s were included
     status = db.Column(db.String(20), default='success')  # 'success', 'failed'
     error_message = db.Column(db.Text, nullable=True)  # Error details if failed
+    scheduled_for = db.Column(db.DateTime, nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+    subject = db.Column(db.String(500), nullable=True)
+    body_text = db.Column(db.Text, nullable=True)
     
     # Relationships
     round = db.relationship('Round', backref=db.backref('exports', lazy='dynamic'))
@@ -381,4 +385,3 @@ class ImportJobRecord(db.Model):
             elif self.item_type == 'track':
                 return f"https://www.deezer.com/track/{self.item_id}"
         return None
-

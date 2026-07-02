@@ -528,6 +528,80 @@ class TestAssetInspection:
             export = RoundExport.query.filter_by(round_id=round_id).one()
             assert export.status == "failed"
 
+    def test_schedule_round_email_stores_pending_export(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            result = automation.schedule_round_email(
+                round_id,
+                scheduled_for="2026-07-09T19:00:00+02:00",
+                user_id=user.id,
+                subject="Scheduled subject",
+            )
+
+            export = RoundExport.query.get(result["export"]["id"])
+            assert result["scheduled"] is True
+            assert export.status == "scheduled"
+            assert export.destination == user.email
+            assert export.subject == "Scheduled subject"
+            assert result["export"]["scheduled_for"] == "2026-07-09T17:00:00Z"
+
+    def test_list_scheduled_round_emails_returns_pending_exports(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Listed", artist="Artist")
+            round_id = automation.create_round(
+                name="Listed Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            automation.schedule_round_email(
+                round_id,
+                scheduled_for="2026-07-09T19:00:00+02:00",
+                user_id=user.id,
+            )
+
+            result = automation.list_scheduled_round_emails(user_id=user.id)
+
+            assert result["count"] == 1
+            assert result["scheduled_exports"][0]["round_id"] == round_id
+            assert result["scheduled_exports"][0]["status"] == "scheduled"
+
+    def test_process_due_scheduled_round_emails_sends_due_exports(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Due", artist="Artist")
+            round_id = automation.create_round(
+                name="Due Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            scheduled = automation.schedule_round_email(
+                round_id,
+                scheduled_for="2026-07-09T19:00:00+02:00",
+                user_id=user.id,
+            )
+
+            with patch(
+                "musicround.services.automation.email_round",
+                return_value={"success": True, "message": "sent"},
+            ) as mock_email:
+                result = automation.process_due_scheduled_round_emails(
+                    now="2026-07-09T19:01:00+02:00"
+                )
+
+            assert result["processed_count"] == 1
+            mock_email.assert_called_once()
+            export = RoundExport.query.get(scheduled["export"]["id"])
+            assert export.status == "success"
+            assert export.processed_at is not None
+
 
 class TestTTSAutomation:
     """Tests for TTS snippet assignment."""
