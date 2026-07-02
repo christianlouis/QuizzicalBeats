@@ -330,6 +330,27 @@ def inspect_round_package(
 
 
 @mcp.tool()
+def round_repair_report(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = 6.0,
+) -> dict[str, Any]:
+    """Return package quality plus a human-readable repair report."""
+    return _with_app_context(
+        automation.round_repair_report,
+        round_id=round_id,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+
+
+@mcp.tool()
 def send_round_email(
     round_id: int,
     recipient: str | None = None,

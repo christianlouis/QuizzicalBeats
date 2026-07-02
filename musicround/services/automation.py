@@ -1004,6 +1004,120 @@ def _round_audio_components(
     return components, issues
 
 
+def _round_repair_report(quality: dict[str, Any]) -> dict[str, Any]:
+    round_label = quality.get("round_name") or f"Round {quality.get('round_id')}"
+    status = quality.get("status", "blocked")
+    ok = bool(quality.get("ok"))
+    issues = quality.get("issues", [])
+    remediation = quality.get("remediation", [])
+    preview_checks = quality.get("preview_checks", [])
+
+    if ok:
+        headline = f"{round_label} is ready to send."
+        summary = (
+            f"{quality.get('resolved_song_count', quality.get('song_count', 0))} songs, "
+            "all previews and generated assets passed the package gate."
+        )
+    else:
+        headline = f"{round_label} is blocked: {status}."
+        summary = (
+            f"{len(issues)} issue(s) found. Expected "
+            f"{quality.get('expected_song_count')} songs, found "
+            f"{quality.get('resolved_song_count', quality.get('song_count'))} playable songs."
+        )
+
+    blockers: list[str] = []
+    for issue in issues:
+        song = issue.get("song")
+        prefix = ""
+        if song:
+            prefix = f"{song.get('artist')} - {song.get('title')}: "
+        blockers.append(f"{prefix}{issue.get('message')}")
+
+    failed_positions = []
+    for check in preview_checks:
+        if check.get("ok"):
+            continue
+        failed_positions.append(
+            {
+                "position": check.get("position"),
+                "song_id": check.get("song_id"),
+                "artist": check.get("artist"),
+                "title": check.get("title"),
+                "issue_code": check.get("issue_code"),
+                "message": (
+                    f"Position {check.get('position')}: "
+                    f"{check.get('artist')} - {check.get('title')}"
+                ),
+            }
+        )
+
+    actions = []
+    seen_actions = set()
+    for item in remediation:
+        action = item.get("action")
+        if action == "replace_position":
+            text = (
+                f"Replace position {item.get('position')} "
+                f"({item.get('artist')} - {item.get('title')}) and regenerate assets."
+            )
+        elif action == "add_missing_track":
+            text = (
+                f"Add {item.get('expected_song_count') - item.get('actual_song_count')} "
+                "missing song(s), then regenerate assets."
+            )
+        elif action == "remove_extra_track":
+            text = "Remove extra song(s), then regenerate assets."
+        elif action == "replace_unresolved_positions":
+            positions = ", ".join(str(position) for position in item.get("positions", []))
+            text = f"Replace unresolved position(s) {positions}, then regenerate assets."
+        elif action == "regenerate_assets":
+            text = "Regenerate PDF and MP3, then rerun the package inspection."
+        else:
+            text = item.get("message") or f"Run remediation action {action}."
+        if text not in seen_actions:
+            seen_actions.add(text)
+            actions.append({"action": action, "message": text, "details": item})
+
+    if status == "needs_substitution" and failed_positions:
+        next_step = (
+            "Call suggest_replacement_songs for each failed position, then "
+            "replace_round_song, regenerate assets, and rerun inspect_round_package."
+        )
+    elif status == "needs_more_songs":
+        next_step = (
+            "Complete the round to exactly the expected number of playable songs, "
+            "regenerate assets, and rerun inspect_round_package."
+        )
+    elif status == "render_failed":
+        next_step = "Regenerate assets or fix the renderer inputs, then rerun inspect_round_package."
+    elif ok:
+        next_step = "Send the round email."
+    else:
+        next_step = "Resolve the listed blockers and rerun inspect_round_package."
+
+    markdown_lines = [f"# {headline}", "", summary]
+    if blockers:
+        markdown_lines.extend(["", "## Blockers"])
+        markdown_lines.extend(f"- {blocker}" for blocker in blockers)
+    if actions:
+        markdown_lines.extend(["", "## Repair actions"])
+        markdown_lines.extend(f"- {action['message']}" for action in actions)
+    markdown_lines.extend(["", "## Next step", next_step])
+
+    return {
+        "headline": headline,
+        "summary": summary,
+        "status": status,
+        "ok": ok,
+        "blockers": blockers,
+        "failed_positions": failed_positions,
+        "actions": actions,
+        "next_step": next_step,
+        "markdown": "\n".join(markdown_lines),
+    }
+
+
 def inspect_round_package(
     round_id: int,
     user_id: int | None = None,
@@ -1250,7 +1364,7 @@ def inspect_round_package(
     else:
         status = "blocked"
 
-    return {
+    result = {
         "round_id": round_id,
         "round_name": round_obj.name,
         "status": status,
@@ -1268,6 +1382,28 @@ def inspect_round_package(
         "remediation": remediation,
         "ok": not issues,
     }
+    result["report"] = _round_repair_report(result)
+    return result
+
+
+def round_repair_report(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = 6.0,
+) -> dict[str, Any]:
+    """Return the package quality payload plus a human-readable repair report."""
+    quality = inspect_round_package(
+        round_id=round_id,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+    return {"quality": quality, "report": quality["report"]}
 
 
 def email_round(
@@ -1286,6 +1422,7 @@ def email_round(
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
+        report = quality.get("report") or _round_repair_report(quality)
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
         db.session.add(
             RoundExport(
@@ -1307,6 +1444,7 @@ def email_round(
                 "recipient": target,
                 "assets": assets,
                 "quality": quality,
+                "report": report,
             },
         )
 

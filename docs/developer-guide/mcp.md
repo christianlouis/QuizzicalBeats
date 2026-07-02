@@ -53,6 +53,7 @@ The MCP server exposes these tools:
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
 | `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
+| `round_repair_report` | Return package quality plus a human-readable blocked/repair report. |
 | `send_round_email` | Generate assets, block on failed package checks, and email only robust round bundles. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
 
@@ -78,10 +79,11 @@ fields whose names contain `password`, `token`, or `secret` unless
 6. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
 
-When `inspect_round_package` or `send_round_email` returns
-`needs_substitution`, read the failed `preview_checks` position, call
-`suggest_replacement_songs`, then call `replace_round_song`. Regenerate assets
-after any replacement because the generated MP3/PDF flags are invalidated.
+When `inspect_round_package`, `round_repair_report`, or `send_round_email`
+returns `needs_substitution`, read the failed `preview_checks` position or the
+report's `failed_positions`, call `suggest_replacement_songs`, then call
+`replace_round_song`. Regenerate assets after any replacement because the
+generated MP3/PDF flags are invalidated.
 
 For Spotify imports, pass a `user_id` for a user with connected Spotify tokens.
 For email, either pass an explicit recipient or use a selected user that has an

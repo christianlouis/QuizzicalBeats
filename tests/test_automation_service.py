@@ -353,6 +353,10 @@ class TestAssetInspection:
             assert any(issue["code"] == "missing_preview_url" for issue in result["issues"])
             assert result["preview_checks"][0]["issue_code"] == "missing_preview_url"
             assert result["remediation"][0]["action"] == "replace_position"
+            assert result["report"]["status"] == "needs_substitution"
+            assert result["report"]["failed_positions"][0]["position"] == 1
+            assert "suggest_replacement_songs" in result["report"]["next_step"]
+            assert "Position 1" in result["report"]["markdown"]
 
     def test_inspect_round_package_warns_for_short_preview(self, app):
         with app.app_context():
@@ -465,6 +469,7 @@ class TestAssetInspection:
 
             assert not mock_send.called
             assert exc_info.value.details["status"] == "needs_substitution"
+            assert exc_info.value.details["report"]["status"] == "needs_substitution"
             export = RoundExport.query.filter_by(round_id=round_id).one()
             assert export.status == "failed"
 
