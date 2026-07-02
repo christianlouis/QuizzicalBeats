@@ -256,6 +256,46 @@ def replace_round_song(
 
 
 @mcp.tool()
+def suggest_additional_songs(
+    round_id: int,
+    limit: int = 10,
+    query: str | None = None,
+    require_deezer_id: bool = True,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+) -> dict[str, Any]:
+    """Suggest catalog songs that can be added to an incomplete round."""
+    return _with_app_context(
+        automation.suggest_additional_songs,
+        round_id=round_id,
+        limit=limit,
+        query=query,
+        require_deezer_id=require_deezer_id,
+        verify_previews=verify_previews,
+        min_preview_seconds=min_preview_seconds,
+    )
+
+
+@mcp.tool()
+def add_round_song(
+    round_id: int,
+    song_id: int,
+    position: int | None = None,
+    inspect_after: bool = False,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Add one song to a round at a 1-based position or append it."""
+    return _with_app_context(
+        automation.add_round_song,
+        round_id=round_id,
+        song_id=song_id,
+        position=position,
+        inspect_after=inspect_after,
+        user_id=user_id,
+    )
+
+
+@mcp.tool()
 def create_round_from_playlist(
     service_name: str,
     playlist_id_or_url: str,
