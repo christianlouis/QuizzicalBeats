@@ -356,7 +356,7 @@ class TestAssetInspection:
             assert result["report"]["status"] == "needs_substitution"
             assert result["report"]["failed_positions"][0]["position"] == 1
             assert "suggest_replacement_songs" in result["report"]["next_step"]
-            assert "Position 1" in result["report"]["markdown"]
+            assert "Replace position 1" in result["report"]["markdown"]
 
     def test_inspect_round_package_warns_for_short_preview(self, app):
         with app.app_context():
