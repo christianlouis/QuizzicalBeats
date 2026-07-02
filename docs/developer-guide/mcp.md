@@ -57,7 +57,7 @@ The MCP server exposes these tools:
 | `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
 | `round_repair_report` | Return package quality plus a human-readable blocked/repair report. |
 | `send_round_email` | Generate assets, block on failed package checks, and email only robust round bundles. |
-| `schedule_round_email` | Schedule a robust round bundle for later email delivery. |
+| `schedule_round_email` | Generate and inspect a robust round bundle, then schedule later email delivery. |
 | `list_scheduled_round_emails` | List pending or historical scheduled email exports. |
 | `process_due_scheduled_round_emails` | Send scheduled round emails that are due. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
@@ -84,8 +84,9 @@ fields whose names contain `password`, `token`, or `secret` unless
 6. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
-   `2026-07-09T19:00:00+02:00`, then run `process_due_scheduled_round_emails`
-   from a scheduler.
+   `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package
+   gate before it creates the scheduled send. Then run
+   `process_due_scheduled_round_emails` from a scheduler.
 
 When `inspect_round_package`, `round_repair_report`, or `send_round_email`
 returns `needs_substitution`, read the failed `preview_checks` position or the

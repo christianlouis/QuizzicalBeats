@@ -1588,7 +1588,7 @@ def schedule_round_email(
     subject: str | None = None,
     body_text: str | None = None,
 ) -> dict[str, Any]:
-    """Schedule a round email for a future worker run."""
+    """Generate, inspect, and schedule a robust round email for a future worker run."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
@@ -1599,6 +1599,24 @@ def schedule_round_email(
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
     scheduled_at = _parse_datetime_utc(scheduled_for)
+    assets = generate_round_assets(round_id, user_id=user.id)
+    quality = inspect_round_package(round_id, user_id=user.id)
+    if not quality["ok"]:
+        report = quality.get("report") or _round_repair_report(quality)
+        message = "Round quality gate failed: " + "; ".join(quality["hints"])
+        raise AutomationError(
+            message,
+            details={
+                "scheduled": False,
+                "status": quality["status"],
+                "recipient": target,
+                "scheduled_for": _datetime_payload(scheduled_at),
+                "assets": assets,
+                "quality": quality,
+                "report": report,
+            },
+        )
+
     export = RoundExport(
         round_id=round_id,
         user_id=user.id,
@@ -1612,7 +1630,12 @@ def schedule_round_email(
     )
     db.session.add(export)
     db.session.commit()
-    return {"scheduled": True, "export": _round_export_summary(export)}
+    return {
+        "scheduled": True,
+        "export": _round_export_summary(export),
+        "assets": assets,
+        "quality": quality,
+    }
 
 
 def list_scheduled_round_emails(

@@ -538,19 +538,65 @@ class TestAssetInspection:
                 song_ids=[song.id],
             )["round"]["id"]
 
-            result = automation.schedule_round_email(
-                round_id,
-                scheduled_for="2026-07-09T19:00:00+02:00",
-                user_id=user.id,
-                subject="Scheduled subject",
-            )
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                result = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                    subject="Scheduled subject",
+                )
 
             export = RoundExport.query.get(result["export"]["id"])
             assert result["scheduled"] is True
+            assert result["quality"]["status"] == "ok"
             assert export.status == "scheduled"
             assert export.destination == user.email
             assert export.subject == "Scheduled subject"
             assert result["export"]["scheduled_for"] == "2026-07-09T17:00:00Z"
+
+    def test_schedule_round_email_blocks_when_quality_fails(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Scheduled Bad", artist="Artist")
+            round_id = automation.create_round(
+                name="Bad Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={
+                        "ok": False,
+                        "status": "needs_substitution",
+                        "hints": ["missing preview"],
+                        "report": {"status": "needs_substitution"},
+                    },
+                ),
+            ):
+                with pytest.raises(automation.AutomationError, match="quality gate") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        user_id=user.id,
+                    )
+
+            assert exc_info.value.details["scheduled"] is False
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
 
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():
@@ -561,11 +607,21 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
-            automation.schedule_round_email(
-                round_id,
-                scheduled_for="2026-07-09T19:00:00+02:00",
-                user_id=user.id,
-            )
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
 
             result = automation.list_scheduled_round_emails(user_id=user.id)
 
@@ -582,11 +638,21 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
-            scheduled = automation.schedule_round_email(
-                round_id,
-                scheduled_for="2026-07-09T19:00:00+02:00",
-                user_id=user.id,
-            )
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                scheduled = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
 
             with patch(
                 "musicround.services.automation.email_round",
