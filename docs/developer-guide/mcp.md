@@ -46,11 +46,15 @@ The MCP server exposes these tools:
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
+| `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
+| `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
-| `send_round_email` | Generate assets and email the finished round bundle. |
+| `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
+| `round_repair_report` | Return package quality plus a human-readable blocked/repair report. |
+| `send_round_email` | Generate assets, block on failed package checks, and email only robust round bundles. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
 
 `find_songs` includes `used_count`, `usage_frequency`, and `last_used` for each
@@ -68,9 +72,18 @@ fields whose names contain `password`, `token`, or `secret` unless
 2. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
 3. Create the round with `compile_round` or `create_round_from_playlist`.
+   Playlist imports return `needs_more_songs` instead of creating a partial
+   round when fewer than the requested eight tracks resolve.
 4. Generate PDF and MP3 files with `generate_round_assets`.
-5. Inspect the generated files with `inspect_round_pdf` and `inspect_round_mp3`.
-6. Send the completed bundle with `send_round_email`.
+5. Inspect the generated files and previews with `inspect_round_package`.
+6. Send the completed bundle with `send_round_email`; it reruns the package
+   checks and refuses to send if previews or generated assets look wrong.
+
+When `inspect_round_package`, `round_repair_report`, or `send_round_email`
+returns `needs_substitution`, read the failed `preview_checks` position or the
+report's `failed_positions`, call `suggest_replacement_songs`, then call
+`replace_round_song`. Regenerate assets after any replacement because the
+generated MP3/PDF flags are invalidated.
 
 For Spotify imports, pass a `user_id` for a user with connected Spotify tokens.
 For email, either pass an explicit recipient or use a selected user that has an
