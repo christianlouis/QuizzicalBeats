@@ -617,6 +617,145 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     return {"round": _round_summary(round_obj)}
 
 
+def _song_position(round_obj: Round, position: int) -> tuple[list[int], int]:
+    song_ids = _round_song_ids(round_obj)
+    if position < 1 or position > len(song_ids):
+        raise AutomationError(
+            f"Position {position} is outside this round. Allowed positions are 1-{len(song_ids)}."
+        )
+    return song_ids, position - 1
+
+
+def replace_round_song(
+    round_id: int,
+    position: int,
+    replacement_song_id: int,
+    inspect_after: bool = False,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Replace one song at a 1-based round position and mark generated assets stale."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    song_ids, index = _song_position(round_obj, position)
+    replacement = db.session.get(Song, replacement_song_id)
+    if not replacement:
+        raise AutomationError(f"Song {replacement_song_id} was not found.")
+
+    old_song_id = song_ids[index]
+    old_song = db.session.get(Song, old_song_id)
+    song_ids[index] = replacement.id
+    round_obj.songs = ",".join(str(song_id) for song_id in song_ids)
+    round_obj.reset_generated_status()
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    result: dict[str, Any] = {
+        "round": _round_summary(round_obj),
+        "position": position,
+        "replaced_song": _song_summary(old_song) if old_song else {"id": old_song_id},
+        "replacement_song": _song_summary(replacement),
+        "assets_invalidated": True,
+    }
+    if inspect_after:
+        result["quality"] = inspect_round_package(round_id, user_id=user_id)
+    return result
+
+
+def suggest_replacement_songs(
+    round_id: int,
+    position: int,
+    limit: int = 10,
+    query: str | None = None,
+    require_deezer_id: bool = True,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+) -> dict[str, Any]:
+    """Suggest catalog songs that can replace a failed round position."""
+    if limit < 1 or limit > 50:
+        raise AutomationError("limit must be between 1 and 50.")
+
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    song_ids, index = _song_position(round_obj, position)
+    original_song = db.session.get(Song, song_ids[index])
+    excluded_ids = set(song_ids)
+
+    song_query = Song.query.filter(~Song.id.in_(excluded_ids))
+    if require_deezer_id:
+        song_query = song_query.filter(Song.deezer_id.isnot(None))
+    if query:
+        pattern = f"%{query.strip()}%"
+        song_query = song_query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+
+    candidates = song_query.limit(250).all()
+
+    def _candidate_score(song: Song) -> tuple[int, int, int, int, str, str]:
+        genre_match = 1 if original_song and song.genre and song.genre == original_song.genre else 0
+        original_year = original_song.year if original_song and original_song.year else None
+        year_distance = abs(song.year - original_year) if song.year and original_year else 9999
+        preview_signal = 1 if song.preview_url or song.deezer_preview_url or song.spotify_preview_url else 0
+        used_count = song.used_count or 0
+        return (-genre_match, year_distance, -preview_signal, used_count, song.artist or "", song.title or "")
+
+    suggestions = []
+    for song in sorted(candidates, key=_candidate_score):
+        suggestion = _song_summary(song)
+        suggestion["same_genre"] = bool(original_song and song.genre and song.genre == original_song.genre)
+        suggestion["year_distance"] = (
+            abs(song.year - original_song.year)
+            if original_song and song.year and original_song.year
+            else None
+        )
+        suggestion["preview_check"] = {
+            "required": verify_previews,
+            "ok": None,
+            "duration_seconds": None,
+            "issue_code": None,
+        }
+        suggestions.append(suggestion)
+
+    if verify_previews:
+        verified = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for suggestion in suggestions:
+                song = db.session.get(Song, suggestion["id"])
+                preview_url, audio, issue = _download_preview_audio(song, temp_dir)
+                suggestion["preview_url"] = preview_url or suggestion["preview_url"]
+                if issue:
+                    suggestion["preview_check"]["ok"] = False
+                    suggestion["preview_check"]["issue_code"] = issue["code"]
+                    continue
+                duration_seconds = len(audio) / 1000 if audio else 0
+                suggestion["preview_check"]["duration_seconds"] = round(duration_seconds, 3)
+                suggestion["preview_check"]["ok"] = duration_seconds >= min_preview_seconds
+                if duration_seconds < min_preview_seconds:
+                    suggestion["preview_check"]["issue_code"] = "preview_too_short"
+                    continue
+                verified.append(suggestion)
+                if len(verified) >= limit:
+                    break
+        suggestions = verified
+
+    return {
+        "round_id": round_id,
+        "round_name": round_obj.name,
+        "position": position,
+        "original_song": _song_summary(original_song) if original_song else {"id": song_ids[index]},
+        "count": min(len(suggestions), limit),
+        "suggestions": suggestions[:limit],
+        "filters": {
+            "query": query,
+            "require_deezer_id": require_deezer_id,
+            "verify_previews": verify_previews,
+            "excluded_song_ids": sorted(excluded_ids),
+        },
+    }
+
+
 def _spotify_playlist_song_ids(playlist_id: str, limit: int, user_id: int | None) -> list[int]:
     from musicround.routes.generate import get_songs_from_spotify_playlist
 

@@ -112,6 +112,83 @@ class TestRoundAutomation:
             assert exc_info.value.details["expected_song_count"] == 8
             assert exc_info.value.details["resolved_song_count"] == 1
 
+    def test_replace_round_song_updates_position_and_invalidates_assets(self, app):
+        with app.app_context():
+            song_one = _create_song(title="One", artist="A")
+            song_two = _create_song(title="Two", artist="B")
+            replacement = _create_song(title="Replacement", artist="C")
+            round_id = automation.create_round(
+                name="Repair Me",
+                round_type="manual",
+                song_ids=[song_one.id, song_two.id],
+            )["round"]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.mp3_generated = True
+            round_obj.pdf_generated = True
+            db.session.commit()
+
+            result = automation.replace_round_song(
+                round_id,
+                position=2,
+                replacement_song_id=replacement.id,
+            )
+
+            assert result["position"] == 2
+            assert result["replaced_song"]["id"] == song_two.id
+            assert result["replacement_song"]["id"] == replacement.id
+            assert result["round"]["song_ids"] == [song_one.id, replacement.id]
+            refreshed_round = db.session.get(Round, round_id)
+            assert refreshed_round.mp3_generated is False
+            assert refreshed_round.pdf_generated is False
+
+    def test_suggest_replacement_songs_prefers_similar_unused_candidates(self, app):
+        with app.app_context():
+            original = _create_song(
+                title="Broken",
+                artist="A",
+                genre="Rock",
+                year=1990,
+                deezer_id=100,
+            )
+            in_round = _create_song(
+                title="Already In Round",
+                artist="B",
+                genre="Rock",
+                year=1991,
+                deezer_id=101,
+            )
+            best = _create_song(
+                title="Best",
+                artist="C",
+                genre="Rock",
+                year=1992,
+                deezer_id=102,
+            )
+            _create_song(
+                title="Different",
+                artist="D",
+                genre="Pop",
+                year=2010,
+                deezer_id=103,
+            )
+            round_id = automation.create_round(
+                name="Needs Candidate",
+                round_type="manual",
+                song_ids=[original.id, in_round.id],
+            )["round"]["id"]
+
+            result = automation.suggest_replacement_songs(
+                round_id,
+                position=1,
+                limit=3,
+            )
+
+            suggestion_ids = [song["id"] for song in result["suggestions"]]
+            assert best.id == suggestion_ids[0]
+            assert original.id not in suggestion_ids
+            assert in_round.id not in suggestion_ids
+            assert result["suggestions"][0]["same_genre"] is True
+
 
 class TestAssetInspection:
     """Tests for generated asset quality checks."""

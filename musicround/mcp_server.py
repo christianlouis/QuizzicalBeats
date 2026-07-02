@@ -214,6 +214,48 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
 
 
 @mcp.tool()
+def suggest_replacement_songs(
+    round_id: int,
+    position: int,
+    limit: int = 10,
+    query: str | None = None,
+    require_deezer_id: bool = True,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+) -> dict[str, Any]:
+    """Suggest replacement songs for one failed round position."""
+    return _with_app_context(
+        automation.suggest_replacement_songs,
+        round_id=round_id,
+        position=position,
+        limit=limit,
+        query=query,
+        require_deezer_id=require_deezer_id,
+        verify_previews=verify_previews,
+        min_preview_seconds=min_preview_seconds,
+    )
+
+
+@mcp.tool()
+def replace_round_song(
+    round_id: int,
+    position: int,
+    replacement_song_id: int,
+    inspect_after: bool = False,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Replace one song at a 1-based round position and invalidate generated assets."""
+    return _with_app_context(
+        automation.replace_round_song,
+        round_id=round_id,
+        position=position,
+        replacement_song_id=replacement_song_id,
+        inspect_after=inspect_after,
+        user_id=user_id,
+    )
+
+
+@mcp.tool()
 def create_round_from_playlist(
     service_name: str,
     playlist_id_or_url: str,

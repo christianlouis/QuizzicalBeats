@@ -46,6 +46,8 @@ The MCP server exposes these tools:
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
+| `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
+| `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
@@ -75,6 +77,11 @@ fields whose names contain `password`, `token`, or `secret` unless
 5. Inspect the generated files and previews with `inspect_round_package`.
 6. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
+
+When `inspect_round_package` or `send_round_email` returns
+`needs_substitution`, read the failed `preview_checks` position, call
+`suggest_replacement_songs`, then call `replace_round_song`. Regenerate assets
+after any replacement because the generated MP3/PDF flags are invalidated.
 
 For Spotify imports, pass a `user_id` for a user with connected Spotify tokens.
 For email, either pass an explicit recipient or use a selected user that has an
