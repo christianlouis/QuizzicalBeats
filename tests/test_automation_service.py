@@ -140,6 +140,44 @@ class TestRoundAutomation:
             refreshed_round = db.session.get(Round, round_id)
             assert refreshed_round.mp3_generated is False
             assert refreshed_round.pdf_generated is False
+            assert Song.query.get(song_two.id).used_count == 0
+            assert Song.query.get(replacement.id).used_count == 1
+
+    def test_add_round_song_appends_and_invalidates_assets(self, app):
+        with app.app_context():
+            song_one = _create_song(title="One", artist="A")
+            addition = _create_song(title="Addition", artist="B")
+            round_id = automation.create_round(
+                name="Needs One",
+                round_type="manual",
+                song_ids=[song_one.id],
+            )["round"]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.mp3_generated = True
+            round_obj.pdf_generated = True
+            db.session.commit()
+
+            result = automation.add_round_song(round_id, addition.id)
+
+            assert result["position"] == 2
+            assert result["added_song"]["id"] == addition.id
+            assert result["round"]["song_ids"] == [song_one.id, addition.id]
+            refreshed_round = db.session.get(Round, round_id)
+            assert refreshed_round.mp3_generated is False
+            assert refreshed_round.pdf_generated is False
+            assert Song.query.get(addition.id).used_count == 1
+
+    def test_add_round_song_rejects_duplicate_song(self, app):
+        with app.app_context():
+            song = _create_song(title="One", artist="A")
+            round_id = automation.create_round(
+                name="Duplicate",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="already in round"):
+                automation.add_round_song(round_id, song.id)
 
     def test_suggest_replacement_songs_prefers_similar_unused_candidates(self, app):
         with app.app_context():
@@ -188,6 +226,23 @@ class TestRoundAutomation:
             assert original.id not in suggestion_ids
             assert in_round.id not in suggestion_ids
             assert result["suggestions"][0]["same_genre"] is True
+
+    def test_suggest_additional_songs_excludes_current_round(self, app):
+        with app.app_context():
+            in_round = _create_song(title="Already In Round", artist="A", deezer_id=200)
+            addition = _create_song(title="Possible", artist="B", deezer_id=201)
+            _create_song(title="No Deezer", artist="C")
+            round_id = automation.create_round(
+                name="Needs More",
+                round_type="manual",
+                song_ids=[in_round.id],
+            )["round"]["id"]
+
+            result = automation.suggest_additional_songs(round_id, limit=5)
+
+            suggestion_ids = [song["id"] for song in result["suggestions"]]
+            assert addition.id in suggestion_ids
+            assert in_round.id not in suggestion_ids
 
 
 class TestAssetInspection:

@@ -626,6 +626,16 @@ def _song_position(round_obj: Round, position: int) -> tuple[list[int], int]:
     return song_ids, position - 1
 
 
+def _record_song_added_to_round(song: Song) -> None:
+    song.used_count = (song.used_count or 0) + 1
+    song.last_used = datetime.utcnow()
+
+
+def _record_song_removed_from_round(song: Song | None) -> None:
+    if song and song.used_count:
+        song.used_count = max(song.used_count - 1, 0)
+
+
 def replace_round_song(
     round_id: int,
     position: int,
@@ -644,11 +654,17 @@ def replace_round_song(
         raise AutomationError(f"Song {replacement_song_id} was not found.")
 
     old_song_id = song_ids[index]
+    if replacement.id in song_ids and replacement.id != old_song_id:
+        raise AutomationError(f"Song {replacement.id} is already in round {round_id}.")
+
     old_song = db.session.get(Song, old_song_id)
     song_ids[index] = replacement.id
     round_obj.songs = ",".join(str(song_id) for song_id in song_ids)
-    round_obj.reset_generated_status()
-    round_obj.updated_at = datetime.utcnow()
+    if replacement.id != old_song_id:
+        _record_song_removed_from_round(old_song)
+        _record_song_added_to_round(replacement)
+        round_obj.reset_generated_status()
+        round_obj.updated_at = datetime.utcnow()
     db.session.commit()
 
     result: dict[str, Any] = {
@@ -656,6 +672,51 @@ def replace_round_song(
         "position": position,
         "replaced_song": _song_summary(old_song) if old_song else {"id": old_song_id},
         "replacement_song": _song_summary(replacement),
+        "assets_invalidated": replacement.id != old_song_id,
+    }
+    if inspect_after:
+        result["quality"] = inspect_round_package(round_id, user_id=user_id)
+    return result
+
+
+def add_round_song(
+    round_id: int,
+    song_id: int,
+    position: int | None = None,
+    inspect_after: bool = False,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Add one song to a round at a 1-based position or append it."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    song = db.session.get(Song, song_id)
+    if not song:
+        raise AutomationError(f"Song {song_id} was not found.")
+
+    song_ids = _round_song_ids(round_obj)
+    if song.id in song_ids:
+        raise AutomationError(f"Song {song.id} is already in round {round_id}.")
+
+    insert_position = position if position is not None else len(song_ids) + 1
+    if insert_position < 1 or insert_position > len(song_ids) + 1:
+        raise AutomationError(
+            f"Position {insert_position} is outside this round. "
+            f"Allowed insert positions are 1-{len(song_ids) + 1}."
+        )
+
+    song_ids.insert(insert_position - 1, song.id)
+    round_obj.songs = ",".join(str(existing_id) for existing_id in song_ids)
+    _record_song_added_to_round(song)
+    round_obj.reset_generated_status()
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    result: dict[str, Any] = {
+        "round": _round_summary(round_obj),
+        "position": insert_position,
+        "added_song": _song_summary(song),
         "assets_invalidated": True,
     }
     if inspect_after:
@@ -745,6 +806,84 @@ def suggest_replacement_songs(
         "round_name": round_obj.name,
         "position": position,
         "original_song": _song_summary(original_song) if original_song else {"id": song_ids[index]},
+        "count": min(len(suggestions), limit),
+        "suggestions": suggestions[:limit],
+        "filters": {
+            "query": query,
+            "require_deezer_id": require_deezer_id,
+            "verify_previews": verify_previews,
+            "excluded_song_ids": sorted(excluded_ids),
+        },
+    }
+
+
+def suggest_additional_songs(
+    round_id: int,
+    limit: int = 10,
+    query: str | None = None,
+    require_deezer_id: bool = True,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+) -> dict[str, Any]:
+    """Suggest catalog songs that can be added to an incomplete round."""
+    if limit < 1 or limit > 50:
+        raise AutomationError("limit must be between 1 and 50.")
+
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    excluded_ids = set(_round_song_ids(round_obj))
+    song_query = Song.query.filter(~Song.id.in_(excluded_ids))
+    if require_deezer_id:
+        song_query = song_query.filter(Song.deezer_id.isnot(None))
+    if query:
+        pattern = f"%{query.strip()}%"
+        song_query = song_query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+
+    candidates = song_query.limit(250).all()
+
+    def _candidate_score(song: Song) -> tuple[int, int, str, str]:
+        preview_signal = 1 if song.preview_url or song.deezer_preview_url or song.spotify_preview_url else 0
+        used_count = song.used_count or 0
+        return (-preview_signal, used_count, song.artist or "", song.title or "")
+
+    suggestions = []
+    for song in sorted(candidates, key=_candidate_score):
+        suggestion = _song_summary(song)
+        suggestion["preview_check"] = {
+            "required": verify_previews,
+            "ok": None,
+            "duration_seconds": None,
+            "issue_code": None,
+        }
+        suggestions.append(suggestion)
+
+    if verify_previews:
+        verified = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for suggestion in suggestions:
+                song = db.session.get(Song, suggestion["id"])
+                preview_url, audio, issue = _download_preview_audio(song, temp_dir)
+                suggestion["preview_url"] = preview_url or suggestion["preview_url"]
+                if issue:
+                    suggestion["preview_check"]["ok"] = False
+                    suggestion["preview_check"]["issue_code"] = issue["code"]
+                    continue
+                duration_seconds = len(audio) / 1000 if audio else 0
+                suggestion["preview_check"]["duration_seconds"] = round(duration_seconds, 3)
+                suggestion["preview_check"]["ok"] = duration_seconds >= min_preview_seconds
+                if duration_seconds < min_preview_seconds:
+                    suggestion["preview_check"]["issue_code"] = "preview_too_short"
+                    continue
+                verified.append(suggestion)
+                if len(verified) >= limit:
+                    break
+        suggestions = verified
+
+    return {
+        "round_id": round_id,
+        "round_name": round_obj.name,
         "count": min(len(suggestions), limit),
         "suggestions": suggestions[:limit],
         "filters": {

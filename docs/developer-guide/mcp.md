@@ -48,6 +48,8 @@ The MCP server exposes these tools:
 | `rename_round` | Set or clear a round name. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
+| `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |
+| `add_round_song` | Add one song to a round and invalidate generated assets. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
@@ -84,6 +86,10 @@ returns `needs_substitution`, read the failed `preview_checks` position or the
 report's `failed_positions`, call `suggest_replacement_songs`, then call
 `replace_round_song`. Regenerate assets after any replacement because the
 generated MP3/PDF flags are invalidated.
+
+When the status is `needs_more_songs`, call `suggest_additional_songs`, then
+`add_round_song` until the round has exactly eight playable songs. Regenerate
+assets and rerun `inspect_round_package` before sending.
 
 For Spotify imports, pass a `user_id` for a user with connected Spotify tokens.
 For email, either pass an explicit recipient or use a selected user that has an
