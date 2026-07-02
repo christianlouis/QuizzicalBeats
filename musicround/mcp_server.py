@@ -222,14 +222,19 @@ def create_round_from_playlist(
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """Import a Spotify or Deezer playlist and turn it into a quiz round."""
-    return _with_app_context(
-        automation.create_round_from_playlist,
-        service_name=service_name,
-        playlist_id_or_url=playlist_id_or_url,
-        name=name,
-        count=count,
-        user_id=user_id,
-    )
+    try:
+        return _with_app_context(
+            automation.create_round_from_playlist,
+            service_name=service_name,
+            playlist_id_or_url=playlist_id_or_url,
+            name=name,
+            count=count,
+            user_id=user_id,
+        )
+    except automation.AutomationError as exc:
+        if exc.details:
+            return exc.details
+        raise
 
 
 @mcp.tool()
@@ -262,6 +267,27 @@ def inspect_round_pdf(path: str | None = None, round_id: int | None = None) -> d
 
 
 @mcp.tool()
+def inspect_round_package(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = 6.0,
+) -> dict[str, Any]:
+    """Check previews, generated MP3 length, MP3 quality, and PDF integrity before sending."""
+    return _with_app_context(
+        automation.inspect_round_package,
+        round_id=round_id,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+
+
+@mcp.tool()
 def send_round_email(
     round_id: int,
     recipient: str | None = None,
@@ -270,14 +296,19 @@ def send_round_email(
     body_text: str | None = None,
 ) -> dict[str, Any]:
     """Generate assets and email the completed round bundle."""
-    return _with_app_context(
-        automation.email_round,
-        round_id=round_id,
-        recipient=recipient,
-        user_id=user_id,
-        subject=subject,
-        body_text=body_text,
-    )
+    try:
+        return _with_app_context(
+            automation.email_round,
+            round_id=round_id,
+            recipient=recipient,
+            user_id=user_id,
+            subject=subject,
+            body_text=body_text,
+        )
+    except automation.AutomationError as exc:
+        if exc.details:
+            return exc.details
+        raise
 
 
 @mcp.tool()

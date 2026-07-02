@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from datetime import datetime
 from typing import Any, Iterable
 
+import requests
 from flask import current_app
 from flask_login import login_user, logout_user
 from pydub import AudioSegment
@@ -16,13 +18,28 @@ from sqlalchemy import or_
 from musicround import db
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
-from musicround.helpers.utils import generate_tts_mp3
+from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
 from musicround.models import Round, RoundExport, Song, Tag, User
 
 
 class AutomationError(ValueError):
     """Raised when an automation request cannot be completed."""
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
+
+
+def _round_song_ids(round_obj: Round) -> list[int]:
+    return [int(song_id) for song_id in round_obj.songs.split(",") if song_id]
+
+
+def _ordered_round_songs(round_obj: Round) -> list[Song]:
+    ids = _round_song_ids(round_obj)
+    songs = Song.query.filter(Song.id.in_(ids)).all()
+    songs_by_id = {song.id: song for song in songs}
+    return [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
 
 
 def _song_summary(song: Song) -> dict[str, Any]:
@@ -46,10 +63,8 @@ def _song_summary(song: Song) -> dict[str, Any]:
 
 
 def _round_summary(round_obj: Round) -> dict[str, Any]:
-    ids = [int(song_id) for song_id in round_obj.songs.split(",") if song_id]
-    songs = Song.query.filter(Song.id.in_(ids)).all()
-    songs_by_id = {song.id: song for song in songs}
-    ordered = [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
+    ids = _round_song_ids(round_obj)
+    ordered = _ordered_round_songs(round_obj)
     return {
         "id": round_obj.id,
         "name": round_obj.name,
@@ -652,8 +667,38 @@ def create_round_from_playlist(
         ) or _deezer_playlist_song_ids(playlist_id, count)
     if not song_ids:
         raise AutomationError("Playlist import did not return song IDs to build a round.")
+    if len(song_ids) < count:
+        message = (
+            f"Playlist import resolved {len(song_ids)} songs; "
+            f"expected exactly {count} for a complete quiz round."
+        )
+        raise AutomationError(
+            message,
+            details={
+                "success": False,
+                "status": "needs_more_songs",
+                "service": service_name.lower(),
+                "playlist_id": playlist_id,
+                "expected_song_count": count,
+                "resolved_song_count": len(song_ids),
+                "missing_count": count - len(song_ids),
+                "import": imported,
+                "hints": [message],
+                "remediation": [
+                    {
+                        "action": "add_or_replace_playlist_tracks",
+                        "message": message,
+                        "expected_song_count": count,
+                        "resolved_song_count": len(song_ids),
+                    }
+                ],
+            },
+        )
     round_result = create_round(
-        name=name, round_type="manual", count=count, song_ids=song_ids[:count]
+        name=name,
+        round_type="manual",
+        count=count,
+        song_ids=song_ids[:count],
     )
     return {"import": imported, "round": round_result["round"]}
 
@@ -714,6 +759,378 @@ def generate_round_assets(
     return assets
 
 
+def _quality_issue(
+    code: str,
+    message: str,
+    song: Song | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    issue: dict[str, Any] = {"code": code, "severity": "error", "message": message}
+    if song:
+        issue["song"] = {
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist,
+            "deezer_id": song.deezer_id,
+            "spotify_id": song.spotify_id,
+        }
+    if details:
+        issue["details"] = details
+    return issue
+
+
+def _download_preview_audio(
+    song: Song, temp_dir: str
+) -> tuple[str | None, AudioSegment | None, dict[str, Any] | None]:
+    if not song.deezer_id:
+        return None, None, _quality_issue(
+            "missing_deezer_id",
+            f"{song.artist} - {song.title} has no Deezer ID, so the MP3 generator will skip it.",
+            song,
+        )
+
+    deezer_client = current_app.config.get("deezer")
+    if not deezer_client:
+        return None, None, _quality_issue(
+            "deezer_client_missing",
+            "The Deezer client is not configured, so preview availability cannot be verified.",
+            song,
+        )
+
+    try:
+        track = deezer_client.get_track(song.deezer_id)
+    except Exception as exc:
+        return None, None, _quality_issue(
+            "deezer_lookup_failed",
+            f"Could not fetch Deezer metadata for {song.artist} - {song.title}: {exc}",
+            song,
+        )
+
+    preview_url = track.get("preview") if isinstance(track, dict) else None
+    if not preview_url:
+        return None, None, _quality_issue(
+            "missing_preview_url",
+            f"{song.artist} - {song.title} has no Deezer preview URL.",
+            song,
+        )
+
+    try:
+        response = requests.get(preview_url, stream=True, timeout=30)
+        response.raise_for_status()
+        preview_path = os.path.join(temp_dir, f"preview_{song.id}.mp3")
+        with open(preview_path, "wb") as preview_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    preview_file.write(chunk)
+        return preview_url, AudioSegment.from_file(preview_path), None
+    except Exception as exc:
+        return preview_url, None, _quality_issue(
+            "preview_download_failed",
+            f"Could not download or decode preview for {song.artist} - {song.title}: {exc}",
+            song,
+            {"preview_url": preview_url},
+        )
+
+
+def _round_audio_components(
+    user: User, song_count: int
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    issues: list[dict[str, Any]] = []
+    components: dict[str, Any] = {"custom_audio_ms": {}, "number_audio_ms": []}
+
+    for mp3_type in ("intro", "replay", "outro"):
+        try:
+            segment = AudioSegment.from_mp3(get_mp3_path(user, mp3_type))
+            components["custom_audio_ms"][mp3_type] = len(segment)
+        except Exception as exc:
+            issues.append(
+                _quality_issue(
+                    "custom_audio_failed",
+                    f"Could not load {mp3_type} audio for duration validation: {exc}",
+                )
+            )
+
+    for index in range(song_count):
+        path = os.path.join(current_app.root_path, "static", "audio", f"{index + 1}.mp3")
+        try:
+            components["number_audio_ms"].append(len(AudioSegment.from_mp3(path)))
+        except Exception as exc:
+            issues.append(
+                _quality_issue(
+                    "number_audio_failed",
+                    f"Could not load number announcement {index + 1}: {exc}",
+                )
+            )
+
+    return components, issues
+
+
+def inspect_round_package(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = 6.0,
+) -> dict[str, Any]:
+    """Validate a generated round bundle before it is allowed to leave by email."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    user = _find_user(user_id)
+    song_ids = _round_song_ids(round_obj)
+    songs = _ordered_round_songs(round_obj)
+    issues: list[dict[str, Any]] = []
+    preview_checks: list[dict[str, Any]] = []
+    remediation: list[dict[str, Any]] = []
+    total_preview_ms = 0
+
+    actual_song_count = len(song_ids)
+    if actual_song_count != expected_song_count:
+        code = "actual_song_count_mismatch"
+        message = (
+            f"Round {round_id} has {actual_song_count} stored songs; "
+            f"expected exactly {expected_song_count}."
+        )
+        issues.append(
+            _quality_issue(
+                code,
+                message,
+                details={
+                    "expected_song_count": expected_song_count,
+                    "actual_song_count": actual_song_count,
+                },
+            )
+        )
+        remediation.append(
+            {
+                "action": "add_missing_track"
+                if actual_song_count < expected_song_count
+                else "remove_extra_track",
+                "message": message,
+                "expected_song_count": expected_song_count,
+                "actual_song_count": actual_song_count,
+            }
+        )
+
+    resolved_song_count = len(songs)
+    if resolved_song_count != actual_song_count:
+        resolved_song_ids = {song.id for song in songs}
+        unresolved_positions = [
+            index + 1
+            for index, song_id in enumerate(song_ids)
+            if song_id not in resolved_song_ids
+        ]
+        message = (
+            f"Round {round_id} resolves to {resolved_song_count} playable songs "
+            f"from {actual_song_count} stored IDs."
+        )
+        issues.append(
+            _quality_issue(
+                "resolved_song_count_mismatch",
+                message,
+                details={
+                    "expected_song_count": expected_song_count,
+                    "actual_song_count": actual_song_count,
+                    "resolved_song_count": resolved_song_count,
+                    "unresolved_positions": unresolved_positions,
+                },
+            )
+        )
+        remediation.append(
+            {
+                "action": "replace_unresolved_positions",
+                "message": message,
+                "positions": unresolved_positions,
+                "expected_song_count": expected_song_count,
+                "resolved_song_count": resolved_song_count,
+            }
+        )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for index, song in enumerate(songs, start=1):
+            preview_url, audio, issue = _download_preview_audio(song, temp_dir)
+            check = {
+                "position": index,
+                "song_id": song.id,
+                "title": song.title,
+                "artist": song.artist,
+                "preview_url": preview_url,
+                "duration_seconds": None,
+                "issue_code": None,
+                "remediation": None,
+                "ok": False,
+            }
+            if issue:
+                issues.append(issue)
+                check["issue_code"] = issue["code"]
+                check["remediation"] = "replace_position"
+                remediation.append(
+                    {
+                        "action": "replace_position",
+                        "position": index,
+                        "song_id": song.id,
+                        "artist": song.artist,
+                        "title": song.title,
+                        "issue_code": issue["code"],
+                        "message": issue["message"],
+                    }
+                )
+            elif audio:
+                duration_seconds = len(audio) / 1000
+                total_preview_ms += len(audio)
+                check["duration_seconds"] = round(duration_seconds, 3)
+                check["ok"] = True
+                if duration_seconds < min_preview_seconds:
+                    check["ok"] = False
+                    issue = _quality_issue(
+                        "preview_too_short",
+                        (
+                            f"{song.artist} - {song.title} preview is "
+                            f"{duration_seconds:.1f}s; expected at least "
+                            f"{min_preview_seconds:.1f}s."
+                        ),
+                        song,
+                        {"duration_seconds": round(duration_seconds, 3)},
+                    )
+                    issues.append(issue)
+                    check["issue_code"] = issue["code"]
+                    check["remediation"] = "replace_position"
+                    remediation.append(
+                        {
+                            "action": "replace_position",
+                            "position": index,
+                            "song_id": song.id,
+                            "artist": song.artist,
+                            "title": song.title,
+                            "issue_code": issue["code"],
+                            "message": issue["message"],
+                        }
+                    )
+                elif duration_seconds > max_preview_seconds:
+                    check["ok"] = False
+                    issue = _quality_issue(
+                        "preview_too_long",
+                        (
+                            f"{song.artist} - {song.title} preview is "
+                            f"{duration_seconds:.1f}s; expected at most "
+                            f"{max_preview_seconds:.1f}s."
+                        ),
+                        song,
+                        {"duration_seconds": round(duration_seconds, 3)},
+                    )
+                    issues.append(issue)
+                    check["issue_code"] = issue["code"]
+                    check["remediation"] = "replace_position"
+                    remediation.append(
+                        {
+                            "action": "replace_position",
+                            "position": index,
+                            "song_id": song.id,
+                            "artist": song.artist,
+                            "title": song.title,
+                            "issue_code": issue["code"],
+                            "message": issue["message"],
+                        }
+                    )
+            preview_checks.append(check)
+
+    components, component_issues = _round_audio_components(user, len(songs))
+    issues.extend(component_issues)
+    expected_ms = None
+    if not component_issues:
+        custom_audio_ms = components["custom_audio_ms"]
+        expected_ms = (
+            custom_audio_ms.get("intro", 0)
+            + custom_audio_ms.get("replay", 0)
+            + custom_audio_ms.get("outro", 0)
+            + 2 * sum(components["number_audio_ms"])
+            + 2 * total_preview_ms
+        )
+
+    pdf_result: dict[str, Any] | None = None
+    mp3_result: dict[str, Any] | None = None
+    try:
+        pdf_result = inspect_pdf_quality(round_id=round_id)
+        for warning in pdf_result.get("warnings", []):
+            issues.append(_quality_issue("pdf_quality_warning", warning))
+    except Exception as exc:
+        issues.append(_quality_issue("pdf_inspection_failed", str(exc)))
+
+    try:
+        mp3_result = inspect_mp3_quality(round_id=round_id)
+        for warning in mp3_result.get("warnings", []):
+            issues.append(_quality_issue("mp3_quality_warning", warning))
+    except Exception as exc:
+        issues.append(_quality_issue("mp3_inspection_failed", str(exc)))
+
+    if expected_ms is not None and mp3_result and mp3_result.get("duration_seconds") is not None:
+        expected_seconds = expected_ms / 1000
+        actual_seconds = float(mp3_result["duration_seconds"])
+        delta_seconds = actual_seconds - expected_seconds
+        if abs(delta_seconds) > duration_tolerance_seconds:
+            issue = _quality_issue(
+                "round_mp3_duration_mismatch",
+                (
+                    f"Generated MP3 is {actual_seconds:.1f}s, expected about "
+                    f"{expected_seconds:.1f}s from intro, replay, outro, number "
+                    "announcements, and two plays of every preview."
+                ),
+                details={
+                    "actual_seconds": round(actual_seconds, 3),
+                    "expected_seconds": round(expected_seconds, 3),
+                    "delta_seconds": round(delta_seconds, 3),
+                    "tolerance_seconds": duration_tolerance_seconds,
+                },
+            )
+            issues.append(issue)
+            remediation.append(
+                {
+                    "action": "regenerate_assets",
+                    "issue_code": issue["code"],
+                    "message": issue["message"],
+                }
+            )
+
+    issue_codes = {issue["code"] for issue in issues}
+    if not issues:
+        status = "ok"
+    elif issue_codes & {"actual_song_count_mismatch", "resolved_song_count_mismatch"}:
+        status = "needs_more_songs" if len(songs) < expected_song_count else "blocked"
+    elif issue_codes & {
+        "missing_deezer_id",
+        "missing_preview_url",
+        "preview_too_short",
+        "preview_too_long",
+        "preview_download_failed",
+    }:
+        status = "needs_substitution"
+    elif issue_codes & {"pdf_inspection_failed", "mp3_inspection_failed", "round_mp3_duration_mismatch"}:
+        status = "render_failed"
+    else:
+        status = "blocked"
+
+    return {
+        "round_id": round_id,
+        "round_name": round_obj.name,
+        "status": status,
+        "expected_song_count": expected_song_count,
+        "actual_song_count": actual_song_count,
+        "resolved_song_count": resolved_song_count,
+        "song_count": len(songs),
+        "preview_checks": preview_checks,
+        "components": components,
+        "expected_duration_seconds": None if expected_ms is None else round(expected_ms / 1000, 3),
+        "pdf": pdf_result,
+        "mp3": mp3_result,
+        "issues": issues,
+        "hints": [issue["message"] for issue in issues],
+        "remediation": remediation,
+        "ok": not issues,
+    }
+
+
 def email_round(
     round_id: int,
     recipient: str | None = None,
@@ -728,6 +1145,32 @@ def email_round(
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
     assets = generate_round_assets(round_id, user_id=user.id)
+    quality = inspect_round_package(round_id, user_id=user.id)
+    if not quality["ok"]:
+        message = "Round quality gate failed: " + "; ".join(quality["hints"])
+        db.session.add(
+            RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination=target,
+                include_mp3s=True,
+                status="failed",
+                error_message=message,
+            )
+        )
+        db.session.commit()
+        raise AutomationError(
+            message,
+            details={
+                "success": False,
+                "status": quality["status"],
+                "recipient": target,
+                "assets": assets,
+                "quality": quality,
+            },
+        )
+
     round_obj = db.session.get(Round, round_id)
     title = round_obj.name if round_obj and round_obj.name else f"Quizzical Beats Round {round_id}"
     email_subject = subject or title
@@ -765,7 +1208,13 @@ def email_round(
     db.session.commit()
     if not success:
         raise AutomationError(message)
-    return {"success": True, "message": message, "recipient": target, "assets": assets}
+    return {
+        "success": True,
+        "message": message,
+        "recipient": target,
+        "assets": assets,
+        "quality": quality,
+    }
 
 
 def inspect_mp3_quality(path: str | None = None, round_id: int | None = None) -> dict[str, Any]:
