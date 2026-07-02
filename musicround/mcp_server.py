@@ -391,6 +391,55 @@ def round_repair_report(
 
 
 @mcp.tool()
+def schedule_round_email(
+    round_id: int,
+    scheduled_for: str,
+    recipient: str | None = None,
+    user_id: int | None = None,
+    subject: str | None = None,
+    body_text: str | None = None,
+) -> dict[str, Any]:
+    """Schedule a round email for a future worker run."""
+    return _with_app_context(
+        automation.schedule_round_email,
+        round_id=round_id,
+        scheduled_for=scheduled_for,
+        recipient=recipient,
+        user_id=user_id,
+        subject=subject,
+        body_text=body_text,
+    )
+
+
+@mcp.tool()
+def list_scheduled_round_emails(
+    user_id: int | None = None,
+    include_processed: bool = False,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List scheduled round email exports."""
+    return _with_app_context(
+        automation.list_scheduled_round_emails,
+        user_id=user_id,
+        include_processed=include_processed,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def process_due_scheduled_round_emails(
+    now: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Send scheduled round emails that are due and still pending."""
+    return _with_app_context(
+        automation.process_due_scheduled_round_emails,
+        now=now,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def send_round_email(
     round_id: int,
     recipient: str | None = None,

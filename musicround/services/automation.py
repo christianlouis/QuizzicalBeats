@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import requests
@@ -1545,12 +1545,167 @@ def round_repair_report(
     return {"quality": quality, "report": quality["report"]}
 
 
+def _parse_datetime_utc(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        normalized = value.strip()
+        if normalized.endswith("Z"):
+            normalized = f"{normalized[:-1]}+00:00"
+        parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _datetime_payload(value: datetime | None) -> str | None:
+    return None if value is None else f"{value.isoformat()}Z"
+
+
+def _round_export_summary(export: RoundExport) -> dict[str, Any]:
+    return {
+        "id": export.id,
+        "round_id": export.round_id,
+        "round_name": export.round.name if export.round else None,
+        "user_id": export.user_id,
+        "export_type": export.export_type,
+        "destination": export.destination,
+        "status": export.status,
+        "scheduled_for": _datetime_payload(export.scheduled_for),
+        "processed_at": _datetime_payload(export.processed_at),
+        "timestamp": _datetime_payload(export.timestamp),
+        "subject": export.subject,
+        "body_text": export.body_text,
+        "error_message": export.error_message,
+    }
+
+
+def schedule_round_email(
+    round_id: int,
+    scheduled_for: str | datetime,
+    recipient: str | None = None,
+    user_id: int | None = None,
+    subject: str | None = None,
+    body_text: str | None = None,
+) -> dict[str, Any]:
+    """Schedule a round email for a future worker run."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    user = _find_user(user_id)
+    target = recipient or user.email
+    if not target:
+        raise AutomationError("No recipient was provided and the selected user has no email.")
+
+    scheduled_at = _parse_datetime_utc(scheduled_for)
+    export = RoundExport(
+        round_id=round_id,
+        user_id=user.id,
+        export_type="email",
+        destination=target,
+        include_mp3s=True,
+        status="scheduled",
+        scheduled_for=scheduled_at,
+        subject=subject,
+        body_text=body_text,
+    )
+    db.session.add(export)
+    db.session.commit()
+    return {"scheduled": True, "export": _round_export_summary(export)}
+
+
+def list_scheduled_round_emails(
+    user_id: int | None = None,
+    include_processed: bool = False,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List scheduled round email exports."""
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+
+    query = RoundExport.query.filter_by(export_type="email").filter(
+        RoundExport.scheduled_for.isnot(None)
+    )
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    if not include_processed:
+        query = query.filter_by(status="scheduled")
+    exports = (
+        query.order_by(RoundExport.scheduled_for.asc(), RoundExport.id.asc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(exports),
+        "scheduled_exports": [_round_export_summary(item) for item in exports],
+    }
+
+
+def process_due_scheduled_round_emails(
+    now: str | datetime | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Send scheduled round emails that are due and still pending."""
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+
+    now_utc = _parse_datetime_utc(now) if now is not None else datetime.utcnow()
+    due_exports = (
+        RoundExport.query.filter_by(export_type="email", status="scheduled")
+        .filter(RoundExport.scheduled_for.isnot(None))
+        .filter(RoundExport.scheduled_for <= now_utc)
+        .order_by(RoundExport.scheduled_for.asc(), RoundExport.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+    results = []
+    for export in due_exports:
+        export.status = "processing"
+        db.session.commit()
+        try:
+            delivery = email_round(
+                export.round_id,
+                recipient=export.destination,
+                user_id=export.user_id,
+                subject=export.subject,
+                body_text=export.body_text,
+                record_export=False,
+            )
+            export.status = "success"
+            export.processed_at = datetime.utcnow()
+            export.error_message = delivery.get("message")
+            db.session.commit()
+            results.append({"export": _round_export_summary(export), "delivery": delivery})
+        except Exception as exc:
+            export.status = "failed"
+            export.processed_at = datetime.utcnow()
+            export.error_message = str(exc)
+            db.session.commit()
+            details = getattr(exc, "details", None)
+            results.append(
+                {
+                    "export": _round_export_summary(export),
+                    "error": str(exc),
+                    "details": details,
+                }
+            )
+
+    return {
+        "processed_count": len(results),
+        "now": _datetime_payload(now_utc),
+        "results": results,
+    }
+
+
 def email_round(
     round_id: int,
     recipient: str | None = None,
     user_id: int | None = None,
     subject: str | None = None,
     body_text: str | None = None,
+    record_export: bool = True,
 ) -> dict[str, Any]:
     """Generate assets and send a round as an email attachment bundle."""
     user = _find_user(user_id)
@@ -1563,18 +1718,21 @@ def email_round(
     if not quality["ok"]:
         report = quality.get("report") or _round_repair_report(quality)
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
-        db.session.add(
-            RoundExport(
-                round_id=round_id,
-                user_id=user.id,
-                export_type="email",
-                destination=target,
-                include_mp3s=True,
-                status="failed",
-                error_message=message,
+        if record_export:
+            db.session.add(
+                RoundExport(
+                    round_id=round_id,
+                    user_id=user.id,
+                    export_type="email",
+                    destination=target,
+                    include_mp3s=True,
+                    status="failed",
+                    error_message=message,
+                    subject=subject,
+                    body_text=body_text,
+                )
             )
-        )
-        db.session.commit()
+            db.session.commit()
         raise AutomationError(
             message,
             details={
@@ -1611,17 +1769,21 @@ def email_round(
         )
 
     success, message = send_email(target, email_subject, email_body, attachments)
-    export = RoundExport(
-        round_id=round_id,
-        user_id=user.id,
-        export_type="email",
-        destination=target,
-        include_mp3s=True,
-        status="success" if success else "failed",
-        error_message=None if success else message,
-    )
-    db.session.add(export)
-    db.session.commit()
+    if record_export:
+        export = RoundExport(
+            round_id=round_id,
+            user_id=user.id,
+            export_type="email",
+            destination=target,
+            include_mp3s=True,
+            status="success" if success else "failed",
+            error_message=None if success else message,
+            subject=subject,
+            body_text=body_text,
+            processed_at=datetime.utcnow(),
+        )
+        db.session.add(export)
+        db.session.commit()
     if not success:
         raise AutomationError(message)
     return {
