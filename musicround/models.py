@@ -63,17 +63,17 @@ class User(db.Model, UserMixin):
     spotify_token_expiry = db.Column(db.DateTime)
     
     # OAuth provider info - Google
-    google_id = db.Column(db.String(100))      # Google user ID
+    google_id = db.Column(db.String(100), index=True, unique=True, nullable=True)      # Google user ID
     google_token = db.Column(db.Text)          # Store Google access token
     google_refresh_token = db.Column(db.Text)   # Store Google refresh token
     
     # OAuth provider info - Authentik
-    authentik_id = db.Column(db.String(100))    # Authentik user ID
+    authentik_id = db.Column(db.String(100), index=True, unique=True, nullable=True)    # Authentik user ID
     authentik_token = db.Column(db.Text)        # Store Authentik access token
     authentik_refresh_token = db.Column(db.Text) # Store Authentik refresh token
     
     # OAuth provider info - Dropbox
-    dropbox_id = db.Column(db.String(100))      # Dropbox user ID
+    dropbox_id = db.Column(db.String(100), index=True, unique=True, nullable=True)      # Dropbox user ID
     dropbox_token = db.Column(db.Text)          # Store Dropbox access token
     dropbox_refresh_token = db.Column(db.Text)  # Store Dropbox refresh token
     dropbox_token_expiry = db.Column(db.DateTime) # Dropbox token expiration
