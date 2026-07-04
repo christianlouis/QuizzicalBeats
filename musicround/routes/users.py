@@ -830,7 +830,10 @@ def update_bearer_token():
         session['token_source'] = 'manual' # Initial assumption
         session['bearer_token_added'] = datetime.now().timestamp()
         
-        current_app.logger.info(f"User {current_user.id} added a manual bearer token to session. Validating: {bearer_token[:10]}...")
+        current_app.logger.info(
+            "User %s added a manual bearer token to session. Validating token presence only.",
+            current_user.id,
+        )
         
         try:
             resp_me = oauth.spotify.get('https://api.spotify.com/v1/me', token={'access_token': bearer_token, 'token_type': 'Bearer'})

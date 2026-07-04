@@ -10,6 +10,7 @@ from datetime import datetime
 import requests
 import secrets
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_spotify_user_info, get_oauth_redirect_uri
+from musicround.helpers.logging_utils import oauth_token_log_summary
 
 # Create blueprint
 auth_bp = Blueprint('auth', __name__)
@@ -48,7 +49,10 @@ def callback():
     """Handle Spotify OAuth callback for login using Authlib."""
     try:
         token = oauth.spotify.authorize_access_token()
-        current_app.logger.debug(f"Spotify token received for login: {token}")
+        current_app.logger.debug(
+            "Spotify token received for login: %s",
+            oauth_token_log_summary(token),
+        )
 
         # Fetch user info using the token
         spotify_info = get_spotify_user_info(token)

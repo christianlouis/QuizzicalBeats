@@ -811,7 +811,7 @@ def export_to_dropbox(round_id):
         
         # Access token for Dropbox API calls
         access_token = current_user.dropbox_token
-        current_app.logger.debug(f"Access token (first 10 chars): {access_token[:10] if access_token else 'None'}")
+        current_app.logger.debug("Dropbox access token present for export: %s", bool(access_token))
         
         # Prepare song list - check if the helper method works
         try:
