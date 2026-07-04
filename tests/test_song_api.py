@@ -173,6 +173,16 @@ class TestSongDetailPut:
             assert song.artist == 'Keep Artist'
             assert song.genre == 'New Genre'
 
+    def test_update_song_requires_json_body(self, app, client):
+        """Test PUT without a JSON body returns 400 and preserves the song."""
+        _login(app, client)
+        song_id = _create_song(app, title='No JSON Target')
+        response = client.put(f'/api/songs/{song_id}', data='not json')
+        assert response.status_code == 400
+        with app.app_context():
+            song = Song.query.get(song_id)
+            assert song.title == 'No JSON Target'
+
 
 class TestSongDetailDelete:
     """Tests for DELETE /api/songs/<id>."""
@@ -223,9 +233,16 @@ class TestSongDetailDelete:
             content_type='application/json',
         )
         assert response.status_code in (302, 401, 403)
+        with app.app_context():
+            song = Song.query.get(song_id)
+            assert song.title == 'Anonymous Update Target'
 
     def test_delete_song_requires_login(self, app, client):
         """Test DELETE requires authentication."""
         song_id = _create_song(app, title='Anonymous Delete Target')
         response = client.delete(f'/api/songs/{song_id}')
         assert response.status_code in (302, 401, 403)
+        with app.app_context():
+            song = Song.query.get(song_id)
+            assert song is not None
+            assert song.title == 'Anonymous Delete Target'
