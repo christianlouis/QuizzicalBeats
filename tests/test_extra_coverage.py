@@ -301,6 +301,39 @@ class TestImportQueueStatusRoute:
         assert response.status_code == 200
         assert b'pending-playlist' in response.data
 
+    def test_queue_status_orders_database_jobs_by_priority(self, app, client):
+        """Test appended database jobs keep priority order in the status page."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add_all(
+                [
+                    ImportJobRecord(
+                        service_name='spotify',
+                        item_type='playlist',
+                        item_id='low-priority-playlist',
+                        user_id=user.id,
+                        status='pending',
+                        priority=9,
+                    ),
+                    ImportJobRecord(
+                        service_name='spotify',
+                        item_type='playlist',
+                        item_id='high-priority-playlist',
+                        user_id=user.id,
+                        status='pending',
+                        priority=1,
+                    ),
+                ]
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status')
+        page = response.data.decode()
+
+        assert response.status_code == 200
+        assert page.index('high-priority-playlist') < page.index('low-priority-playlist')
+
 
 class TestUserRoutesExtended:
     """Additional user route tests for more coverage."""

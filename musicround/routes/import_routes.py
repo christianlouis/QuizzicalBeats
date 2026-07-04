@@ -811,6 +811,14 @@ def queue_status():
                 'user_id': job.user_id,
                 'record_id': job.id,
             })
+        queue_snapshot.sort(
+            key=lambda job: (
+                job.get('priority', 0),
+                job.get('counter') is None,
+                job.get('counter') or 0,
+                job.get('record_id') or 0,
+            )
+        )
     except (ImportError, AttributeError):
         # ImportJobRecord might not be defined yet, handle this case
         pass

@@ -212,18 +212,20 @@ class ImportWorker(threading.Thread):
 
     def _process_job(self, job: ImportJob) -> None:
         with self.app.test_request_context():
-            record = self._claim_record(job)
-            if job.record_id and record is None:
-                return
-
-            user = User.query.get(job.user_id)
-            if not user:
-                current_app.logger.error("Import job for unknown user %s", job.user_id)
-                self._mark_failed(record, f"Unknown user id {job.user_id}")
-                return
-
-            login_user(user)
+            logged_in = False
             try:
+                record = self._claim_record(job)
+                if job.record_id and record is None:
+                    return
+
+                user = User.query.get(job.user_id)
+                if not user:
+                    current_app.logger.error("Import job for unknown user %s", job.user_id)
+                    self._mark_failed(record, f"Unknown user id {job.user_id}")
+                    return
+
+                login_user(user)
+                logged_in = True
                 current_app.logger.info(
                     "Processing import job: record=%s service=%s type=%s id=%s user=%s priority=%s",
                     job.record_id,
@@ -242,7 +244,8 @@ class ImportWorker(threading.Thread):
                 db.session.rollback()
                 self._mark_failed(record, str(exc))
             finally:
-                logout_user()
+                if logged_in:
+                    logout_user()
                 db.session.remove()
 
     def _claim_record(self, job: ImportJob) -> Optional[ImportJobRecord]:
@@ -250,13 +253,25 @@ class ImportWorker(threading.Thread):
             return None
 
         with self._claim_lock:
-            statement = (
-                update(ImportJobRecord)
-                .where(ImportJobRecord.id == job.record_id, ImportJobRecord.status == "pending")
-                .values(status="processing", started_at=datetime.utcnow())
-            )
-            result = db.session.execute(statement)
-            db.session.commit()
+            try:
+                statement = (
+                    update(ImportJobRecord)
+                    .where(
+                        ImportJobRecord.id == job.record_id,
+                        ImportJobRecord.status == "pending",
+                    )
+                    .values(status="processing", started_at=datetime.utcnow())
+                )
+                result = db.session.execute(statement)
+                db.session.commit()
+            except SQLAlchemyError as exc:
+                db.session.rollback()
+                current_app.logger.warning(
+                    "Could not claim import job record %s: %s",
+                    job.record_id,
+                    exc,
+                )
+                return None
 
         if result.rowcount != 1:
             db.session.rollback()
