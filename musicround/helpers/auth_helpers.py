@@ -319,22 +319,32 @@ def find_or_create_user(user_info, auth_provider):
 def update_oauth_tokens(user, tokens, auth_provider):
     """
     Update user's OAuth tokens
+
+    A refresh response doesn't always include a new refresh_token (Spotify in
+    particular: if the provider doesn't rotate it, the response simply omits
+    it and the existing refresh token remains valid). Only overwrite the
+    stored refresh token when a new one is actually present, so a refresh
+    that omits it doesn't clobber a still-valid refresh token with None.
     """
     from musicround.models import db
     if auth_provider == 'google':
         user.google_token = tokens.get('access_token')
-        user.google_refresh_token = tokens.get('refresh_token')
+        if tokens.get('refresh_token'):
+            user.google_refresh_token = tokens.get('refresh_token')
     elif auth_provider == 'authentik':
         user.authentik_token = tokens.get('access_token')
-        user.authentik_refresh_token = tokens.get('refresh_token')
+        if tokens.get('refresh_token'):
+            user.authentik_refresh_token = tokens.get('refresh_token')
     elif auth_provider == 'dropbox':
         user.dropbox_token = tokens.get('access_token')
-        user.dropbox_refresh_token = tokens.get('refresh_token')
+        if tokens.get('refresh_token'):
+            user.dropbox_refresh_token = tokens.get('refresh_token')
         if tokens.get('expires_in'):
             user.dropbox_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
     elif auth_provider == 'spotify':
         user.spotify_token = tokens.get('access_token')
-        user.spotify_refresh_token = tokens.get('refresh_token')
+        if tokens.get('refresh_token'):
+            user.spotify_refresh_token = tokens.get('refresh_token')
         if tokens.get('expires_in'):
             user.spotify_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
     user.last_login = datetime.now()
