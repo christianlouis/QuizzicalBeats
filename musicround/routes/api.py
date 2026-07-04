@@ -72,7 +72,10 @@ def mutate_song_detail(song_id):
 
     if request.method == 'PUT':
         # Update song details
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'JSON body required'}), 400
+
         current_app.logger.info(f"Updating song {song_id} with data: {data}")
         
         # Update basic fields
@@ -123,7 +126,10 @@ def mutate_song_detail(song_id):
             'cover_url': song.cover_url,
             'tags': tag_list
         })
-        
+
+    if request.method != 'DELETE':
+        return jsonify({'error': 'Method not allowed'}), 405
+
     # Check for exact membership in the comma-separated round song list without
     # loading every Round row into Python.
     song_id_token = str(song.id)

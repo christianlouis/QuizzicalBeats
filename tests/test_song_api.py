@@ -173,6 +173,16 @@ class TestSongDetailPut:
             assert song.artist == 'Keep Artist'
             assert song.genre == 'New Genre'
 
+    def test_update_song_requires_json_body(self, app, client):
+        """Test PUT without a JSON body returns 400 and preserves the song."""
+        _login(app, client)
+        song_id = _create_song(app, title='No JSON Target')
+        response = client.put(f'/api/songs/{song_id}', data='not json')
+        assert response.status_code == 400
+        with app.app_context():
+            song = Song.query.get(song_id)
+            assert song.title == 'No JSON Target'
+
 
 class TestSongDetailDelete:
     """Tests for DELETE /api/songs/<id>."""
