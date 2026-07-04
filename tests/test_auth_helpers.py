@@ -106,3 +106,38 @@ class TestFindOrCreateUserEmailLinking:
 
             assert found is None
             assert User.query.get(user.id).authentik_id is None
+
+    def test_missing_provider_id_does_not_match_nullable_oauth_id(self, app):
+        with app.app_context():
+            user = _make_user()
+
+            found = find_or_create_user(
+                {
+                    'id': '',
+                    'email': user.email,
+                    'email_verified': True,
+                    'given_name': 'OAuth',
+                    'family_name': 'User',
+                },
+                'google',
+            )
+
+            assert found is None
+            assert User.query.get(user.id).google_id is None
+
+    def test_spotify_email_match_links_without_verified_claim(self, app):
+        with app.app_context():
+            user = _make_user()
+
+            found = find_or_create_user(
+                {
+                    'id': 'spotify-user-123',
+                    'email': user.email,
+                    'given_name': 'Spotify',
+                    'family_name': 'User',
+                },
+                'spotify',
+            )
+
+            assert found.id == user.id
+            assert User.query.get(user.id).spotify_id == 'spotify-user-123'

@@ -180,8 +180,8 @@ def get_dropbox_user_info(token):
         
         # Create a standardized user info dictionary
         user_info = {
-            'id': profile.get('account_id', ''),
-            'email': profile.get('email', ''),
+            'id': _none_if_blank(profile.get('account_id')),
+            'email': _none_if_blank(profile.get('email')),
             'name': profile.get('name', {}).get('display_name', ''),
             'given_name': profile.get('name', {}).get('given_name', ''),
             'family_name': profile.get('name', {}).get('surname', ''),
@@ -194,12 +194,27 @@ def get_dropbox_user_info(token):
         current_app.logger.error(f"Error getting Dropbox user info: {str(e)}")
         return None
 
+
+def _none_if_blank(value):
+    """Normalize missing provider identifiers so they never match nullable DB rows."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _oauth_email_is_verified(user_info):
     """Return True only when the provider explicitly verified the email claim."""
     verified = user_info.get('email_verified')
     if isinstance(verified, str):
         return verified.strip().lower() in {'1', 'true', 'yes'}
     return verified is True
+
+
+def _oauth_email_can_link(user_info, auth_provider):
+    """Return whether an OAuth email can safely attach to an existing account."""
+    return auth_provider == 'spotify' or _oauth_email_is_verified(user_info)
+
 
 def get_spotify_user_info(token):
     """
@@ -245,41 +260,48 @@ def find_or_create_user(user_info, auth_provider):
     from musicround.models import db, User
     if not user_info:
         return None
+
+    provider_id = _none_if_blank(user_info.get('id'))
+    if not provider_id:
+        current_app.logger.warning("Refusing %s OAuth login without provider ID", auth_provider)
+        return None
+
+    email = _none_if_blank(user_info.get('email'))
         
     # First try to find user by provider-specific ID
     if auth_provider == 'google':
-        user = User.query.filter_by(google_id=user_info['id']).first()
+        user = User.query.filter_by(google_id=provider_id).first()
     elif auth_provider == 'authentik':
-        user = User.query.filter_by(authentik_id=user_info['id']).first()
+        user = User.query.filter_by(authentik_id=provider_id).first()
     elif auth_provider == 'dropbox':
-        user = User.query.filter_by(dropbox_id=user_info['id']).first()
+        user = User.query.filter_by(dropbox_id=provider_id).first()
     elif auth_provider == 'spotify':
-        user = User.query.filter_by(spotify_id=user_info['id']).first()
+        user = User.query.filter_by(spotify_id=provider_id).first()
     else:
         return None
         
     # If not found by provider ID, try verified email.
-    if user is None and user_info.get('email'):
-        user = User.query.filter_by(email=user_info['email']).first()
+    if user is None and email:
+        user = User.query.filter_by(email=email).first()
         
         if user:
-            if not _oauth_email_is_verified(user_info):
+            if not _oauth_email_can_link(user_info, auth_provider):
                 current_app.logger.warning(
                     "Refusing to link %s OAuth identity %s to existing user %s because email is not verified",
                     auth_provider,
-                    user_info.get('id'),
+                    provider_id,
                     user.username,
                 )
                 return None
 
             if auth_provider == 'google':
-                user.google_id = user_info['id']
+                user.google_id = provider_id
             elif auth_provider == 'authentik':
-                user.authentik_id = user_info['id']
+                user.authentik_id = provider_id
             elif auth_provider == 'dropbox':
-                user.dropbox_id = user_info['id']
+                user.dropbox_id = provider_id
             elif auth_provider == 'spotify':
-                user.spotify_id = user_info['id']
+                user.spotify_id = provider_id
                 
             db.session.commit()
             current_app.logger.info(f"Updated existing user {user.username} with {auth_provider} ID")
@@ -295,8 +317,7 @@ def find_or_create_user(user_info, auth_provider):
             return None
             
         # Generate a username from email
-        email = user_info.get('email', '')
-        base_username = email.split('@')[0] if email else f"{auth_provider}_{user_info['id']}"
+        base_username = email.split('@')[0] if email else f"{auth_provider}_{provider_id}"
         
         # Ensure username is unique
         username = base_username
@@ -308,7 +329,7 @@ def find_or_create_user(user_info, auth_provider):
         # Create new user
         user = User(
             username=username,
-            email=user_info.get('email', ''),
+            email=email or '',
             first_name=user_info.get('given_name', ''),
             last_name=user_info.get('family_name', ''),
             auth_provider=auth_provider,
@@ -318,13 +339,13 @@ def find_or_create_user(user_info, auth_provider):
         
         # Set provider-specific fields
         if auth_provider == 'google':
-            user.google_id = user_info['id']
+            user.google_id = provider_id
         elif auth_provider == 'authentik':
-            user.authentik_id = user_info['id']
+            user.authentik_id = provider_id
         elif auth_provider == 'dropbox':
-            user.dropbox_id = user_info['id']
+            user.dropbox_id = provider_id
         elif auth_provider == 'spotify':
-            user.spotify_id = user_info['id']
+            user.spotify_id = provider_id
             
         db.session.add(user)
         try:
