@@ -11,7 +11,6 @@ Quizzical Beats uses environment variables for configuration. These can be set i
 ```bash
 # Debug settings
 DEBUG=True
-DEBUG2=False
 SECRET_KEY=your-secret-key-here-make-it-long-and-random
 ```
 
