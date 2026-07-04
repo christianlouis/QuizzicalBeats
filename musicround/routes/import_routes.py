@@ -155,19 +155,16 @@ def import_official_playlists():
             flash("Import queue not initialized.", "danger")
             return redirect(url_for('core.view_songs'))
         
-        # Create import job and add to queue
-        from musicround.helpers.import_queue import ImportJob
-        priority = int(request.form.get('priority', 10))
-        
-        job = ImportJob(
-            priority=priority,
+        from musicround.helpers.import_queue import enqueue_import_job
+        job_record = enqueue_import_job(
+            queue=queue,
+            priority=request.form.get('priority', 10),
             service_name='spotify',
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
         )
-        queue.add_job(job)
-        flash('Official Spotify playlist import queued successfully. You will be notified when it completes.', 'info')
+        flash(f'Official Spotify playlist import queued as job #{job_record.id}.', 'info')
             
         return redirect(url_for('core.view_songs'))
 
@@ -309,19 +306,16 @@ def direct_official_playlists():
             flash("Import queue not initialized.", "danger")
             return redirect(url_for('core.view_songs'))
         
-        # Create import job and add to queue
-        from musicround.helpers.import_queue import ImportJob
-        priority = int(request.form.get('priority', 10))
-        
-        job = ImportJob(
-            priority=priority,
+        from musicround.helpers.import_queue import enqueue_import_job
+        job_record = enqueue_import_job(
+            queue=queue,
+            priority=request.form.get('priority', 10),
             service_name='spotify',
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
         )
-        queue.add_job(job)
-        flash('Direct Spotify playlist import queued successfully. You will be notified when it completes.', 'info')
+        flash(f'Direct Spotify playlist import queued as job #{job_record.id}.', 'info')
         
         return redirect(url_for('core.view_songs'))
 
@@ -765,31 +759,14 @@ def queue_status():
         flash("Import queue not initialized.", "danger")
         return redirect(url_for('core.view_songs'))
     
-    # Access queue internals for display - this won't modify the queue
-    queue_size = queue._queue.qsize()
-    
-    # Extract information about jobs in the queue (without removing them)
-    # This is a bit of a hack but necessary to see what's in the PriorityQueue
-    # without removing items
-    queue_snapshot = []
-    if hasattr(queue._queue, 'queue'):
-        # Make a copy of the internal queue list
-        with queue._lock:  # Ensure thread safety while accessing the queue
-            queue_items = list(queue._queue.queue)
-            
-            for priority, counter, job in queue_items:
-                queue_snapshot.append({
-                    'priority': priority,
-                    'counter': counter,
-                    'service': job.service_name,
-                    'type': job.item_type,
-                    'item_id': job.item_id,
-                    'user_id': job.user_id
-                })
+    local_queue_size = queue.qsize()
+    queue_snapshot = queue.snapshot()
     
     # Get active and recent jobs from database if available
     active_jobs = []
+    pending_jobs = []
     recent_jobs = []
+    queue_size = local_queue_size
     
     # Check if ImportJobRecord is defined
     try:
@@ -800,6 +777,32 @@ def queue_status():
         
         # Get the active jobs (status='processing')
         active_jobs = ImportJobRecord.query.filter_by(status='processing').all()
+        pending_jobs = (
+            ImportJobRecord.query.filter_by(status='pending')
+            .order_by(
+                ImportJobRecord.priority.asc(),
+                ImportJobRecord.created_at.asc(),
+                ImportJobRecord.id.asc(),
+            )
+            .limit(50)
+            .all()
+        )
+        queue_size = ImportJobRecord.query.filter_by(status='pending').count()
+        snapshot_record_ids = {
+            job.get('record_id') for job in queue_snapshot if job.get('record_id')
+        }
+        for job in pending_jobs:
+            if job.id in snapshot_record_ids:
+                continue
+            queue_snapshot.append({
+                'priority': job.priority,
+                'counter': None,
+                'service': job.service_name,
+                'type': job.item_type,
+                'item_id': job.item_id,
+                'user_id': job.user_id,
+                'record_id': job.id,
+            })
     except (ImportError, AttributeError):
         # ImportJobRecord might not be defined yet, handle this case
         pass

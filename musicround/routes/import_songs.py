@@ -85,26 +85,21 @@ def import_playlist():
             flash("No playlist ID provided for import.", "danger")
             return redirect(request.referrer or url_for('core.search'))
 
-        try:
-            priority = int(request.form.get('priority', 10))
-        except (ValueError, TypeError):
-            priority = 10
         queue = current_app.config.get('import_queue')
         if not queue:
             flash("Import queue not initialized.", "danger")
             return redirect(url_for('core.view_songs'))
 
-        from musicround.helpers.import_queue import ImportJob
-
-        job = ImportJob(
-            priority=priority,
+        from musicround.helpers.import_queue import enqueue_import_job
+        job_record = enqueue_import_job(
+            queue=queue,
+            priority=request.form.get('priority', 10),
             service_name='spotify',
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
         )
-        queue.add_job(job)
-        flash('Playlist import queued.', 'info')
+        flash(f'Playlist import queued as job #{job_record.id}.', 'info')
         return redirect(url_for('core.view_songs'))
         
     return render_template('service_import.html',

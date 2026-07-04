@@ -1,6 +1,6 @@
 """Additional coverage tests for generate helpers, routes, and import queue."""
 import pytest
-from musicround.models import db, User, Song, Round, Tag
+from musicround.models import db, ImportJobRecord, User, Song, Round, Tag
 
 
 def _login(app, client, username='extra_user', email='extra@example.com'):
@@ -251,8 +251,55 @@ class TestImportQueueStatusRoute:
         """Test queue-status endpoint is accessible for admin users."""
         _login_admin(app, client)
         response = client.get('/import/queue-status')
-        # The template may not exist in test env (500) or works (200)
-        assert response.status_code in (200, 302, 500)
+        assert response.status_code == 200
+        assert b'Import Queue' in response.data
+
+    def test_queue_status_shows_failed_job_details_for_admin(self, app, client):
+        """Test queue-status renders persisted failure details."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='broken-playlist',
+                    user_id=user.id,
+                    status='failed',
+                    error_message='Preview import failed loudly',
+                    imported_count=2,
+                    skipped_count=1,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status')
+
+        assert response.status_code == 200
+        assert b'broken-playlist' in response.data
+        assert b'Preview import failed loudly' in response.data
+
+    def test_queue_status_shows_pending_database_job_for_admin(self, app, client):
+        """Test queue-status uses pending ImportJobRecord rows as source of truth."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='pending-playlist',
+                    user_id=user.id,
+                    status='pending',
+                    priority=3,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status')
+
+        assert response.status_code == 200
+        assert b'pending-playlist' in response.data
 
 
 class TestUserRoutesExtended:
