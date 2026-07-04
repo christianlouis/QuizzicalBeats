@@ -8,8 +8,19 @@ from musicround.models import Song, db
 from musicround.helpers.metadata import get_song_metadata_by_isrc
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.auth_helpers import oauth
+from musicround.helpers.spotify_helper import get_spotify_token
 
 import_songs_bp = Blueprint('import_songs', __name__, url_prefix='/import')
+
+
+def _require_spotify_token(item_type):
+    """Redirect users without any usable Spotify token before import."""
+    access_token, _token_source = get_spotify_token()
+    if access_token:
+        return None
+
+    flash(f"Please connect your Spotify account to import {item_type}.", "warning")
+    return redirect(url_for('users.spotify_link'))
 
 # Legacy function retained for backward compatibility
 def import_track(track_id):
@@ -34,9 +45,9 @@ def import_song():
         flash("Please log in to import songs.", "warning")
         return redirect(url_for('users.login'))
 
-    if not current_user.spotify_token:
-        flash("Please connect your Spotify account to import songs.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+    token_redirect = _require_spotify_token("songs")
+    if token_redirect:
+        return token_redirect
 
     if request.method == 'POST':
         track_id = request.form.get('song_id')
@@ -75,9 +86,9 @@ def import_playlist():
         flash("Please log in to import playlists.", "warning")
         return redirect(url_for('users.login'))
 
-    if not current_user.spotify_token:
-        flash("Please connect your Spotify account to import playlists.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+    token_redirect = _require_spotify_token("playlists")
+    if token_redirect:
+        return token_redirect
     
     if request.method == 'POST':
         playlist_id = request.form.get('playlist_id')
@@ -123,9 +134,9 @@ def import_album():
         flash("Please log in to import albums.", "warning")
         return redirect(url_for('users.login'))
 
-    if not current_user.spotify_token:
-        flash("Please connect your Spotify account to import albums.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+    token_redirect = _require_spotify_token("albums")
+    if token_redirect:
+        return token_redirect
     
     if request.method == 'POST':
         album_id = request.form.get('album_id')

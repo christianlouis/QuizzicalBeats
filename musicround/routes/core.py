@@ -4,7 +4,6 @@ Core routes for the Music Round application
 import os
 import json
 import time
-import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session, jsonify, abort, send_from_directory
 from flask_login import login_required, current_user
 from musicround.models import db, Round, Song
@@ -14,6 +13,7 @@ import traceback
 from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
 from musicround.helpers.spotify_helper import get_spotify_token, get_spotify_user_info
 from datetime import datetime
+from authlib.integrations.base_client.errors import OAuthError
 
 core_bp = Blueprint('core', __name__)
 
@@ -46,31 +46,40 @@ def search():
 @login_required
 def search_results():
     """Process Spotify search and display results using Authlib"""
-    if not current_user.spotify_token:
+    # Resolve the best available Spotify token: a manually-supplied bearer
+    # token (see users.update_bearer_token) takes priority, then the logged-in
+    # user's own token, then the system fallback account.
+    access_token, token_source = get_spotify_token()
+    if not access_token:
         current_app.logger.warning(f"User {current_user.id} does not have a Spotify token for search.")
         flash("Please connect your Spotify account to search.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+        return redirect(url_for('users.spotify_link'))
 
-    # Prepare Authlib token object from current_user
-    expires_at_timestamp = None
-    if current_user.spotify_token_expiry:
-        if isinstance(current_user.spotify_token_expiry, datetime):
-            expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
-        else:
-            try: # Should be a datetime object from DB, but being defensive
-                expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
-            except ValueError:
-                current_app.logger.warning(f"Could not parse spotify_token_expiry for user {current_user.id}.")
-
+    # Only the user's own token carries a refresh_token Authlib can use to
+    # auto-refresh; a manually-supplied or system fallback token is used as-is
+    # and must not be persisted onto (or clear) the user's own linked account.
     authlib_token = {
-        'access_token': current_user.spotify_token,
-        'refresh_token': current_user.spotify_refresh_token,
+        'access_token': access_token,
+        'refresh_token': None,
         'token_type': 'Bearer',
-        'expires_at': expires_at_timestamp
+        'expires_at': None
     }
-    
-    if current_user.spotify_token_expiry and current_user.spotify_token_expiry < datetime.now():
-        current_app.logger.info(f"User {current_user.id}'s Spotify token appears expired. Authlib will attempt refresh.")
+    if token_source == 'user':
+        expires_at_timestamp = None
+        if current_user.spotify_token_expiry:
+            if isinstance(current_user.spotify_token_expiry, datetime):
+                expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
+            else:
+                try: # Should be a datetime object from DB, but being defensive
+                    expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
+                except ValueError:
+                    current_app.logger.warning(f"Could not parse spotify_token_expiry for user {current_user.id}.")
+
+        authlib_token['refresh_token'] = current_user.spotify_refresh_token
+        authlib_token['expires_at'] = expires_at_timestamp
+
+        if current_user.spotify_token_expiry and current_user.spotify_token_expiry < datetime.now():
+            current_app.logger.info(f"User {current_user.id}'s Spotify token appears expired. Authlib will attempt refresh.")
 
     search_api_url = 'https://api.spotify.com/v1/search'
     search_term = request.form.get('search_term', '')
@@ -100,13 +109,17 @@ def search_results():
                 response.raise_for_status()
                 results = response.json()
                 
-                # Check if the token was refreshed by Authlib
-                # The new token would be in oauth.spotify.token
-                if oauth.spotify.token and oauth.spotify.token.get('access_token') != authlib_token.get('access_token'):
+                # Check if the token was refreshed by Authlib (only possible when
+                # using the user's own token, since that's the only one with a
+                # refresh_token attached above).
+                if (token_source == 'user' and oauth.spotify.token
+                        and oauth.spotify.token.get('access_token') != authlib_token.get('access_token')):
                     current_app.logger.info(f"Spotify token refreshed for user {current_user.id}.")
-                    if update_oauth_tokens(current_user, oauth.spotify.token, 'spotify'):
+                    refreshed_token = dict(oauth.spotify.token)
+                    refreshed_token.setdefault('refresh_token', current_user.spotify_refresh_token)
+                    if update_oauth_tokens(current_user, refreshed_token, 'spotify'):
                         # Update the local authlib_token variable to use the new token for subsequent requests in this function
-                        authlib_token = oauth.spotify.token 
+                        authlib_token = refreshed_token
                         current_app.logger.info(f"Refreshed Spotify token saved and authlib_token updated for user {current_user.id}.")
                     else:
                         current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id}.")
@@ -170,19 +183,42 @@ def search_results():
                     current_app.logger.info(f"Results found with strategy: {strategy_params}")
                     break 
             
+            except OAuthError as oauth_err:
+                current_app.logger.error(f"OAuth error with search strategy {strategy_params} for user {current_user.id}: {oauth_err}")
+                if oauth_err.error == 'invalid_grant':
+                    current_app.logger.warning(
+                        f"Spotify refresh token revoked/expired (invalid_grant) for user {current_user.id} during search. Clearing tokens."
+                    )
+                    # invalid_grant can only occur here when Authlib attempted a
+                    # refresh, which only happens for the user's own token (see
+                    # authlib_token construction above) - so token_source == 'user'.
+                    # spotify_id is kept so the linked-account identity survives;
+                    # the user only needs to reconnect, not re-link from scratch.
+                    current_user.spotify_token = None
+                    current_user.spotify_refresh_token = None
+                    current_user.spotify_token_expiry = None
+                    db.session.commit()
+                    flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
+                    return redirect(url_for('users.spotify_link'))
+                continue
             except requests.exceptions.HTTPError as http_err:
                 current_app.logger.error(f"HTTP error with search strategy {strategy_params} for user {current_user.id}: {http_err}")
                 if hasattr(http_err, 'response') and http_err.response is not None:
                     current_app.logger.error(f"Response status: {http_err.response.status_code}, Response text: {http_err.response.text}")
                     if http_err.response.status_code == 401:
-                        current_app.logger.warning(f"Spotify token invalid/expired for user {current_user.id} during search. Clearing tokens.")
-                        current_user.spotify_token = None
-                        current_user.spotify_refresh_token = None
-                        current_user.spotify_token_expiry = None
-                        current_user.spotify_id = None 
-                        db.session.commit()
-                        flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
-                        return redirect(url_for('users.spotify_auth'))
+                        if token_source == 'user':
+                            current_app.logger.warning(f"Spotify token invalid/expired for user {current_user.id} during search. Clearing tokens.")
+                            current_user.spotify_token = None
+                            current_user.spotify_refresh_token = None
+                            current_user.spotify_token_expiry = None
+                            db.session.commit()
+                            flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
+                        else:
+                            current_app.logger.warning(
+                                f"Spotify {token_source} token rejected (401) for user {current_user.id} during search."
+                            )
+                            flash("The Spotify token in use has expired or is invalid.", "warning")
+                        return redirect(url_for('users.spotify_link'))
                 continue
             except Exception as search_error:
                 current_app.logger.error(f"Error with search strategy {strategy_params} for user {current_user.id}: {str(search_error)}")
@@ -203,12 +239,15 @@ def search_results():
                     response.raise_for_status()
                     results = response.json()
 
-                    # Check if the token was refreshed by Authlib
-                    if oauth.spotify.token and oauth.spotify.token.get('access_token') != authlib_token.get('access_token'):
+                    # Check if the token was refreshed by Authlib (user tokens only, see above)
+                    if (token_source == 'user' and oauth.spotify.token
+                            and oauth.spotify.token.get('access_token') != authlib_token.get('access_token')):
                         current_app.logger.info(f"Spotify token refreshed during fallback for user {current_user.id}.")
-                        if update_oauth_tokens(current_user, oauth.spotify.token, 'spotify'):
+                        refreshed_token = dict(oauth.spotify.token)
+                        refreshed_token.setdefault('refresh_token', current_user.spotify_refresh_token)
+                        if update_oauth_tokens(current_user, refreshed_token, 'spotify'):
                             # Update the local authlib_token variable
-                            authlib_token = oauth.spotify.token
+                            authlib_token = refreshed_token
                             current_app.logger.info(f"Refreshed Spotify token saved (fallback) and authlib_token updated for user {current_user.id}.")
                         else:
                              current_app.logger.error(f"Failed to save refreshed Spotify token (fallback) for user {current_user.id}.")
@@ -237,19 +276,39 @@ def search_results():
                         if results_found:
                             current_app.logger.info(f"Results found with fallback strategy: {strategy_params}")
                             break 
+                except OAuthError as oauth_err:
+                    current_app.logger.error(f"OAuth error with fallback strategy {strategy_params} for user {current_user.id}: {oauth_err}")
+                    if oauth_err.error == 'invalid_grant':
+                        current_app.logger.warning(
+                            f"Spotify refresh token revoked/expired (invalid_grant) for user {current_user.id} during fallback. Clearing tokens."
+                        )
+                        # Only reachable for token_source == 'user' (see note above).
+                        # spotify_id is kept so the linked-account identity survives.
+                        current_user.spotify_token = None
+                        current_user.spotify_refresh_token = None
+                        current_user.spotify_token_expiry = None
+                        db.session.commit()
+                        flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
+                        return redirect(url_for('users.spotify_link'))
+                    continue
                 except requests.exceptions.HTTPError as http_err:
                     current_app.logger.error(f"HTTP error with fallback strategy {strategy_params} for user {current_user.id}: {http_err}")
                     if hasattr(http_err, 'response') and http_err.response is not None:
                         current_app.logger.error(f"Response status: {http_err.response.status_code}, Response text: {http_err.response.text}")
                         if http_err.response.status_code == 401:
-                            current_app.logger.warning(f"Spotify token invalid/expired for user {current_user.id} during fallback. Clearing tokens.")
-                            current_user.spotify_token = None
-                            current_user.spotify_refresh_token = None
-                            current_user.spotify_token_expiry = None
-                            current_user.spotify_id = None
-                            db.session.commit()
-                            flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
-                            return redirect(url_for('users.spotify_auth'))
+                            if token_source == 'user':
+                                current_app.logger.warning(f"Spotify token invalid/expired for user {current_user.id} during fallback. Clearing tokens.")
+                                current_user.spotify_token = None
+                                current_user.spotify_refresh_token = None
+                                current_user.spotify_token_expiry = None
+                                db.session.commit()
+                                flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
+                            else:
+                                current_app.logger.warning(
+                                    f"Spotify {token_source} token rejected (401) for user {current_user.id} during fallback."
+                                )
+                                flash("The Spotify token in use has expired or is invalid.", "warning")
+                            return redirect(url_for('users.spotify_link'))
                     continue
                 except Exception as fallback_error:
                     current_app.logger.error(f"Error with fallback strategy {strategy_params} for user {current_user.id}: {str(fallback_error)}")
@@ -277,7 +336,7 @@ def search_results():
         current_app.logger.error(traceback.format_exc())
         if "token" in str(e).lower() or "auth" in str(e).lower() or "401" in str(e):
              flash("An authentication error occurred with Spotify. Please try reconnecting your account.", "danger")
-             return redirect(url_for('users.spotify_auth'))
+             return redirect(url_for('users.spotify_link'))
         return render_template('error.html', 
                               error_message="An error occurred while searching Spotify.",
                               error_details=str(e),

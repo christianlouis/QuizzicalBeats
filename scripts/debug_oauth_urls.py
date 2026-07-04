@@ -4,7 +4,7 @@ This script helps debug OAuth URL generation when behind a reverse proxy.
 It's especially useful for debugging HTTPS redirection issues.
 
 Usage:
-    python debug_oauth_urls.py [--https] [--host hostname] [--port portnumber]
+    python scripts/debug_oauth_urls.py [--https] [--host hostname] [--port portnumber]
 
 Options:
     --https     Force HTTPS URL generation regardless of request headers
