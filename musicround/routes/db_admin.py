@@ -15,6 +15,20 @@ from functools import wraps
 import os
 import json
 
+SENSITIVE_USER_COLUMNS = [
+    'password_hash',
+    'reset_token',
+    'reset_token_expiry',
+    'spotify_token',
+    'spotify_refresh_token',
+    'google_token',
+    'google_refresh_token',
+    'authentik_token',
+    'authentik_refresh_token',
+    'dropbox_token',
+    'dropbox_refresh_token',
+]
+
 # Create a basic authentication wrapper
 def admin_required(view_func):
     @wraps(view_func)
@@ -96,12 +110,34 @@ class SongTagModelView(AuthModelView):
 
 # Enhanced User ModelView
 class UserModelView(AuthModelView):
+    can_view_details = True
     column_searchable_list = ['username', 'email', 'first_name', 'last_name']
     column_filters = ['username', 'email', 'active', 'created_at', 'last_login']
+    column_list = [
+        'id',
+        'username',
+        'email',
+        'first_name',
+        'last_name',
+        'active',
+        'is_admin',
+        'auth_provider',
+        'created_at',
+        'last_login',
+        'spotify_id',
+        'google_id',
+        'authentik_id',
+        'dropbox_id',
+        'spotify_token_expiry',
+        'dropbox_token_expiry',
+        'dropbox_export_path',
+    ]
+    column_details_exclude_list = SENSITIVE_USER_COLUMNS
+    column_export_exclude_list = SENSITIVE_USER_COLUMNS
     column_default_sort = ('id', False)
     
     # Protect password field in forms
-    form_excluded_columns = ['password_hash', 'reset_token', 'reset_token_expiry']
+    form_excluded_columns = SENSITIVE_USER_COLUMNS
     
     @action('activate_users', 'Activate Users', 'Are you sure you want to activate selected users?')
     def action_activate_users(self, ids):
@@ -144,9 +180,12 @@ class UserPreferencesModelView(AuthModelView):
     
 # Enhanced SystemSetting ModelView
 class SystemSettingModelView(AuthModelView):
+    can_view_details = True
     column_searchable_list = ['key']
     column_filters = ['key']
-    column_exclude_list = []  # Ensure any sensitive values are not excluded if needed
+    column_list = ['id', 'key']
+    column_details_list = ['id', 'key']
+    column_export_list = ['id', 'key']
 
 # Initialize the admin interface
 admin = None
