@@ -212,6 +212,7 @@ class ImportWorker(threading.Thread):
 
     def _process_job(self, job: ImportJob) -> None:
         with self.app.test_request_context():
+            record = None
             logged_in = False
             try:
                 record = self._claim_record(job)
@@ -263,6 +264,9 @@ class ImportWorker(threading.Thread):
                     .values(status="processing", started_at=datetime.utcnow())
                 )
                 result = db.session.execute(statement)
+                if result.rowcount != 1:
+                    db.session.rollback()
+                    return None
                 db.session.commit()
             except SQLAlchemyError as exc:
                 db.session.rollback()
@@ -272,10 +276,6 @@ class ImportWorker(threading.Thread):
                     exc,
                 )
                 return None
-
-        if result.rowcount != 1:
-            db.session.rollback()
-            return None
 
         return ImportJobRecord.query.get(job.record_id)
 
