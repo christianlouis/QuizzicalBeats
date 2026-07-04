@@ -18,6 +18,9 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 @api_bp.route('/songs/<int:song_id>', methods=['GET', 'PUT', 'DELETE'])
 def song_detail(song_id):
     """API endpoint for getting, updating, and deleting song details"""
+    if request.method in {'PUT', 'DELETE'} and not current_user.is_authenticated:
+        return current_app.login_manager.unauthorized()
+
     song = Song.query.get_or_404(song_id)
     
     if request.method == 'GET':
@@ -154,6 +157,7 @@ def song_detail(song_id):
         })
 
 @api_bp.route('/songs/<int:song_id>/refresh-metadata', methods=['POST'])
+@login_required
 def refresh_song_metadata(song_id):
     """API endpoint for refreshing song metadata"""
     song = Song.query.get_or_404(song_id)
@@ -302,6 +306,7 @@ def list_tags():
     })
 
 @api_bp.route('/tags', methods=['POST'])
+@login_required
 def create_tag():
     """Create a new tag"""
     data = request.get_json()
@@ -340,6 +345,7 @@ def get_song_tags(song_id):
     })
 
 @api_bp.route('/songs/<int:song_id>/tags', methods=['POST'])
+@login_required
 def add_tag_to_song(song_id):
     """Add a tag to a song"""
     song = Song.query.get_or_404(song_id)
@@ -383,6 +389,7 @@ def add_tag_to_song(song_id):
     })
 
 @api_bp.route('/songs/<int:song_id>/tags/<int:tag_id>', methods=['DELETE'])
+@login_required
 def remove_tag_from_song(song_id, tag_id):
     """Remove a tag from a song"""
     song = Song.query.get_or_404(song_id)

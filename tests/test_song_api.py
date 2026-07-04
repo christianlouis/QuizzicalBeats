@@ -72,6 +72,7 @@ class TestSongDetailPut:
 
     def test_update_song_title(self, app, client):
         """Test PUT updates song title."""
+        _login(app, client)
         song_id = _create_song(app, title='Original Title')
         response = client.put(
             f'/api/songs/{song_id}',
@@ -84,6 +85,7 @@ class TestSongDetailPut:
 
     def test_update_song_artist(self, app, client):
         """Test PUT updates song artist."""
+        _login(app, client)
         song_id = _create_song(app, artist='Original Artist')
         response = client.put(
             f'/api/songs/{song_id}',
@@ -96,6 +98,7 @@ class TestSongDetailPut:
 
     def test_update_song_genre(self, app, client):
         """Test PUT updates song genre."""
+        _login(app, client)
         song_id = _create_song(app, genre='Rock')
         response = client.put(
             f'/api/songs/{song_id}',
@@ -108,6 +111,7 @@ class TestSongDetailPut:
 
     def test_update_song_year(self, app, client):
         """Test PUT updates song year."""
+        _login(app, client)
         song_id = _create_song(app, year=2000)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -120,6 +124,7 @@ class TestSongDetailPut:
 
     def test_update_song_popularity(self, app, client):
         """Test PUT updates song popularity."""
+        _login(app, client)
         song_id = _create_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -132,6 +137,7 @@ class TestSongDetailPut:
 
     def test_update_song_not_found(self, app, client):
         """Test PUT on non-existent song returns 404."""
+        _login(app, client)
         response = client.put(
             '/api/songs/99999',
             data=json.dumps({'title': 'Test'}),
@@ -141,6 +147,7 @@ class TestSongDetailPut:
 
     def test_update_song_persists_to_db(self, app, client):
         """Test PUT changes are persisted to the database."""
+        _login(app, client)
         song_id = _create_song(app, title='Before Update', artist='Orig')
         client.put(
             f'/api/songs/{song_id}',
@@ -153,6 +160,7 @@ class TestSongDetailPut:
 
     def test_update_song_partial_update(self, app, client):
         """Test PUT with partial data only updates specified fields."""
+        _login(app, client)
         song_id = _create_song(app, title='Keep Title', artist='Keep Artist', genre='Keep Genre')
         client.put(
             f'/api/songs/{song_id}',
@@ -171,11 +179,13 @@ class TestSongDetailDelete:
 
     def test_delete_song_not_found(self, app, client):
         """Test DELETE on non-existent song returns 404."""
+        _login(app, client)
         response = client.delete('/api/songs/99999')
         assert response.status_code == 404
 
     def test_delete_song_success(self, app, client):
         """Test DELETE successfully removes a song."""
+        _login(app, client)
         song_id = _create_song(app, title='Delete Me Song')
         response = client.delete(f'/api/songs/{song_id}')
         assert response.status_code == 200
@@ -189,6 +199,7 @@ class TestSongDetailDelete:
 
     def test_delete_song_in_use_fails(self, app, client):
         """Test DELETE on a song used in a round returns 400."""
+        _login(app, client)
         song_id = _create_song(app, title='In-Use Song')
         with app.app_context():
             round_ = Round(
@@ -202,3 +213,19 @@ class TestSongDetailDelete:
         assert response.status_code == 400
         data = response.get_json()
         assert 'error' in data
+
+    def test_update_song_requires_login(self, app, client):
+        """Test PUT requires authentication."""
+        song_id = _create_song(app, title='Anonymous Update Target')
+        response = client.put(
+            f'/api/songs/{song_id}',
+            data=json.dumps({'title': 'Should Not Apply'}),
+            content_type='application/json',
+        )
+        assert response.status_code in (302, 401, 403)
+
+    def test_delete_song_requires_login(self, app, client):
+        """Test DELETE requires authentication."""
+        song_id = _create_song(app, title='Anonymous Delete Target')
+        response = client.delete(f'/api/songs/{song_id}')
+        assert response.status_code in (302, 401, 403)
