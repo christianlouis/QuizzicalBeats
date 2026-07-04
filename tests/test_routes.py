@@ -1,5 +1,10 @@
 """Tests for Flask routes."""
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
+
 import pytest
+from authlib.integrations.base_client.errors import OAuthError
+
 from musicround.models import db, User, Song, Round, Tag
 
 
@@ -197,3 +202,53 @@ class TestAuthenticatedRoutes:
         self._login(app, client)
         response = client.get('/api/songs/search?q=test')
         assert response.status_code == 200
+
+
+class TestSpotifySearchInvalidGrant:
+    """Spotify refresh tokens expire after six months starting 2026-07-20.
+
+    When Authlib's automatic refresh hits invalid_grant during a search, the
+    stored tokens must be discarded and the user sent to reconnect, instead
+    of the error surfacing as a generic failure.
+    """
+
+    def _login_with_spotify(self, app, client):
+        with app.app_context():
+            user = User(username='spotifyuser', email='spotifyuser@example.com')
+            user.password = 'TestPass123!'
+            user.spotify_id = 'spotify-user-1'
+            user.spotify_token = 'old-access-token'
+            user.spotify_refresh_token = 'old-refresh-token'
+            user.spotify_token_expiry = datetime.now() + timedelta(hours=1)
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+        client.post('/users/login', data={
+            'username': 'spotifyuser',
+            'password': 'TestPass123!',
+        })
+        return user_id
+
+    def test_invalid_grant_clears_tokens_and_redirects_to_reconnect(self, app, client):
+        user_id = self._login_with_spotify(app, client)
+
+        # The Spotify OAuth client is only registered when SPOTIFY_CLIENT_ID/SECRET
+        # are configured, so `oauth.spotify` doesn't exist in the test app; patch
+        # it in directly to simulate Authlib raising invalid_grant during refresh.
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.get.side_effect = OAuthError(error='invalid_grant')
+        with patch('musicround.routes.core.oauth.spotify', new=mock_spotify_client, create=True):
+            response = client.post(
+                '/search-results',
+                data={'search_term': 'some song'},
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 302
+        assert 'spotify' in response.headers['Location'].lower()
+
+        with app.app_context():
+            user = db.session.get(User, user_id)
+            assert user.spotify_token is None
+            assert user.spotify_refresh_token is None
+            assert user.spotify_token_expiry is None

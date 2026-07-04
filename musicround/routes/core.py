@@ -14,6 +14,7 @@ import traceback
 from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
 from musicround.helpers.spotify_helper import get_spotify_token, get_spotify_user_info
 from datetime import datetime
+from authlib.integrations.base_client.errors import OAuthError
 
 core_bp = Blueprint('core', __name__)
 
@@ -49,7 +50,7 @@ def search_results():
     if not current_user.spotify_token:
         current_app.logger.warning(f"User {current_user.id} does not have a Spotify token for search.")
         flash("Please connect your Spotify account to search.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+        return redirect(url_for('users.spotify_link'))
 
     # Prepare Authlib token object from current_user
     expires_at_timestamp = None
@@ -170,6 +171,20 @@ def search_results():
                     current_app.logger.info(f"Results found with strategy: {strategy_params}")
                     break 
             
+            except OAuthError as oauth_err:
+                current_app.logger.error(f"OAuth error with search strategy {strategy_params} for user {current_user.id}: {oauth_err}")
+                if oauth_err.error == 'invalid_grant':
+                    current_app.logger.warning(
+                        f"Spotify refresh token revoked/expired (invalid_grant) for user {current_user.id} during search. Clearing tokens."
+                    )
+                    current_user.spotify_token = None
+                    current_user.spotify_refresh_token = None
+                    current_user.spotify_token_expiry = None
+                    current_user.spotify_id = None
+                    db.session.commit()
+                    flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
+                    return redirect(url_for('users.spotify_link'))
+                continue
             except requests.exceptions.HTTPError as http_err:
                 current_app.logger.error(f"HTTP error with search strategy {strategy_params} for user {current_user.id}: {http_err}")
                 if hasattr(http_err, 'response') and http_err.response is not None:
@@ -179,10 +194,10 @@ def search_results():
                         current_user.spotify_token = None
                         current_user.spotify_refresh_token = None
                         current_user.spotify_token_expiry = None
-                        current_user.spotify_id = None 
+                        current_user.spotify_id = None
                         db.session.commit()
                         flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
-                        return redirect(url_for('users.spotify_auth'))
+                        return redirect(url_for('users.spotify_link'))
                 continue
             except Exception as search_error:
                 current_app.logger.error(f"Error with search strategy {strategy_params} for user {current_user.id}: {str(search_error)}")
@@ -237,6 +252,20 @@ def search_results():
                         if results_found:
                             current_app.logger.info(f"Results found with fallback strategy: {strategy_params}")
                             break 
+                except OAuthError as oauth_err:
+                    current_app.logger.error(f"OAuth error with fallback strategy {strategy_params} for user {current_user.id}: {oauth_err}")
+                    if oauth_err.error == 'invalid_grant':
+                        current_app.logger.warning(
+                            f"Spotify refresh token revoked/expired (invalid_grant) for user {current_user.id} during fallback. Clearing tokens."
+                        )
+                        current_user.spotify_token = None
+                        current_user.spotify_refresh_token = None
+                        current_user.spotify_token_expiry = None
+                        current_user.spotify_id = None
+                        db.session.commit()
+                        flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
+                        return redirect(url_for('users.spotify_link'))
+                    continue
                 except requests.exceptions.HTTPError as http_err:
                     current_app.logger.error(f"HTTP error with fallback strategy {strategy_params} for user {current_user.id}: {http_err}")
                     if hasattr(http_err, 'response') and http_err.response is not None:
@@ -249,7 +278,7 @@ def search_results():
                             current_user.spotify_id = None
                             db.session.commit()
                             flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
-                            return redirect(url_for('users.spotify_auth'))
+                            return redirect(url_for('users.spotify_link'))
                     continue
                 except Exception as fallback_error:
                     current_app.logger.error(f"Error with fallback strategy {strategy_params} for user {current_user.id}: {str(fallback_error)}")
@@ -277,7 +306,7 @@ def search_results():
         current_app.logger.error(traceback.format_exc())
         if "token" in str(e).lower() or "auth" in str(e).lower() or "401" in str(e):
              flash("An authentication error occurred with Spotify. Please try reconnecting your account.", "danger")
-             return redirect(url_for('users.spotify_auth'))
+             return redirect(url_for('users.spotify_link'))
         return render_template('error.html', 
                               error_message="An error occurred while searching Spotify.",
                               error_details=str(e),

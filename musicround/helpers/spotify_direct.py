@@ -64,42 +64,73 @@ class SpotifyDirectClient:
             self.logger.info("Saved tokens to cache file")
         except Exception as e:
             self.logger.error(f"Error saving tokens to cache: {e}")
-    
+
+    def _discard_cached_token(self):
+        """Discard the cached token after Spotify reports invalid_grant.
+
+        Spotify refresh tokens expire after six months as of 2026-07-20; once
+        that happens the refresh token is permanently invalid and must not be
+        retried. The user needs to go through the sign-in flow again.
+        """
+        self.access_token = None
+        self.refresh_token = None
+        self.token_expiry = 0
+        if os.path.exists(self.cache_path):
+            try:
+                os.remove(self.cache_path)
+                self.logger.info(f"Removed invalid Spotify token cache at {self.cache_path}")
+            except OSError as e:
+                self.logger.error(f"Failed to remove Spotify token cache: {e}")
+
     def _refresh_access_token(self):
         """Refresh the access token using the refresh token"""
         if not self.refresh_token:
             self.logger.error("No refresh token available. User must log in again.")
             return False
-            
+
         self.logger.info("Refreshing access token...")
-        
+
         data = {
             'grant_type': 'refresh_token',
             'refresh_token': self.refresh_token,
             'client_id': self.client_id,
             'client_secret': self.client_secret
         }
-        
+
         try:
             response = self.session.post(self.token_url, data=data)
+
+            if response.status_code == 400:
+                try:
+                    error_body = response.json()
+                except ValueError:
+                    error_body = {}
+                if error_body.get('error') == 'invalid_grant':
+                    self.logger.error(
+                        "Spotify refresh token is invalid or has expired (invalid_grant); "
+                        "discarding cached token. User must sign in again."
+                    )
+                    self._discard_cached_token()
+                    return False
+
             response.raise_for_status()
-            
+
             token_info = response.json()
             self.access_token = token_info['access_token']
             self.token_expiry = int(time.time()) + token_info['expires_in']
-            
+
             # If new refresh token provided, update it
             if 'refresh_token' in token_info:
                 self.refresh_token = token_info['refresh_token']
-                
+
             # Update cache
             token_info['expires_at'] = self.token_expiry
             if 'refresh_token' not in token_info and self.refresh_token:
                 token_info['refresh_token'] = self.refresh_token
-                
+
             self._save_token_to_cache(token_info)
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error refreshing access token: {e}")
             return False

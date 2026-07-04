@@ -36,7 +36,7 @@ def import_song():
 
     if not current_user.spotify_token:
         flash("Please connect your Spotify account to import songs.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+        return redirect(url_for('users.spotify_link'))
 
     if request.method == 'POST':
         track_id = request.form.get('song_id')
@@ -77,7 +77,7 @@ def import_playlist():
 
     if not current_user.spotify_token:
         flash("Please connect your Spotify account to import playlists.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+        return redirect(url_for('users.spotify_link'))
     
     if request.method == 'POST':
         playlist_id = request.form.get('playlist_id')
@@ -125,7 +125,7 @@ def import_album():
 
     if not current_user.spotify_token:
         flash("Please connect your Spotify account to import albums.", "warning")
-        return redirect(url_for('users.spotify_auth'))
+        return redirect(url_for('users.spotify_link'))
     
     if request.method == 'POST':
         album_id = request.form.get('album_id')

@@ -5,34 +5,93 @@ Provides centralized token refresh functionality similar to Dropbox helper
 import requests
 import time
 from datetime import datetime, timedelta
-from flask import current_app
+from flask import current_app, flash
 from flask_login import current_user
 from musicround.models import db, SystemSetting
 
 
+class SpotifyTokenRevokedError(Exception):
+    """Raised when Spotify reports invalid_grant for a refresh token.
+
+    Spotify refresh tokens expire after six months as of 2026-07-20. Once that
+    happens the refresh token is permanently invalid: it must be discarded
+    and the user must go through the sign-in flow again, not be retried.
+    See https://developer.spotify.com/blog (Developer Blog, 2026-06-18).
+    """
+
+
 def refresh_spotify_token(refresh_token):
-    """Refresh an expired Spotify access token"""
+    """Refresh an expired Spotify access token.
+
+    Returns the token response dict on success, or None on a transient
+    failure (network error, timeout, 5xx) that is safe to retry later.
+
+    Raises:
+        SpotifyTokenRevokedError: Spotify responded with invalid_grant,
+            meaning the refresh token itself is no longer valid and must be
+            discarded rather than retried.
+    """
     client_id = current_app.config.get('SPOTIFY_CLIENT_ID')
     client_secret = current_app.config.get('SPOTIFY_CLIENT_SECRET')
-    
+
     if not client_id or not client_secret:
         current_app.logger.error("Spotify client credentials not configured")
         return None
-    
+
     data = {
         'grant_type': 'refresh_token',
         'refresh_token': refresh_token,
         'client_id': client_id,
         'client_secret': client_secret
     }
-    
-    response = requests.post('https://accounts.spotify.com/api/token', data=data, timeout=10)
-    
+
+    try:
+        response = requests.post('https://accounts.spotify.com/api/token', data=data, timeout=10)
+    except requests.RequestException as e:
+        current_app.logger.error(f"Network error refreshing Spotify token: {e}")
+        return None
+
     if response.status_code == 200:
         return response.json()
-    else:
-        current_app.logger.error(f"Error refreshing Spotify token: {response.text}")
-        return None
+
+    if response.status_code == 400:
+        try:
+            error_body = response.json()
+        except ValueError:
+            error_body = {}
+        if error_body.get('error') == 'invalid_grant':
+            raise SpotifyTokenRevokedError(
+                error_body.get('error_description', 'Spotify refresh token is invalid or has expired')
+            )
+
+    current_app.logger.error(f"Error refreshing Spotify token: {response.status_code} {response.text}")
+    return None
+
+
+def _clear_user_spotify_tokens(user):
+    """Discard a user's Spotify tokens after Spotify reports invalid_grant.
+
+    spotify_id is intentionally kept so the linked-account identity survives;
+    the user only needs to reconnect, not re-link from scratch.
+    """
+    user.spotify_token = None
+    user.spotify_refresh_token = None
+    user.spotify_token_expiry = None
+    db.session.commit()
+    current_app.logger.warning(
+        f"Discarded revoked Spotify refresh token for user {user.id}; user must reconnect Spotify."
+    )
+
+
+def _clear_system_spotify_tokens():
+    """Discard the system fallback Spotify tokens after Spotify reports invalid_grant."""
+    SystemSetting.set('fallback_spotify_refresh_token', '')
+    SystemSetting.set('system_spotify_token', '')
+    SystemSetting.set('system_spotify_token_expiry', '')
+    current_app.logger.error(
+        "Discarded revoked system Spotify fallback refresh token. "
+        "Re-authorize the service account via the admin Spotify token wizard."
+    )
 
 
 def get_current_user_spotify_token():
@@ -52,10 +111,15 @@ def get_current_user_spotify_token():
     # Token is missing or about to expire - try to refresh
     if current_user.spotify_refresh_token:
         current_app.logger.info(f"Refreshing Spotify token for user {current_user.id}")
-        
+
         # Try to refresh the token
-        token_info = refresh_spotify_token(current_user.spotify_refresh_token)
-        
+        try:
+            token_info = refresh_spotify_token(current_user.spotify_refresh_token)
+        except SpotifyTokenRevokedError:
+            _clear_user_spotify_tokens(current_user)
+            flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
+            return None
+
         if token_info and 'access_token' in token_info:
             # Update token in database
             current_user.spotify_token = token_info['access_token']
@@ -99,9 +163,13 @@ def get_system_spotify_token():
     
     # Token is missing or about to expire - try to refresh
     current_app.logger.info("Refreshing system Spotify token")
-    
-    token_info = refresh_spotify_token(system_refresh_token)
-    
+
+    try:
+        token_info = refresh_spotify_token(system_refresh_token)
+    except SpotifyTokenRevokedError:
+        _clear_system_spotify_tokens()
+        return None
+
     if token_info and 'access_token' in token_info:
         # Cache the new token
         new_token = token_info['access_token']
@@ -156,9 +224,16 @@ def refresh_spotify_token_if_needed(token, refresh_token, token_expiry):
     if not refresh_token:
         current_app.logger.error("Token expired but no refresh token available")
         return None, None, None
-    
-    token_info = refresh_spotify_token(refresh_token)
-    
+
+    try:
+        token_info = refresh_spotify_token(refresh_token)
+    except SpotifyTokenRevokedError:
+        current_app.logger.warning(
+            "Spotify refresh token has been revoked/expired; caller must discard "
+            "it and prompt the user to reconnect."
+        )
+        return None, None, None
+
     if token_info and 'access_token' in token_info:
         new_token = token_info['access_token']
         expires_in = token_info.get('expires_in', 3600)
