@@ -120,15 +120,26 @@ class TestApiRoutes:
         response = client.get('/api/songs/search?q=test')
         assert response.status_code in (302, 401, 403)
 
-    def test_spotify_album_without_any_token_returns_401(self, client):
-        """These endpoints used to always 401 (they checked a session key that
-        was never set anywhere). Confirm the no-token case still 401s cleanly."""
+    def test_spotify_album_requires_login(self, client):
+        """These endpoints previously always 401'd (they checked a session key
+        that was never set anywhere), so being unauthenticated was never
+        actually a security boundary. Now that a token can be resolved (and
+        could fall back to the shared system account), they must require
+        login so anonymous callers can't use the service account's token."""
         response = client.get('/api/spotify/album/abc123')
-        assert response.status_code == 401
+        assert response.status_code == 302
+        assert 'login' in response.headers['Location'].lower()
 
     def test_spotify_album_uses_manual_session_bearer_token(self, app, client):
         """A manually-supplied bearer token (users.update_bearer_token) must be
         usable for these endpoints instead of always failing."""
+        with app.app_context():
+            user = User(username='apitokenuser', email='apitokenuser@example.com')
+            user.password = 'TestPass123!'
+            db.session.add(user)
+            db.session.commit()
+        client.post('/users/login', data={'username': 'apitokenuser', 'password': 'TestPass123!'})
+
         with client.session_transaction() as sess:
             sess['access_token'] = 'manually-extracted-token'
             sess['bearer_token_added'] = datetime.now().timestamp()
@@ -285,6 +296,39 @@ class TestSpotifySearchInvalidGrant:
             assert user.spotify_token is None
             assert user.spotify_refresh_token is None
             assert user.spotify_token_expiry is None
+            # The linked-account identity must survive; the user only needs
+            # to reconnect, not re-link their Spotify account from scratch.
+            assert user.spotify_id == 'spotify-user-1'
+
+    def test_401_during_search_clears_tokens_but_keeps_spotify_id(self, app, client):
+        """A plain 401 (not an OAuthError) on the user's own token must clear
+        the token/refresh_token/expiry but must not unlink the account."""
+        user_id = self._login_with_spotify(app, client)
+
+        import requests
+        fake_401_response = MagicMock()
+        fake_401_response.status_code = 401
+        fake_401_response.text = 'invalid token'
+        http_error = requests.exceptions.HTTPError(response=fake_401_response)
+
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.get.side_effect = http_error
+        mock_spotify_client.token = None
+        with patch('musicround.routes.core.oauth.spotify', new=mock_spotify_client, create=True):
+            response = client.post(
+                '/search-results',
+                data={'search_term': 'some song'},
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 302
+
+        with app.app_context():
+            user = db.session.get(User, user_id)
+            assert user.spotify_token is None
+            assert user.spotify_refresh_token is None
+            assert user.spotify_token_expiry is None
+            assert user.spotify_id == 'spotify-user-1'
 
 
 class TestSpotifySearchManualTokenPriority:

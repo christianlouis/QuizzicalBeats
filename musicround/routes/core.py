@@ -4,7 +4,6 @@ Core routes for the Music Round application
 import os
 import json
 import time
-import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session, jsonify, abort, send_from_directory
 from flask_login import login_required, current_user
 from musicround.models import db, Round, Song
@@ -191,10 +190,11 @@ def search_results():
                     # invalid_grant can only occur here when Authlib attempted a
                     # refresh, which only happens for the user's own token (see
                     # authlib_token construction above) - so token_source == 'user'.
+                    # spotify_id is kept so the linked-account identity survives;
+                    # the user only needs to reconnect, not re-link from scratch.
                     current_user.spotify_token = None
                     current_user.spotify_refresh_token = None
                     current_user.spotify_token_expiry = None
-                    current_user.spotify_id = None
                     db.session.commit()
                     flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
                     return redirect(url_for('users.spotify_link'))
@@ -209,7 +209,6 @@ def search_results():
                             current_user.spotify_token = None
                             current_user.spotify_refresh_token = None
                             current_user.spotify_token_expiry = None
-                            current_user.spotify_id = None
                             db.session.commit()
                             flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
                         else:
@@ -280,10 +279,10 @@ def search_results():
                             f"Spotify refresh token revoked/expired (invalid_grant) for user {current_user.id} during fallback. Clearing tokens."
                         )
                         # Only reachable for token_source == 'user' (see note above).
+                        # spotify_id is kept so the linked-account identity survives.
                         current_user.spotify_token = None
                         current_user.spotify_refresh_token = None
                         current_user.spotify_token_expiry = None
-                        current_user.spotify_id = None
                         db.session.commit()
                         flash("Your Spotify connection has expired. Please reconnect your Spotify account.", "warning")
                         return redirect(url_for('users.spotify_link'))
@@ -298,7 +297,6 @@ def search_results():
                                 current_user.spotify_token = None
                                 current_user.spotify_refresh_token = None
                                 current_user.spotify_token_expiry = None
-                                current_user.spotify_id = None
                                 db.session.commit()
                                 flash("Your Spotify session has expired or is invalid. Please reconnect your Spotify account.", "warning")
                             else:

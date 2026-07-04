@@ -148,7 +148,7 @@ def import_official_playlists():
             current_user.spotify_token_expiry.timestamp() if current_user.spotify_token_expiry else None
         )
         auth_token['refresh_token'] = current_user.spotify_refresh_token
-      # Handle POST request for importing a playlist
+    # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
         

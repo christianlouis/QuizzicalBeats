@@ -425,6 +425,7 @@ def get_songs_by_tag(tag_id):
     })
 
 @api_bp.route('/spotify/album/<album_id>', methods=['GET'])
+@login_required
 def get_spotify_album(album_id):
     try:
         # Check for Spotify access token
@@ -480,6 +481,7 @@ def get_spotify_album(album_id):
         return jsonify({'error': 'Unable to fetch album details'}), 500
 
 @api_bp.route('/spotify/playlist/<playlist_id>', methods=['GET'])
+@login_required
 def get_spotify_playlist(playlist_id):
     try:
         # Check for Spotify access token
