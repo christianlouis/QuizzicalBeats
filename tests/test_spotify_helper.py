@@ -215,3 +215,92 @@ class TestRefreshSpotifyTokenIfNeeded:
                 result = spotify_helper.refresh_spotify_token_if_needed('token', 'refresh', expiry)
                 assert result == ('token', 'refresh', expiry)
                 mock_refresh.assert_not_called()
+
+
+class TestManualSpotifyBearerToken:
+    """A user can temporarily supply their own bearer token (e.g. extracted
+    from a Spotify web session) to use instead of this app's own tokens.
+    """
+
+    def test_no_token_in_session_returns_none(self, app):
+        with app.test_request_context('/'):
+            assert spotify_helper.get_manual_spotify_bearer_token() is None
+
+    def test_fresh_token_is_returned(self, app):
+        with app.test_request_context('/'):
+            from flask import session
+            session['access_token'] = 'manually-extracted-token'
+            session['bearer_token_added'] = datetime.now().timestamp()
+            assert spotify_helper.get_manual_spotify_bearer_token() == 'manually-extracted-token'
+
+    def test_expired_token_is_ignored(self, app):
+        with app.test_request_context('/'):
+            from flask import session
+            session['access_token'] = 'stale-token'
+            session['bearer_token_added'] = (datetime.now() - timedelta(hours=2)).timestamp()
+            assert spotify_helper.get_manual_spotify_bearer_token() is None
+
+    def test_token_without_timestamp_is_trusted(self, app):
+        """Defensive: a token set without bearer_token_added shouldn't be dropped."""
+        with app.test_request_context('/'):
+            from flask import session
+            session['access_token'] = 'manually-extracted-token'
+            assert spotify_helper.get_manual_spotify_bearer_token() == 'manually-extracted-token'
+
+
+class TestGetSpotifyTokenPriority:
+    """get_spotify_token() must prefer: manual session token > user's own
+    token > system fallback token, so a user can override both the app-wide
+    fallback and their own linked account with a token they supply themselves.
+    """
+
+    def test_manual_token_wins_over_user_and_system(self, app):
+        with app.test_request_context('/'):
+            from flask import session
+            session['access_token'] = 'manual-token'
+            session['bearer_token_added'] = datetime.now().timestamp()
+
+            with patch('musicround.helpers.spotify_helper.get_current_user_spotify_token') as mock_user, \
+                 patch('musicround.helpers.spotify_helper.get_system_spotify_token') as mock_system:
+                mock_user.return_value = 'user-token'
+                mock_system.return_value = 'system-token'
+
+                token, source = spotify_helper.get_spotify_token()
+
+                assert (token, source) == ('manual-token', 'manual')
+                mock_user.assert_not_called()
+                mock_system.assert_not_called()
+
+    def test_user_token_wins_over_system_when_no_manual_token(self, app):
+        with app.test_request_context('/'):
+            with patch('musicround.helpers.spotify_helper.get_current_user_spotify_token') as mock_user, \
+                 patch('musicround.helpers.spotify_helper.get_system_spotify_token') as mock_system:
+                mock_user.return_value = 'user-token'
+                mock_system.return_value = 'system-token'
+
+                token, source = spotify_helper.get_spotify_token()
+
+                assert (token, source) == ('user-token', 'user')
+                mock_system.assert_not_called()
+
+    def test_system_token_used_when_no_manual_or_user_token(self, app):
+        with app.test_request_context('/'):
+            with patch('musicround.helpers.spotify_helper.get_current_user_spotify_token') as mock_user, \
+                 patch('musicround.helpers.spotify_helper.get_system_spotify_token') as mock_system:
+                mock_user.return_value = None
+                mock_system.return_value = 'system-token'
+
+                token, source = spotify_helper.get_spotify_token()
+
+                assert (token, source) == ('system-token', 'system')
+
+    def test_none_when_nothing_available(self, app):
+        with app.test_request_context('/'):
+            with patch('musicround.helpers.spotify_helper.get_current_user_spotify_token') as mock_user, \
+                 patch('musicround.helpers.spotify_helper.get_system_spotify_token') as mock_system:
+                mock_user.return_value = None
+                mock_system.return_value = None
+
+                token, source = spotify_helper.get_spotify_token()
+
+                assert (token, source) == (None, 'none')

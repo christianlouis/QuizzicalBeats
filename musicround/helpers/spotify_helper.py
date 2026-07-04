@@ -5,9 +5,17 @@ Provides centralized token refresh functionality similar to Dropbox helper
 import requests
 import time
 from datetime import datetime, timedelta
-from flask import current_app, flash
+from flask import current_app, flash, session
 from flask_login import current_user
 from musicround.models import db, SystemSetting
+
+# How long a manually-supplied bearer token (see update_bearer_token) is
+# trusted for. These tokens aren't obtained through this app's OAuth client
+# (e.g. they may be extracted directly from a Spotify web session) so there
+# is no refresh_token and no way to renew them automatically; treat them as
+# valid for a normal Spotify access-token lifetime and require the user to
+# resupply a fresh one afterwards.
+MANUAL_BEARER_TOKEN_TTL_SECONDS = 3600
 
 
 class SpotifyTokenRevokedError(Exception):
@@ -191,21 +199,52 @@ def get_system_spotify_token():
     return None
 
 
+def get_manual_spotify_bearer_token():
+    """Return a user-supplied Spotify bearer token from the session, if present and not expired.
+
+    This lets a user temporarily use a token they obtained themselves (e.g.
+    extracted from a Spotify web session) instead of this app's own OAuth
+    tokens - useful when that token carries scopes/permissions an app-issued
+    token can't get. Set via users.update_bearer_token; there is no refresh
+    token for these, so they simply expire after MANUAL_BEARER_TOKEN_TTL_SECONDS.
+    """
+    token = session.get('access_token')
+    if not token:
+        return None
+
+    added = session.get('bearer_token_added')
+    if added is not None:
+        try:
+            age_seconds = datetime.now().timestamp() - float(added)
+        except (TypeError, ValueError):
+            age_seconds = None
+        if age_seconds is not None and age_seconds > MANUAL_BEARER_TOKEN_TTL_SECONDS:
+            current_app.logger.info("Manually supplied Spotify bearer token has expired; ignoring it.")
+            return None
+
+    return token
+
+
 def get_spotify_token():
     """
-    Get the best available Spotify token with automatic refresh
-    Priority: User token -> System token -> None
+    Get the best available Spotify token with automatic refresh.
+    Priority: manually-supplied session token -> logged-in user's token -> system fallback token -> None
     """
-    # Try user token first
+    # A manually supplied token always wins: the user explicitly asked to use it.
+    manual_token = get_manual_spotify_bearer_token()
+    if manual_token:
+        return manual_token, 'manual'
+
+    # Try user token next
     user_token = get_current_user_spotify_token()
     if user_token:
         return user_token, 'user'
-    
+
     # Fall back to system token
     system_token = get_system_spotify_token()
     if system_token:
         return system_token, 'system'
-    
+
     # No valid tokens available
     current_app.logger.warning("No valid Spotify tokens available")
     return None, 'none'

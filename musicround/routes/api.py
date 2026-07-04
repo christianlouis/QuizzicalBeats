@@ -10,6 +10,7 @@ import logging
 from sqlalchemy import or_
 from flask_login import login_required, current_user
 import requests  # Import requests for direct API calls
+from musicround.helpers.spotify_helper import get_spotify_token
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -427,14 +428,14 @@ def get_songs_by_tag(tag_id):
 def get_spotify_album(album_id):
     try:
         # Check for Spotify access token
-        if 'spotify_token' not in session:  # Assuming token will be stored as 'spotify_token' in session
-            return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
-        
-        access_token = session['spotify_token']
+        access_token, _token_source = get_spotify_token()
+        if not access_token:
+            return jsonify({'error': 'No Spotify token available. Please authenticate with Spotify.'}), 401
+
         headers = {
             'Authorization': f'Bearer {access_token}'
         }
-        
+
         # Get album details
         album_url = f'https://api.spotify.com/v1/albums/{album_id}'
         album_response = requests.get(album_url, headers=headers)
@@ -482,10 +483,10 @@ def get_spotify_album(album_id):
 def get_spotify_playlist(playlist_id):
     try:
         # Check for Spotify access token
-        if 'spotify_token' not in session:  # Assuming token will be stored as 'spotify_token' in session
-            return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
+        access_token, _token_source = get_spotify_token()
+        if not access_token:
+            return jsonify({'error': 'No Spotify token available. Please authenticate with Spotify.'}), 401
 
-        access_token = session['spotify_token']
         headers = {
             'Authorization': f'Bearer {access_token}'
         }
@@ -567,10 +568,10 @@ def spotify_search():
     if not query:
         return jsonify({"error": "Search query cannot be empty"}), 400
 
-    if 'spotify_token' not in session:
-        return jsonify({'error': 'Spotify token not found in session. Please authenticate with Spotify.'}), 401
+    access_token, _token_source = get_spotify_token()
+    if not access_token:
+        return jsonify({'error': 'No Spotify token available. Please authenticate with Spotify.'}), 401
 
-    access_token = session['spotify_token']
     headers = {
         'Authorization': f'Bearer {access_token}'
     }

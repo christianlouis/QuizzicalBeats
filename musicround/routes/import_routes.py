@@ -11,6 +11,7 @@ from musicround.models import Song, db
 from musicround.routes.import_songs import import_pl
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.auth_helpers import oauth
+from musicround.helpers.spotify_helper import get_spotify_token
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
 
@@ -128,18 +129,25 @@ def filter_playlists_by_keywords(playlists, keywords, debug_info=None):
 @import_bp.route('/official-playlists', methods=['GET', 'POST'])
 def import_official_playlists():
     """Display and import official Spotify playlists from multiple regional accounts"""
-    # Ensure user is logged in and has a Spotify token in session or on their user object
-    auth_token = session.get('spotify_token')  # Attempt to get token from session
-    if not auth_token and current_user.is_authenticated and current_user.spotify_token:
-        auth_token = {
-            'access_token': current_user.spotify_token,
-            'token_type': 'Bearer',
-            'expires_at': current_user.spotify_token_expiry.timestamp() if current_user.spotify_token_expiry else None,
-            'refresh_token': current_user.spotify_refresh_token
-        }
-    elif not auth_token:
+    # Resolve the best available Spotify token: a manually-supplied bearer token
+    # (see users.update_bearer_token) takes priority, then the logged-in user's
+    # own token, then the system fallback account.
+    access_token, token_source = get_spotify_token()
+    if not access_token:
         flash("No active Spotify session. Please connect your Spotify account.", "warning")
         return redirect(url_for('users.spotify_link'))
+
+    auth_token = {
+        'access_token': access_token,
+        'token_type': 'Bearer',
+    }
+    if token_source == 'user':
+        # Only the user's own token has a refresh_token Authlib can use to
+        # auto-refresh; manual and system tokens are used as-is.
+        auth_token['expires_at'] = (
+            current_user.spotify_token_expiry.timestamp() if current_user.spotify_token_expiry else None
+        )
+        auth_token['refresh_token'] = current_user.spotify_refresh_token
       # Handle POST request for importing a playlist
     if request.method == 'POST':
         playlist_id = request.form['playlist_id']
@@ -200,7 +208,7 @@ def import_official_playlists():
         'matched_keywords': {},
         'query_time_ms': 0,
         'duplicates_removed': 0,
-        'token_source': 'user_session_or_db' if auth_token.get('access_token') == session.get('spotify_token', {}).get('access_token') or (current_user.is_authenticated and auth_token.get('access_token') == current_user.spotify_token) else 'unknown'
+        'token_source': token_source,
     }
     
     # Initialize playlists list

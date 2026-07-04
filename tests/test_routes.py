@@ -120,6 +120,39 @@ class TestApiRoutes:
         response = client.get('/api/songs/search?q=test')
         assert response.status_code in (302, 401, 403)
 
+    def test_spotify_album_without_any_token_returns_401(self, client):
+        """These endpoints used to always 401 (they checked a session key that
+        was never set anywhere). Confirm the no-token case still 401s cleanly."""
+        response = client.get('/api/spotify/album/abc123')
+        assert response.status_code == 401
+
+    def test_spotify_album_uses_manual_session_bearer_token(self, app, client):
+        """A manually-supplied bearer token (users.update_bearer_token) must be
+        usable for these endpoints instead of always failing."""
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'manually-extracted-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+
+        fake_album = {
+            'id': 'abc123', 'name': 'Test Album', 'artists': [{'name': 'Test Artist'}],
+            'release_date': '2020-01-01', 'images': [], 'total_tracks': 1,
+        }
+        fake_tracks = {'items': [{'name': 'Track 1', 'artists': [{'name': 'Test Artist'}],
+                                  'duration_ms': 1000, 'track_number': 1}]}
+
+        def fake_get(url, headers=None, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = fake_tracks if 'tracks' in url else fake_album
+            return resp
+
+        with patch('musicround.routes.api.requests.get', side_effect=fake_get) as mock_get:
+            response = client.get('/api/spotify/album/abc123')
+
+        assert response.status_code == 200
+        # The manually-supplied token must be the one used for the request.
+        assert mock_get.call_args_list[0].kwargs['headers']['Authorization'] == 'Bearer manually-extracted-token'
+
 
 class TestRoundsRoutes:
     """Tests for rounds blueprint routes."""
@@ -252,3 +285,77 @@ class TestSpotifySearchInvalidGrant:
             assert user.spotify_token is None
             assert user.spotify_refresh_token is None
             assert user.spotify_token_expiry is None
+
+
+class TestSpotifySearchManualTokenPriority:
+    """A manually-supplied session bearer token (e.g. extracted from a
+    Spotify web session, see users.update_bearer_token) must be used instead
+    of the user's own linked Spotify account, and a failure with it must not
+    touch that account's stored tokens.
+    """
+
+    def _login_with_spotify(self, app, client):
+        with app.app_context():
+            user = User(username='manualtokenuser', email='manualtokenuser@example.com')
+            user.password = 'TestPass123!'
+            user.spotify_id = 'spotify-user-1'
+            user.spotify_token = 'db-access-token'
+            user.spotify_refresh_token = 'db-refresh-token'
+            user.spotify_token_expiry = datetime.now() + timedelta(hours=1)
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.id
+        client.post('/users/login', data={
+            'username': 'manualtokenuser',
+            'password': 'TestPass123!',
+        })
+        return user_id
+
+    def test_manual_session_token_used_instead_of_users_db_token(self, app, client):
+        self._login_with_spotify(app, client)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'manually-extracted-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json.return_value = {
+            'tracks': {'items': []}, 'albums': {'items': []}, 'playlists': {'items': []}
+        }
+
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.get.return_value = fake_response
+        mock_spotify_client.token = None
+        with patch('musicround.routes.core.oauth.spotify', new=mock_spotify_client, create=True):
+            client.post('/search-results', data={'search_term': 'some song'})
+
+        # The manual token, not the user's own DB token, must have been used,
+        # and with no refresh_token so Authlib won't try to auto-refresh it.
+        used_token = mock_spotify_client.get.call_args_list[0].kwargs['token']
+        assert used_token['access_token'] == 'manually-extracted-token'
+        assert used_token['refresh_token'] is None
+
+    def test_manual_token_401_does_not_clear_users_db_tokens(self, app, client):
+        user_id = self._login_with_spotify(app, client)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'manually-extracted-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+
+        import requests
+        fake_401_response = MagicMock()
+        fake_401_response.status_code = 401
+        fake_401_response.text = 'invalid token'
+        http_error = requests.exceptions.HTTPError(response=fake_401_response)
+
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.get.side_effect = http_error
+        mock_spotify_client.token = None
+        with patch('musicround.routes.core.oauth.spotify', new=mock_spotify_client, create=True):
+            client.post('/search-results', data={'search_term': 'some song'}, follow_redirects=False)
+
+        with app.app_context():
+            user = db.session.get(User, user_id)
+            # Only the manually-supplied token was bad - the user's own linked
+            # Spotify account must be left untouched.
+            assert user.spotify_token == 'db-access-token'
+            assert user.spotify_refresh_token == 'db-refresh-token'
