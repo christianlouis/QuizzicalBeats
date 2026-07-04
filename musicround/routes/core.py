@@ -115,9 +115,11 @@ def search_results():
                 if (token_source == 'user' and oauth.spotify.token
                         and oauth.spotify.token.get('access_token') != authlib_token.get('access_token')):
                     current_app.logger.info(f"Spotify token refreshed for user {current_user.id}.")
-                    if update_oauth_tokens(current_user, oauth.spotify.token, 'spotify'):
+                    refreshed_token = dict(oauth.spotify.token)
+                    refreshed_token.setdefault('refresh_token', current_user.spotify_refresh_token)
+                    if update_oauth_tokens(current_user, refreshed_token, 'spotify'):
                         # Update the local authlib_token variable to use the new token for subsequent requests in this function
-                        authlib_token = oauth.spotify.token
+                        authlib_token = refreshed_token
                         current_app.logger.info(f"Refreshed Spotify token saved and authlib_token updated for user {current_user.id}.")
                     else:
                         current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id}.")
@@ -241,9 +243,11 @@ def search_results():
                     if (token_source == 'user' and oauth.spotify.token
                             and oauth.spotify.token.get('access_token') != authlib_token.get('access_token')):
                         current_app.logger.info(f"Spotify token refreshed during fallback for user {current_user.id}.")
-                        if update_oauth_tokens(current_user, oauth.spotify.token, 'spotify'):
+                        refreshed_token = dict(oauth.spotify.token)
+                        refreshed_token.setdefault('refresh_token', current_user.spotify_refresh_token)
+                        if update_oauth_tokens(current_user, refreshed_token, 'spotify'):
                             # Update the local authlib_token variable
-                            authlib_token = oauth.spotify.token
+                            authlib_token = refreshed_token
                             current_app.logger.info(f"Refreshed Spotify token saved (fallback) and authlib_token updated for user {current_user.id}.")
                         else:
                              current_app.logger.error(f"Failed to save refreshed Spotify token (fallback) for user {current_user.id}.")

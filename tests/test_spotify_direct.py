@@ -75,6 +75,20 @@ class TestRefreshAccessToken:
 
         assert result is True
         assert client.access_token == 'new-token'
+        mock_post.assert_called_once_with(
+            client.token_url,
+            data={
+                'grant_type': 'refresh_token',
+                'refresh_token': 'old-refresh',
+                'client_id': 'cid',
+                'client_secret': 'secret',
+            },
+            timeout=10,
+        )
+        cached = json.loads(cache_path.read_text())
+        assert cached['access_token'] == 'new-token'
+        assert cached['refresh_token'] == 'old-refresh'
+        assert cached['expires_at'] == client.token_expiry
 
     def test_no_refresh_token_returns_false(self, direct_client):
         client, _ = direct_client

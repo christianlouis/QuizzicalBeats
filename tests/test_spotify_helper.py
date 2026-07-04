@@ -240,12 +240,23 @@ class TestManualSpotifyBearerToken:
             session['bearer_token_added'] = (datetime.now() - timedelta(hours=2)).timestamp()
             assert spotify_helper.get_manual_spotify_bearer_token() is None
 
-    def test_token_without_timestamp_is_trusted(self, app):
-        """Defensive: a token set without bearer_token_added shouldn't be dropped."""
+    def test_token_without_timestamp_is_rejected(self, app):
+        """Manual bearer tokens must include an age marker so TTL can be enforced."""
         with app.test_request_context('/'):
             from flask import session
             session['access_token'] = 'manually-extracted-token'
-            assert spotify_helper.get_manual_spotify_bearer_token() == 'manually-extracted-token'
+            assert spotify_helper.get_manual_spotify_bearer_token() is None
+            assert 'access_token' not in session
+
+    def test_token_with_invalid_timestamp_is_rejected(self, app):
+        """Malformed manual bearer-token timestamps must not bypass the TTL."""
+        with app.test_request_context('/'):
+            from flask import session
+            session['access_token'] = 'manually-extracted-token'
+            session['bearer_token_added'] = 'not-a-timestamp'
+            assert spotify_helper.get_manual_spotify_bearer_token() is None
+            assert 'access_token' not in session
+            assert 'bearer_token_added' not in session
 
 
 class TestGetSpotifyTokenPriority:

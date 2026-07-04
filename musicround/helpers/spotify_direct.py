@@ -98,7 +98,7 @@ class SpotifyDirectClient:
         }
 
         try:
-            response = self.session.post(self.token_url, data=data)
+            response = self.session.post(self.token_url, data=data, timeout=10)
 
             if response.status_code == 400:
                 try:

@@ -213,14 +213,30 @@ def get_manual_spotify_bearer_token():
         return None
 
     added = session.get('bearer_token_added')
-    if added is not None:
-        try:
-            age_seconds = datetime.now().timestamp() - float(added)
-        except (TypeError, ValueError):
-            age_seconds = None
-        if age_seconds is not None and age_seconds > MANUAL_BEARER_TOKEN_TTL_SECONDS:
-            current_app.logger.info("Manually supplied Spotify bearer token has expired; ignoring it.")
-            return None
+    if added is None:
+        current_app.logger.info(
+            "Manually supplied Spotify bearer token has no timestamp; ignoring it."
+        )
+        session.pop('access_token', None)
+        return None
+
+    try:
+        age_seconds = datetime.now().timestamp() - float(added)
+    except (TypeError, ValueError):
+        current_app.logger.info(
+            "Manually supplied Spotify bearer token has invalid timestamp; ignoring it."
+        )
+        session.pop('access_token', None)
+        session.pop('bearer_token_added', None)
+        return None
+
+    if age_seconds > MANUAL_BEARER_TOKEN_TTL_SECONDS:
+        current_app.logger.info(
+            "Manually supplied Spotify bearer token has expired; ignoring it."
+        )
+        session.pop('access_token', None)
+        session.pop('bearer_token_added', None)
+        return None
 
     return token
 
