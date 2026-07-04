@@ -2,10 +2,16 @@
 import pytest
 import threading
 import time
+from datetime import datetime
 from unittest.mock import patch
 
-from musicround.helpers.import_queue import ImportJob, ImportQueue, ImportWorker
-from musicround.models import User, db
+from musicround.helpers.import_queue import (
+    ImportJob,
+    ImportQueue,
+    ImportWorker,
+    enqueue_import_job,
+)
+from musicround.models import ImportJobRecord, User, db
 
 
 class TestImportJob:
@@ -158,6 +164,80 @@ class TestImportQueue:
         assert not errors
         assert len(results) == 5
 
+    def test_enqueue_creates_record_and_queue_snapshot(self, app):
+        """Test enqueue persists a pending job and exposes it in queue status data."""
+        with app.app_context():
+            user = User(username='queueuser', email='queue@example.com')
+            user.password = 'QueuePass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='playlist123',
+                user_id=user.id,
+                priority='4',
+            )
+
+            assert record.id is not None
+            assert record.status == 'pending'
+            assert record.priority == 4
+            assert queue.qsize() == 1
+            snapshot = queue.snapshot()
+            assert snapshot[0]['record_id'] == record.id
+            assert snapshot[0]['item_id'] == 'playlist123'
+
+    def test_enqueue_pending_records_loads_database_jobs(self, app):
+        """Test startup can reload pending jobs from the database."""
+        with app.app_context():
+            user = User(username='pendinguser', email='pending@example.com')
+            user.password = 'QueuePass123!'
+            db.session.add(user)
+            db.session.flush()
+            record = ImportJobRecord(
+                service_name='deezer',
+                item_type='album',
+                item_id='album123',
+                user_id=user.id,
+                priority=2,
+                status='pending',
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            queue = ImportQueue()
+            assert queue.enqueue_pending_records() == 1
+            job = queue.get_job(timeout=0.1)
+            assert job.record_id == record.id
+            assert job.item_id == 'album123'
+
+    def test_mark_abandoned_processing_records_fails_stale_jobs(self, app):
+        """Test processing jobs left behind by a restart get a visible failure."""
+        with app.app_context():
+            user = User(username='staleuser', email='stale@example.com')
+            user.password = 'QueuePass123!'
+            db.session.add(user)
+            db.session.flush()
+            record = ImportJobRecord(
+                service_name='spotify',
+                item_type='playlist',
+                item_id='stale',
+                user_id=user.id,
+                status='processing',
+                started_at=datetime(2026, 1, 1, 12, 0, 0),
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            queue = ImportQueue()
+            assert queue.mark_abandoned_processing_records() == 1
+            updated = ImportJobRecord.query.get(record.id)
+            assert updated.status == 'failed'
+            assert 'restarted' in updated.error_message
+
 
 class TestImportWorker:
     """Tests for ImportWorker job processing."""
@@ -183,6 +263,68 @@ class TestImportWorker:
                 worker._process_job(job)
 
             mock_import.assert_called_once_with('deezer', 'track', '123')
+
+    def test_process_job_updates_record_status(self, app):
+        """Test that worker writes processing and completed state to ImportJobRecord."""
+        with app.app_context():
+            user = User(username='recordworker', email='recordworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='deezer',
+                item_type='playlist',
+                item_id='456',
+                user_id=user.id,
+                priority=1,
+            )
+            record_id = record.id
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.return_value = {'imported_count': 3, 'skipped_count': 1}
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record_id)
+            assert updated.status == 'completed'
+            assert updated.started_at is not None
+            assert updated.completed_at is not None
+            assert updated.imported_count == 3
+            assert updated.skipped_count == 1
+
+    def test_process_job_persists_failure_details(self, app):
+        """Test failed imports leave an actionable ImportJobRecord error."""
+        with app.app_context():
+            user = User(username='failworker', email='failworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='bad',
+                user_id=user.id,
+                priority=1,
+            )
+            record_id = record.id
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.side_effect = RuntimeError('Spotify exploded')
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record_id)
+            assert updated.status == 'failed'
+            assert updated.completed_at is not None
+            assert 'Spotify exploded' in updated.error_message
 
     def test_process_job_unknown_user_does_not_import(self, app):
         """Test that jobs for missing users are ignored."""

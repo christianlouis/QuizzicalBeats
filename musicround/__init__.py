@@ -357,16 +357,6 @@ def create_app(config=None):
     from musicround.errors import register_error_handlers
     register_error_handlers(app)
 
-    # Initialize import queue and background workers
-    from musicround.helpers.import_queue import ImportQueue, ImportWorker
-    worker_count = int(os.environ.get('IMPORT_WORKER_COUNT', '2'))
-    import_queue = ImportQueue()
-    workers = [ImportWorker(app, import_queue) for _ in range(worker_count)]
-    for w in workers:
-        w.start()
-    app.config['import_queue'] = import_queue
-    app.config['import_workers'] = workers
-    
     # Try to create database tables if they don't exist
     with app.app_context():
         try:
@@ -377,7 +367,49 @@ def create_app(config=None):
             run_migrations()
         except Exception as e:
             logger.error(f"Error creating database tables during app initialization: {e}")
+
+    # Initialize import queue and background workers after tables/migrations exist.
+    from musicround.helpers.import_queue import ImportQueue, ImportWorker
+    try:
+        worker_count = max(1, int(os.environ.get('IMPORT_WORKER_COUNT', '2')))
+    except ValueError:
+        logger.warning("Invalid IMPORT_WORKER_COUNT value; defaulting to 2")
+        worker_count = 2
+
+    import_queue = ImportQueue()
+    app.config['import_queue'] = import_queue
+
+    with app.app_context():
+        try:
+            abandoned_count = import_queue.mark_abandoned_processing_records()
+            if abandoned_count:
+                logger.warning(
+                    "Marked %s abandoned import job(s) as failed after restart",
+                    abandoned_count,
+                )
+            pending_count = import_queue.enqueue_pending_records()
+            if pending_count:
+                logger.info("Queued %s pending import job(s) from the database", pending_count)
+        except Exception as e:
+            logger.error(f"Error loading pending import jobs: {e}")
+
+    workers_enabled = os.environ.get('IMPORT_WORKERS_ENABLED', 'true').lower() not in (
+        '0',
+        'false',
+        'no',
+    )
+    workers_enabled = workers_enabled and 'PYTEST_CURRENT_TEST' not in os.environ
+
+    workers = []
+    if workers_enabled:
+        workers = [
+            ImportWorker(app, import_queue, worker_id=f"import-worker-{index + 1}")
+            for index in range(worker_count)
+        ]
+        for worker in workers:
+            worker.start()
+    app.config['import_workers'] = workers
+    logger.info("Started %s import worker(s)", len(workers))
     
     # Return the app
     return app
-
