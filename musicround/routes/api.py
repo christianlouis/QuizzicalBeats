@@ -15,60 +15,62 @@ from musicround.helpers.logging_utils import redact_authorization_header
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
-@api_bp.route('/songs/<int:song_id>', methods=['GET', 'PUT', 'DELETE'])
+@api_bp.route('/songs/<int:song_id>', methods=['GET'])
 def song_detail(song_id):
-    """API endpoint for getting, updating, and deleting song details"""
-    if request.method in {'PUT', 'DELETE'} and not current_user.is_authenticated:
-        return current_app.login_manager.unauthorized()
-
+    """API endpoint for getting song details."""
     song = Song.query.get_or_404(song_id)
-    
-    if request.method == 'GET':
-        # Return song details as JSON
-        tag_list = [{'id': tag.id, 'name': tag.name} for tag in song.tags]
-        
-        return jsonify({
-            'id': song.id,
-            'title': song.title,
-            'artist': song.artist,
-            'genre': song.genre,
-            'year': song.year,
-            'isrc': song.isrc,
-            'popularity': song.popularity,
-            'used_count': song.used_count,
-            'spotify_id': song.spotify_id,
-            'deezer_id': song.deezer_id,
-            'preview_url': song.preview_url,
-            'cover_url': song.cover_url,
-            'spotify_preview_url': song.spotify_preview_url,
-            'deezer_preview_url': song.deezer_preview_url,
-            'apple_preview_url': song.apple_preview_url,
-            'youtube_preview_url': song.youtube_preview_url,
-            'spotify_cover_url': song.spotify_cover_url,
-            'deezer_cover_url': song.deezer_cover_url,
-            'apple_cover_url': song.apple_cover_url,
-            'metadata_sources': song.metadata_sources,
-            'album_name': song.album_name,
-            'source': song.source,
-            'import_date': song.import_date.isoformat() if song.import_date else None,
-            'tags': tag_list,
-            # Add all Spotify audio features
-            'acousticness': song.acousticness,
-            'danceability': song.danceability,
-            'energy': song.energy,
-            'instrumentalness': song.instrumentalness,
-            'key': song.key,
-            'liveness': song.liveness,
-            'loudness': song.loudness,
-            'mode': song.mode,
-            'speechiness': song.speechiness,
-            'tempo': song.tempo,
-            'time_signature': song.time_signature,
-            'valence': song.valence,
-            'duration_ms': song.duration_ms
-        })
-    
-    elif request.method == 'PUT':
+    # Return song details as JSON
+    tag_list = [{'id': tag.id, 'name': tag.name} for tag in song.tags]
+
+    return jsonify({
+        'id': song.id,
+        'title': song.title,
+        'artist': song.artist,
+        'genre': song.genre,
+        'year': song.year,
+        'isrc': song.isrc,
+        'popularity': song.popularity,
+        'used_count': song.used_count,
+        'spotify_id': song.spotify_id,
+        'deezer_id': song.deezer_id,
+        'preview_url': song.preview_url,
+        'cover_url': song.cover_url,
+        'spotify_preview_url': song.spotify_preview_url,
+        'deezer_preview_url': song.deezer_preview_url,
+        'apple_preview_url': song.apple_preview_url,
+        'youtube_preview_url': song.youtube_preview_url,
+        'spotify_cover_url': song.spotify_cover_url,
+        'deezer_cover_url': song.deezer_cover_url,
+        'apple_cover_url': song.apple_cover_url,
+        'metadata_sources': song.metadata_sources,
+        'album_name': song.album_name,
+        'source': song.source,
+        'import_date': song.import_date.isoformat() if song.import_date else None,
+        'tags': tag_list,
+        # Add all Spotify audio features
+        'acousticness': song.acousticness,
+        'danceability': song.danceability,
+        'energy': song.energy,
+        'instrumentalness': song.instrumentalness,
+        'key': song.key,
+        'liveness': song.liveness,
+        'loudness': song.loudness,
+        'mode': song.mode,
+        'speechiness': song.speechiness,
+        'tempo': song.tempo,
+        'time_signature': song.time_signature,
+        'valence': song.valence,
+        'duration_ms': song.duration_ms
+    })
+
+
+@api_bp.route('/songs/<int:song_id>', methods=['PUT', 'DELETE'])
+@login_required
+def mutate_song_detail(song_id):
+    """API endpoint for updating and deleting song details."""
+    song = Song.query.get_or_404(song_id)
+
+    if request.method == 'PUT':
         # Update song details
         data = request.get_json()
         current_app.logger.info(f"Updating song {song_id} with data: {data}")
@@ -122,39 +124,38 @@ def song_detail(song_id):
             'tags': tag_list
         })
         
-    elif request.method == 'DELETE':
-        # Check for exact membership in the comma-separated round song list without
-        # loading every Round row into Python.
-        song_id_token = str(song.id)
-        rounds_with_song = [
-            round_id for (round_id,) in Round.query.with_entities(Round.id).filter(
-                or_(
-                    Round.songs == song_id_token,
-                    Round.songs.like(f'{song_id_token},%'),
-                    Round.songs.like(f'%,{song_id_token},%'),
-                    Round.songs.like(f'%,{song_id_token}'),
-                )
-            ).all()
-        ]
-        
-        if rounds_with_song:
-            # The song is used in rounds, return error
-            return jsonify({
-                'error': 'Cannot delete song as it is used in rounds',
-                'rounds': rounds_with_song
-            }), 400
-        
-        # Delete the song
-        title = song.title
-        artist = song.artist
-        db.session.delete(song)
-        db.session.commit()
-        current_app.logger.info(f"Song {song_id} ({title} by {artist}) deleted successfully")
-        
+    # Check for exact membership in the comma-separated round song list without
+    # loading every Round row into Python.
+    song_id_token = str(song.id)
+    rounds_with_song = [
+        round_id for (round_id,) in Round.query.with_entities(Round.id).filter(
+            or_(
+                Round.songs == song_id_token,
+                Round.songs.like(f'{song_id_token},%'),
+                Round.songs.like(f'%,{song_id_token},%'),
+                Round.songs.like(f'%,{song_id_token}'),
+            )
+        ).all()
+    ]
+
+    if rounds_with_song:
+        # The song is used in rounds, return error
         return jsonify({
-            'message': f"Song '{title}' by {artist} deleted successfully",
-            'id': song_id
-        })
+            'error': 'Cannot delete song as it is used in rounds',
+            'rounds': rounds_with_song
+        }), 400
+
+    # Delete the song
+    title = song.title
+    artist = song.artist
+    db.session.delete(song)
+    db.session.commit()
+    current_app.logger.info(f"Song {song_id} ({title} by {artist}) deleted successfully")
+
+    return jsonify({
+        'message': f"Song '{title}' by {artist} deleted successfully",
+        'id': song_id
+    })
 
 @api_bp.route('/songs/<int:song_id>/refresh-metadata', methods=['POST'])
 @login_required
