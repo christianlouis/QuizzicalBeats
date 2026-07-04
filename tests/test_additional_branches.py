@@ -103,6 +103,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_isrc(self, app, client):
         """Test PUT updates ISRC field."""
+        _create_user(app, 'song_branch_isrc', 'song_branch_isrc@example.com')
+        _login(app, client, 'song_branch_isrc')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -113,6 +115,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_invalid_popularity(self, app, client):
         """Test PUT with invalid popularity value is handled gracefully."""
+        _create_user(app, 'song_branch_popularity', 'song_branch_popularity@example.com')
+        _login(app, client, 'song_branch_popularity')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -123,6 +127,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_spotify_id(self, app, client):
         """Test PUT updates spotify_id."""
+        _create_user(app, 'song_branch_spotify', 'song_branch_spotify@example.com')
+        _login(app, client, 'song_branch_spotify')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -133,6 +139,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_deezer_id(self, app, client):
         """Test PUT updates deezer_id."""
+        _create_user(app, 'song_branch_deezer', 'song_branch_deezer@example.com')
+        _login(app, client, 'song_branch_deezer')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -143,6 +151,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_preview_url(self, app, client):
         """Test PUT updates preview_url."""
+        _create_user(app, 'song_branch_preview', 'song_branch_preview@example.com')
+        _login(app, client, 'song_branch_preview')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -153,6 +163,8 @@ class TestSongApiExtendedBranches:
 
     def test_update_song_cover_url(self, app, client):
         """Test PUT updates cover_url."""
+        _create_user(app, 'song_branch_cover', 'song_branch_cover@example.com')
+        _login(app, client, 'song_branch_cover')
         song_id = self._make_song(app)
         response = client.put(
             f'/api/songs/{song_id}',
@@ -163,6 +175,8 @@ class TestSongApiExtendedBranches:
 
     def test_add_tag_no_data(self, app, client):
         """Test POST /api/songs/<id>/tags with no data returns 400."""
+        _create_user(app, 'song_branch_tag_empty', 'song_branch_tag_empty@example.com')
+        _login(app, client, 'song_branch_tag_empty')
         song_id = self._make_song(app, title='No Tag Data Song')
         response = client.post(
             f'/api/songs/{song_id}/tags',
@@ -173,6 +187,8 @@ class TestSongApiExtendedBranches:
 
     def test_add_tag_already_on_song(self, app, client):
         """Test POST /api/songs/<id>/tags when tag already exists on song."""
+        _create_user(app, 'song_branch_tag_existing', 'song_branch_tag_existing@example.com')
+        _login(app, client, 'song_branch_tag_existing')
         song_id = self._make_song(app, title='Already Tagged Song')
         with app.app_context():
             tag = Tag(name='AlreadyAddedTag')
@@ -195,6 +211,8 @@ class TestSongApiExtendedBranches:
 
     def test_remove_tag_not_on_song(self, app, client):
         """Test DELETE /api/songs/<id>/tags/<tag_id> when tag not on song."""
+        _create_user(app, 'song_branch_tag_remove', 'song_branch_tag_remove@example.com')
+        _login(app, client, 'song_branch_tag_remove')
         song_id = self._make_song(app, title='Untagged Song')
         with app.app_context():
             tag = Tag(name='NotOnSongTag')

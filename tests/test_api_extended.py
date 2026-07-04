@@ -49,6 +49,15 @@ class TestTagsApi:
         assert 'tag' in data
         assert data['tag']['name'] == 'NewTag'
 
+    def test_create_tag_requires_login(self, app, client):
+        """Test POST /api/tags requires authentication."""
+        response = client.post(
+            '/api/tags',
+            data=json.dumps({'name': 'AnonymousTag'}),
+            content_type='application/json',
+        )
+        assert response.status_code in (302, 401, 403)
+
     def test_create_tag_duplicate(self, app, client):
         """Test POST /api/tags returns existing tag if duplicate name."""
         _create_user_and_login(app, client, 'tagdup', 'tagdup@example.com')
@@ -116,6 +125,16 @@ class TestSongTagsApi:
         )
         assert response.status_code in (200, 201)
 
+    def test_add_tag_to_song_requires_login(self, app, client):
+        """Test POST /api/songs/<id>/tags requires authentication."""
+        song_id = _create_song(app, 'AnonymousTagSong', 'Artist')
+        response = client.post(
+            f'/api/songs/{song_id}/tags',
+            data=json.dumps({'tag_name': 'ShouldNotApply'}),
+            content_type='application/json',
+        )
+        assert response.status_code in (302, 401, 403)
+
     def test_add_tag_by_name(self, app, client):
         """Test POST /api/songs/<id>/tags creates and adds tag by name."""
         _create_user_and_login(app, client, 'tagbynameuser', 'tagbyname@example.com')
@@ -156,6 +175,27 @@ class TestSongTagsApi:
 
         response = client.delete(f'/api/songs/{song_id}/tags/{tag_id}')
         assert response.status_code in (200, 204)
+
+    def test_remove_tag_from_song_requires_login(self, app, client):
+        """Test DELETE /api/songs/<id>/tags/<tag_id> requires authentication."""
+        with app.app_context():
+            tag = Tag(name='AnonymousRemoveTag')
+            song = Song(title='AnonymousRemoveSong', artist='A', genre='Pop')
+            db.session.add_all([tag, song])
+            db.session.commit()
+            song.tags.append(tag)
+            db.session.commit()
+            song_id = song.id
+            tag_id = tag.id
+
+        response = client.delete(f'/api/songs/{song_id}/tags/{tag_id}')
+        assert response.status_code in (302, 401, 403)
+
+    def test_refresh_metadata_requires_login(self, app, client):
+        """Test POST /api/songs/<id>/refresh-metadata requires authentication."""
+        song_id = _create_song(app, 'AnonymousRefreshSong', 'Artist')
+        response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+        assert response.status_code in (302, 401, 403)
 
 
 class TestSongSearchApi:
