@@ -67,9 +67,9 @@ class AuthModelView(ModelView):
     column_searchable_list = []
     column_filters = []
     
-    # Enable export to CSV
+    # Keep export formats explicit; JSON export requires optional tablib support.
     can_export = True
-    export_types = ['csv', 'json']
+    export_types = ['csv']
 
 # Enhanced Song ModelView
 class SongModelView(AuthModelView):

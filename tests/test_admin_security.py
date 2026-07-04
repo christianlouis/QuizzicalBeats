@@ -58,25 +58,32 @@ def test_admin_user_list_details_and_export_hide_oauth_tokens(app, client):
 
     list_response = client.get('/admin/user/')
     details_response = client.get(f'/admin/user/details/?id={user_id}')
-    export_response = client.get('/admin/user/export/csv/', buffered=True)
+    csv_export_response = client.get('/admin/user/export/csv/', buffered=True)
+    json_export_response = client.get('/admin/user/export/json/', buffered=True)
 
     assert list_response.status_code == 200
     assert details_response.status_code == 200
-    assert export_response.status_code == 200
+    assert csv_export_response.status_code == 200
+    assert json_export_response.status_code in (302, 404)
     _assert_values_absent(list_response, SENSITIVE_USER_VALUES)
     _assert_values_absent(details_response, SENSITIVE_USER_VALUES)
-    _assert_values_absent(export_response, SENSITIVE_USER_VALUES)
+    _assert_values_absent(csv_export_response, SENSITIVE_USER_VALUES)
+    _assert_values_absent(json_export_response, SENSITIVE_USER_VALUES)
 
 
 def test_admin_system_settings_list_and_export_hide_values(app, client):
     _login_admin(app, client)
     with app.app_context():
         SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+        setting_id = SystemSetting.query.filter_by(key='fallback_spotify_refresh_token').one().id
 
     list_response = client.get('/admin/systemsetting/')
-    export_response = client.get('/admin/systemsetting/export/csv/', buffered=True)
+    details_response = client.get(f'/admin/systemsetting/details/?id={setting_id}')
+    csv_export_response = client.get('/admin/systemsetting/export/csv/', buffered=True)
 
     assert list_response.status_code == 200
-    assert export_response.status_code == 200
+    assert details_response.status_code == 200
+    assert csv_export_response.status_code == 200
     _assert_values_absent(list_response, ['system-refresh-secret'])
-    _assert_values_absent(export_response, ['system-refresh-secret'])
+    _assert_values_absent(details_response, ['system-refresh-secret'])
+    _assert_values_absent(csv_export_response, ['system-refresh-secret'])
