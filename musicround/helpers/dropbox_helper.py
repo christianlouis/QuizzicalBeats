@@ -3,6 +3,7 @@ Helpers for Dropbox API integration
 """
 from flask import current_app, url_for, redirect, session
 from musicround.helpers.auth_helpers import get_oauth_redirect_uri
+from musicround.helpers.logging_utils import redact_authorization_header
 import requests
 import json
 import os
@@ -289,9 +290,12 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
         if mode == 'text' and isinstance(data, str):
             data = data.encode('utf-8')
         
-        # Debug token information
-        token_preview = access_token[:10] + '...' if access_token else 'None'
-        current_app.logger.debug(f"Upload to Dropbox - Path: {dropbox_path}, Token preview: {token_preview}, Data size: {len(data) if data else 0} bytes")
+        current_app.logger.debug(
+            "Upload to Dropbox - Path: %s, Token present: %s, Data size: %s bytes",
+            dropbox_path,
+            bool(access_token),
+            len(data) if data else 0,
+        )
         
         headers = {
             'Authorization': f'Bearer {access_token}',
@@ -304,7 +308,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
             'Content-Type': 'application/octet-stream'
         }
         
-        current_app.logger.debug(f"Dropbox API headers: {headers}")
+        current_app.logger.debug("Dropbox API headers: %s", redact_authorization_header(headers))
         
         response = requests.post(
             'https://content.dropboxapi.com/2/files/upload',
@@ -368,9 +372,11 @@ def create_shared_link(access_token, dropbox_path):
         dropbox_path = '/' + dropbox_path
     
     try:
-        # Debug token information
-        token_preview = access_token[:10] + '...' if access_token else 'None'
-        current_app.logger.debug(f"Creating shared link - Path: {dropbox_path}, Token preview: {token_preview}")
+        current_app.logger.debug(
+            "Creating shared link - Path: %s, Token present: %s",
+            dropbox_path,
+            bool(access_token),
+        )
         
         headers = {
             'Authorization': f'Bearer {access_token}',

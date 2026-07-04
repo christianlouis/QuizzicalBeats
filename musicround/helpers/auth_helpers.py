@@ -7,6 +7,7 @@ from authlib.integrations.flask_client import OAuth
 from functools import wraps
 from datetime import datetime, timedelta
 import requests
+from musicround.helpers.logging_utils import oauth_token_log_summary
 
 # Initialize OAuth object
 oauth = OAuth()
@@ -139,8 +140,10 @@ def get_dropbox_user_info(token):
     Get Dropbox user info from the token
     """
     try:
-        # Add debug logging for token
-        current_app.logger.debug(f"Retrieving Dropbox user info with token: {token}")
+        current_app.logger.debug(
+            "Retrieving Dropbox user info with token metadata: %s",
+            oauth_token_log_summary(token),
+        )
         
         # Make sure we have an access token
         access_token = token.get("access_token")

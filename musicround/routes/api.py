@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from flask_login import login_required, current_user
 import requests  # Import requests for direct API calls
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.helpers.logging_utils import redact_authorization_header
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -890,7 +891,8 @@ def list_dropbox_folders():
         }
         
         current_app.logger.debug(f"Sending request to Dropbox API: {json.dumps(data)}")
-        current_app.logger.debug(f"Using token: {token[:5]}...{token[-5:] if len(token) > 10 else ''}")
+        current_app.logger.debug("Dropbox list_folder token present: %s", bool(token))
+        current_app.logger.debug("Dropbox list_folder headers: %s", redact_authorization_header(headers))
         
         response = requests.post(
             'https://api.dropboxapi.com/2/files/list_folder',

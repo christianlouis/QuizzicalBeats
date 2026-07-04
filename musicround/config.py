@@ -16,7 +16,6 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 class Config:
     # Debug settings
     DEBUG = os.getenv("DEBUG", "True") == "True"
-    DEBUG2 = os.getenv("DEBUG2", "False") == "True"
     SECRET_KEY = os.getenv('SECRET_KEY')
     if not SECRET_KEY:
         raise ValueError("SECRET_KEY environment variable must be set. Generate a secure key with: python -c 'import secrets; print(secrets.token_hex(32))'")
@@ -89,6 +88,5 @@ class Config:
     OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")
     OAUTH_AUTHENTIK_URL = os.getenv("OAUTH_AUTHENTIK_URL")
     OAUTH_DROPBOX_URL = os.getenv("OAUTH_DROPBOX_URL")
-
 
 

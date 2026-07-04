@@ -13,6 +13,7 @@ from musicround.config import Config
 from musicround.version import VERSION_INFO, get_version_str
 from datetime import datetime
 from musicround.helpers.auth_helpers import oauth # Import the oauth object
+from musicround.helpers.logging_utils import oauth_token_log_summary
 
 # Initialize SQLAlchemy
 db = SQLAlchemy()
@@ -203,11 +204,20 @@ def create_app(config=None):
         if current_user.is_authenticated:
             if name == 'spotify':
                 token_str = current_user.spotify_token
-                app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Raw token string from DB: {token_str[:150] if token_str else 'None'}...")
+                app.logger.debug(
+                    "_app_fetch_token for Spotify (user %s): Stored token present=%s, length=%s",
+                    current_user.id,
+                    bool(token_str),
+                    len(token_str) if token_str else 0,
+                )
                 if token_str:
                     try:
                         token = json.loads(token_str)
-                        app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Token after json.loads: {{'access_token': 'ACCESS_TOKEN_REDACTED', 'refresh_token': '{'REFRESH_TOKEN_REDACTED' if token.get('refresh_token') else 'None'}', 'expires_at': {token.get('expires_at')}, 'expires_in': {token.get('expires_in')}, 'scope': {token.get('scope')}, 'token_type': '{token.get('token_type')}'}}")
+                        app.logger.debug(
+                            "_app_fetch_token for Spotify (user %s): Token after json.loads: %s",
+                            current_user.id,
+                            oauth_token_log_summary(token),
+                        )
 
                         if 'refresh_token' not in token or not token.get('refresh_token'):
                             if hasattr(current_user, 'spotify_refresh_token') and current_user.spotify_refresh_token:
@@ -245,10 +255,17 @@ def create_app(config=None):
                         if 'expires_in' in token: 
                             del token['expires_in']
 
-                        app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Final token prepared for Authlib: {{'access_token': 'ACCESS_TOKEN_REDACTED', 'refresh_token': '{'REFRESH_TOKEN_REDACTED' if token.get('refresh_token') else 'None'}', 'expires_at': {token.get('expires_at')}, 'token_type': '{token.get('token_type')}', 'scope': {token.get('scope')}}}")
+                        app.logger.debug(
+                            "_app_fetch_token for Spotify (user %s): Final token prepared for Authlib: %s",
+                            current_user.id,
+                            oauth_token_log_summary(token),
+                        )
                         return token
                     except json.JSONDecodeError:
-                        app.logger.error(f"_app_fetch_token for Spotify (user {current_user.id}): Failed to decode token JSON: {token_str[:100]}...")
+                        app.logger.error(
+                            "_app_fetch_token for Spotify (user %s): Failed to decode stored token JSON",
+                            current_user.id,
+                        )
                         return None
                     except Exception as e:
                         app.logger.error(f"_app_fetch_token for Spotify (user {current_user.id}): Error processing token: {str(e)}", exc_info=True)
@@ -264,7 +281,11 @@ def create_app(config=None):
         if name == 'spotify':
             if current_user.is_authenticated:
                 app.logger.info(f"_app_update_token for Spotify (user {current_user.id}): Received new token data to update. Keys: {list(token.keys()) if token else 'None'}")
-                app.logger.debug(f"_app_update_token for Spotify (user {current_user.id}): Full new token: {{'access_token': 'ACCESS_TOKEN_REDACTED', 'refresh_token': '{'REFRESH_TOKEN_REDACTED' if token.get('refresh_token') else 'None'}', 'expires_at': {token.get('expires_at')}, 'token_type': '{token.get('token_type')}', 'scope': {token.get('scope')}}}")
+                app.logger.debug(
+                    "_app_update_token for Spotify (user %s): New token metadata: %s",
+                    current_user.id,
+                    oauth_token_log_summary(token),
+                )
                 
                 current_user.spotify_token = json.dumps(token)
                 
