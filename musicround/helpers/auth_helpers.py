@@ -104,7 +104,8 @@ def get_google_user_info(token):
             'name': profile.get('name'),
             'given_name': profile.get('given_name'),
             'family_name': profile.get('family_name'),
-            'picture': profile.get('picture')
+            'picture': profile.get('picture'),
+            'email_verified': profile.get('email_verified', False),
         }
         
         # Add 'sub' field explicitly for backwards compatibility
@@ -129,7 +130,8 @@ def get_authentik_user_info(token):
             'name': profile.get('name'),
             'given_name': profile.get('given_name', ''),
             'family_name': profile.get('family_name', ''),
-            'picture': profile.get('picture', '')
+            'picture': profile.get('picture', ''),
+            'email_verified': profile.get('email_verified', False),
         }
     except Exception as e:
         current_app.logger.error(f"Error getting Authentik user info: {str(e)}")
@@ -183,13 +185,21 @@ def get_dropbox_user_info(token):
             'name': profile.get('name', {}).get('display_name', ''),
             'given_name': profile.get('name', {}).get('given_name', ''),
             'family_name': profile.get('name', {}).get('surname', ''),
-            'picture': profile.get('profile_photo_url', '')
+            'picture': profile.get('profile_photo_url', ''),
+            'email_verified': profile.get('email_verified', False),
         }
         
         return user_info
     except Exception as e:
         current_app.logger.error(f"Error getting Dropbox user info: {str(e)}")
         return None
+
+def _oauth_email_is_verified(user_info):
+    """Return True only when the provider explicitly verified the email claim."""
+    verified = user_info.get('email_verified')
+    if isinstance(verified, str):
+        return verified.strip().lower() in {'1', 'true', 'yes'}
+    return verified is True
 
 def get_spotify_user_info(token):
     """
@@ -248,12 +258,20 @@ def find_or_create_user(user_info, auth_provider):
     else:
         return None
         
-    # If not found by provider ID, try email
+    # If not found by provider ID, try verified email.
     if user is None and user_info.get('email'):
         user = User.query.filter_by(email=user_info['email']).first()
         
-        # If user exists but doesn't have provider ID, update it
         if user:
+            if not _oauth_email_is_verified(user_info):
+                current_app.logger.warning(
+                    "Refusing to link %s OAuth identity %s to existing user %s because email is not verified",
+                    auth_provider,
+                    user_info.get('id'),
+                    user.username,
+                )
+                return None
+
             if auth_provider == 'google':
                 user.google_id = user_info['id']
             elif auth_provider == 'authentik':

@@ -5,7 +5,7 @@ A provider's refresh response doesn't always include a new refresh_token
 update_oauth_tokens must not clobber a still-valid stored refresh token with
 None just because a given response happened to omit it.
 """
-from musicround.helpers.auth_helpers import update_oauth_tokens
+from musicround.helpers.auth_helpers import find_or_create_user, update_oauth_tokens
 from musicround.models import User, db
 
 
@@ -51,3 +51,58 @@ class TestUpdateOauthTokensPreservesRefreshToken:
             user = _make_user(authentik_refresh_token='old-authentik-refresh')
             update_oauth_tokens(user, {'access_token': 'new-token'}, 'authentik')
             assert user.authentik_refresh_token == 'old-authentik-refresh'
+
+
+class TestFindOrCreateUserEmailLinking:
+    def test_verified_email_match_links_existing_user(self, app):
+        with app.app_context():
+            user = _make_user()
+
+            found = find_or_create_user(
+                {
+                    'id': 'google-sub-123',
+                    'email': user.email,
+                    'email_verified': True,
+                    'given_name': 'OAuth',
+                    'family_name': 'User',
+                },
+                'google',
+            )
+
+            assert found.id == user.id
+            assert User.query.get(user.id).google_id == 'google-sub-123'
+
+    def test_unverified_email_match_does_not_link_existing_user(self, app):
+        with app.app_context():
+            user = _make_user()
+
+            found = find_or_create_user(
+                {
+                    'id': 'google-sub-attacker',
+                    'email': user.email,
+                    'email_verified': False,
+                    'given_name': 'OAuth',
+                    'family_name': 'User',
+                },
+                'google',
+            )
+
+            assert found is None
+            assert User.query.get(user.id).google_id is None
+
+    def test_missing_email_verified_claim_does_not_link_existing_user(self, app):
+        with app.app_context():
+            user = _make_user()
+
+            found = find_or_create_user(
+                {
+                    'id': 'authentik-sub-attacker',
+                    'email': user.email,
+                    'given_name': 'OAuth',
+                    'family_name': 'User',
+                },
+                'authentik',
+            )
+
+            assert found is None
+            assert User.query.get(user.id).authentik_id is None

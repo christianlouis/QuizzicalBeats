@@ -58,6 +58,24 @@ class TestUserModel:
         assert fetched.active is True
         assert fetched.is_admin is False
 
+    @pytest.mark.parametrize('provider_id_field', ['google_id', 'authentik_id', 'dropbox_id'])
+    def test_oauth_provider_ids_are_unique(self, app, provider_id_field):
+        """OAuth provider IDs are login lookup keys and must be unique."""
+        from sqlalchemy.exc import IntegrityError
+
+        user_one = User(username=f'{provider_id_field}1', email=f'{provider_id_field}1@example.com')
+        user_two = User(username=f'{provider_id_field}2', email=f'{provider_id_field}2@example.com')
+        setattr(user_one, provider_id_field, 'provider-user-123')
+        setattr(user_two, provider_id_field, 'provider-user-123')
+
+        db.session.add(user_one)
+        db.session.commit()
+        db.session.add(user_two)
+
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
     def test_password_hashing(self, app):
         """Test that passwords are hashed on assignment."""
         user = User(username='hashtest', email='hash@example.com')
