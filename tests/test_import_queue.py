@@ -5,6 +5,8 @@ import time
 from datetime import datetime
 from unittest.mock import patch
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from musicround.helpers.import_queue import (
     ImportJob,
     ImportQueue,
@@ -342,3 +344,98 @@ class TestImportWorker:
                 worker._process_job(job)
 
             mock_import.assert_not_called()
+
+    def test_process_job_removes_session_when_claim_returns_none(self, app):
+        """Test skipped claimed jobs still clear the worker-scoped session."""
+        with app.app_context():
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=1,
+                record_id=42,
+            )
+
+            with (
+                patch.object(worker, '_claim_record', return_value=None),
+                patch('musicround.helpers.import_queue.db.session.remove') as mock_remove,
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+            ):
+                worker._process_job(job)
+
+            mock_import.assert_not_called()
+            mock_remove.assert_called_once()
+
+    def test_process_job_handles_claim_exception_without_unbound_record(self, app):
+        """Test claim exceptions keep the original worker failure path intact."""
+        with app.app_context():
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=1,
+                record_id=42,
+            )
+
+            with (
+                patch.object(worker, '_claim_record', side_effect=RuntimeError('claim exploded')),
+                patch('musicround.helpers.import_queue.db.session.remove') as mock_remove,
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+            ):
+                worker._process_job(job)
+
+            mock_import.assert_not_called()
+            mock_remove.assert_called_once()
+
+    def test_claim_record_handles_database_errors(self, app):
+        """Test claim failures leave the worker alive and rollback the session."""
+        with app.app_context():
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=1,
+                record_id=42,
+            )
+
+            with (
+                patch(
+                    'musicround.helpers.import_queue.db.session.execute',
+                    side_effect=SQLAlchemyError('database unavailable'),
+                ),
+                patch('musicround.helpers.import_queue.db.session.rollback') as mock_rollback,
+            ):
+                assert worker._claim_record(job) is None
+
+            mock_rollback.assert_called_once()
+
+    def test_claim_record_does_not_commit_unclaimed_record(self, app):
+        """Test a raced claim rolls back instead of committing a no-op update."""
+        with app.app_context():
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='deezer',
+                item_type='track',
+                item_id='123',
+                user_id=1,
+                record_id=42,
+            )
+
+            with (
+                patch('musicround.helpers.import_queue.db.session.execute') as mock_execute,
+                patch('musicround.helpers.import_queue.db.session.commit') as mock_commit,
+                patch('musicround.helpers.import_queue.db.session.rollback') as mock_rollback,
+            ):
+                mock_execute.return_value.rowcount = 0
+
+                assert worker._claim_record(job) is None
+
+            mock_commit.assert_not_called()
+            mock_rollback.assert_called_once()
