@@ -357,4 +357,11 @@ def enqueue_import_job(
     spotify_token: Optional[str] = None,
 ) -> ImportJobRecord:
     """Create and enqueue an import job using the app-wide queue."""
-    return queue.enqueue(service_name, item_type, item_id, user_id, priority, spotify_token=spotify_token)
+    return queue.enqueue(
+        service_name,
+        item_type,
+        item_id,
+        user_id,
+        priority,
+        spotify_token=spotify_token,
+    )

@@ -154,6 +154,68 @@ class TestImportRoutesAccess:
         # Without Spotify token, it may redirect elsewhere; still a valid response
         assert response.status_code in (200, 302)
 
+    def test_official_playlist_queue_passes_resolved_token(self, app, client, monkeypatch):
+        """Official playlist imports should retain the token accepted by the route."""
+        from musicround.routes import import_routes
+
+        captured = {}
+
+        class FakeJob:
+            id = 99
+
+        def fake_enqueue_import_job(**kwargs):
+            captured.update(kwargs)
+            return FakeJob()
+
+        _login(app, client)
+        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setitem(app.config, 'import_queue', object())
+        monkeypatch.setattr(
+            'musicround.helpers.import_queue.enqueue_import_job',
+            fake_enqueue_import_job,
+        )
+
+        response = client.post('/import/official-playlists', data={'playlist_id': 'playlist-123'})
+
+        assert response.status_code == 302
+        assert captured['service_name'] == 'spotify'
+        assert captured['item_type'] == 'playlist'
+        assert captured['item_id'] == 'playlist-123'
+        assert captured['spotify_token'] == 'manual-token'
+
+    def test_direct_official_playlist_queue_passes_direct_token(self, app, client, monkeypatch):
+        """Direct official playlist imports should carry the direct bearer token into the queue."""
+        captured = {}
+
+        class FakeJob:
+            id = 100
+
+        def fake_enqueue_import_job(**kwargs):
+            captured.update(kwargs)
+            return FakeJob()
+
+        _login(app, client)
+        with client.session_transaction() as sess:
+            sess['direct_bearer_token'] = 'direct-token'
+
+        monkeypatch.setitem(app.config, 'import_queue', object())
+        monkeypatch.setattr(
+            'musicround.helpers.spotify_direct.SpotifyDirectClient',
+            lambda bearer_token: object(),
+        )
+        monkeypatch.setattr(
+            'musicround.helpers.import_queue.enqueue_import_job',
+            fake_enqueue_import_job,
+        )
+
+        response = client.post('/import/direct-official-playlists', data={'playlist_id': 'playlist-456'})
+
+        assert response.status_code == 302
+        assert captured['service_name'] == 'spotify'
+        assert captured['item_type'] == 'playlist'
+        assert captured['item_id'] == 'playlist-456'
+        assert captured['spotify_token'] == 'direct-token'
+
     def test_queue_status_requires_login(self, client):
         """Test that queue status requires authentication."""
         response = client.get('/import/queue-status')

@@ -171,6 +171,7 @@ def import_official_playlists():
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
+            spotify_token=access_token,
         )
         flash(f'Official Spotify playlist import queued as job #{job_record.id}.', 'info')
             
@@ -322,6 +323,7 @@ def direct_official_playlists():
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
+            spotify_token=bearer_token,
         )
         flash(f'Direct Spotify playlist import queued as job #{job_record.id}.', 'info')
         
