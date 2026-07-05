@@ -317,6 +317,46 @@ class TestGetRandomSongs:
             result = get_random_songs(5)
         assert len(result) <= 5
 
+    def test_impossible_artist_diversity_returns_unique_songs(self, app):
+        """Test impossible artist diversity does not hang or duplicate songs."""
+        from musicround.routes.generate import get_random_songs
+        _add_songs(app, [
+            {'title': f'Same Artist {i}', 'artist': 'One Artist', 'genre': 'Rock', 'year': 1980 + i}
+            for i in range(8)
+        ])
+
+        with app.app_context():
+            result = get_random_songs(8)
+
+        assert len(result) == 8
+        assert len({song.id for song in result}) == 8
+
+    def test_genre_fallback_does_not_duplicate_only_candidate(self, app):
+        """Test narrow genre fallback never returns the same song twice."""
+        from musicround.routes.generate import get_random_songs_from_genre
+        _add_songs(app, [
+            {'title': 'Only Jazz', 'artist': 'Solo', 'genre': 'Jazz', 'year': 1990},
+        ])
+
+        with app.app_context():
+            result = get_random_songs_from_genre('Jazz', x=2)
+
+        assert len(result) == 1
+        assert len({song.id for song in result}) == len(result)
+
+    def test_decade_fallback_does_not_duplicate_only_candidate(self, app):
+        """Test narrow decade fallback never returns the same song twice."""
+        from musicround.routes.generate import get_random_songs_from_decade
+        _add_songs(app, [
+            {'title': 'Only Eighties', 'artist': 'Solo', 'genre': 'Pop', 'year': 1984},
+        ])
+
+        with app.app_context():
+            result = get_random_songs_from_decade('1980', x=2)
+
+        assert len(result) == 1
+        assert len({song.id for song in result}) == len(result)
+
 
 class TestBuildMusicRoundRoute:
     """Tests for the /build-music-round route."""
