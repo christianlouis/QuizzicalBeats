@@ -31,6 +31,8 @@ def send_email(recipient, subject, body_text, attachments=None):
     mail_username = current_app.config.get('MAIL_USERNAME')
     mail_password = current_app.config.get('MAIL_PASSWORD')
     mail_sender = current_app.config.get('MAIL_SENDER')
+    mail_use_tls = current_app.config.get('MAIL_USE_TLS', False)
+    mail_use_ssl = current_app.config.get('MAIL_USE_SSL', False)
     
     # Check if all email configuration parameters are available
     missing_config = []
@@ -82,9 +84,15 @@ def send_email(recipient, subject, body_text, attachments=None):
 
     try:
         current_app.logger.info(f"Attempting to send email to {recipient} via {mail_host}:{mail_port}")
-        with smtplib.SMTP(mail_host, mail_port, timeout=30) as server:
-            server.starttls()
-            current_app.logger.debug("STARTTLS established")
+        smtp_client = smtplib.SMTP_SSL if mail_use_ssl else smtplib.SMTP
+        with smtp_client(mail_host, mail_port, timeout=30) as server:
+            if mail_use_ssl:
+                current_app.logger.debug("Implicit TLS SMTP connection established")
+            elif mail_use_tls:
+                server.starttls()
+                current_app.logger.debug("STARTTLS established")
+            else:
+                current_app.logger.debug("Plain SMTP connection established")
             server.login(mail_username, mail_password)
             current_app.logger.debug(f"Login successful for {mail_username}")
             server.sendmail(mail_sender, recipient, msg.as_string())

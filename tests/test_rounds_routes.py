@@ -1,7 +1,8 @@
 """Tests for rounds blueprint routes."""
 import pytest
 import json
-from unittest.mock import patch
+from unittest.mock import patch, mock_open
+from flask import jsonify
 from musicround.models import db, User, Song, Round
 
 
@@ -255,3 +256,65 @@ class TestLegacyEmptyRoundRoutes:
         assert response.get_json()['success'] is False
         assert 'no songs' in response.get_json()['message']
         mock_upload.assert_not_called()
+
+
+class TestRoundEmailRoute:
+    """Tests for POST /rounds/<id>/mail."""
+
+    def test_mail_route_returns_mp3_error_without_sending(self, app, client):
+        """Test failed MP3 generation blocks email instead of crashing later."""
+        _login(app, client)
+        round_id = _create_round(app, [])
+
+        def failed_mp3(_round_id):
+            return jsonify({'success': False, 'error': 'Audio boom'}), 400
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.round_mp3', side_effect=failed_mp3), \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['error'] == 'Audio boom'
+        mock_send.assert_not_called()
+
+    def test_mail_route_uses_shared_email_helper_with_attachments(self, app, client):
+        """Test email delivery is delegated to the shared helper."""
+        _login(app, client)
+        song_id = _create_song(app, title='Mailable Song')
+        round_id = _create_round(app, [song_id], name='Mailable Round')
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch('builtins.open', mock_open(read_data=b'ID3 test mp3')), \
+                patch(
+                    'musicround.routes.rounds.send_quiz_email',
+                    return_value=(True, 'sent'),
+                ) as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json() == {'success': True, 'message': 'sent'}
+        mock_send.assert_called_once()
+        recipient, subject, body, attachments = mock_send.call_args.args
+        assert recipient == 'rounds@example.com'
+        assert subject == 'Mailable Round'
+        assert 'Attached please find' in body
+        assert attachments == [
+            {
+                'data': b'%PDF',
+                'filename': f'round_{round_id}.pdf',
+                'mimetype': 'application/pdf',
+            },
+            {
+                'data': b'ID3 test mp3',
+                'filename': f'round_{round_id}.mp3',
+                'mimetype': 'audio/mpeg',
+            },
+        ]

@@ -1,5 +1,4 @@
 import os
-import smtplib
 import shutil
 import base64
 import tempfile
@@ -7,10 +6,6 @@ import requests
 import logging
 from datetime import datetime
 from io import BytesIO
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 import re
 import zipfile
 import io
@@ -23,6 +18,7 @@ from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from musicround.helpers.auth_helpers import oauth
+from musicround.helpers.email_helper import send_email as send_quiz_email
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
@@ -565,7 +561,7 @@ def round_pdf(round_id):
 @login_required
 def send_email(round_id):
     """
-    Generate PDF + MP3, attach them to an email, and send via Postmark.
+    Generate PDF + MP3, attach them to an email, and send via configured SMTP.
     """
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         # For AJAX requests, keep the response consistent
@@ -593,21 +589,28 @@ def send_email(round_id):
         # Call the round_mp3 function but don't return its result yet
         # This will generate the MP3 file at mp3_file_path
         response = round_mp3(round_id)
-        
-        if isinstance(response, str) and response.startswith('Error'):
-            error_msg = response
+
+        response_obj = response
+        status_code = getattr(response, 'status_code', 200)
+        if isinstance(response, tuple):
+            response_obj = response[0]
+            if len(response) > 1 and isinstance(response[1], int):
+                status_code = response[1]
+            else:
+                status_code = getattr(response_obj, 'status_code', 200)
+        if status_code >= 400 or not os.path.exists(mp3_file_path):
+            error_msg = "MP3 generation failed. Please resolve the round audio issues before sending email."
+            try:
+                response_json = response_obj.get_json(silent=True)
+            except Exception:
+                response_json = None
+            if response_json and response_json.get('error'):
+                error_msg = response_json['error']
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return jsonify({'error': error_msg})
             else:
                 flash(error_msg, 'error')
                 return redirect(url_for('rounds.round_detail', round_id=round_id))
-
-    # Get mail configuration from environment variables
-    mail_host = current_app.config.get('MAIL_HOST')
-    mail_port = current_app.config.get('MAIL_PORT')
-    mail_username = current_app.config.get('MAIL_USERNAME')
-    mail_password = current_app.config.get('MAIL_PASSWORD')
-    mail_sender = current_app.config.get('MAIL_SENDER')
     
     # Use the current user's email address as the recipient
     mail_recipient = current_user.email
@@ -622,84 +625,45 @@ def send_email(round_id):
             session['email_error'] = error_msg
             return redirect(url_for('rounds.round_detail', round_id=round_id))
     
-    # Check if all email configuration parameters are available
-    missing_config = []
-    if not mail_host:
-        missing_config.append("MAIL_HOST")
-    if not mail_port:
-        missing_config.append("MAIL_PORT")
-    if not mail_username:
-        missing_config.append("MAIL_USERNAME")
-    if not mail_password:
-        missing_config.append("MAIL_PASSWORD")
-    if not mail_sender:
-        missing_config.append("MAIL_SENDER")
-    
-    if missing_config:
-        missing_params = ", ".join(missing_config)
-        error_msg = f"Email server configuration is incomplete. Missing parameters: {missing_params}. Please check your .env file."
-        current_app.logger.error(f"Email configuration error: {error_msg}")
-        current_app.logger.error(f"Current config values - MAIL_HOST: {'set' if mail_host else 'missing'}, "
-                               f"MAIL_PORT: {'set' if mail_port else 'missing'}, "
-                               f"MAIL_USERNAME: {'set' if mail_username else 'missing'}, "
-                               f"MAIL_PASSWORD: {'set' if mail_password else 'missing'}, "
-                               f"MAIL_SENDER: {'set' if mail_sender else 'missing'}")
-        
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'error': error_msg})
-        else:
-            session['email_error'] = error_msg  # Store the error message in the session
-            return redirect(url_for('rounds.round_detail', round_id=round_id))
-
-    msg = MIMEMultipart()
-    msg['From'] = mail_sender
-    msg['To'] = mail_recipient
-    
     # Get the round name for the subject
     round_title = f'Pub Quiz Round #{round_id}'
     if rnd and rnd.name:
         round_title = rnd.name
-    
-    msg['Subject'] = round_title
-    msg.attach(MIMEText('Attached please find the MP3 and PDF files for the quiz round.', 'plain'))
-
-    # Attach PDF
-    pdf_attachment = MIMEBase('application', 'pdf')
-    pdf_attachment.set_payload(pdf_data)
-    encoders.encode_base64(pdf_attachment)
-    pdf_attachment.add_header('Content-Disposition', f'attachment; filename=round_{round_id}.pdf')
-    msg.attach(pdf_attachment)
-
-    # Attach MP3
-    with open(mp3_file_path, 'rb') as mp3_file:
-        mp3_data = mp3_file.read()
-        mp3_attachment = MIMEBase('audio', 'mpeg')
-        mp3_attachment.set_payload(mp3_data)
-        encoders.encode_base64(mp3_attachment)
-        mp3_attachment.add_header('Content-Disposition', f'attachment; filename=round_{round_id}.mp3')
-        msg.attach(mp3_attachment)
 
     try:
-        current_app.logger.info(f"Attempting to send email to {mail_recipient} via {mail_host}:{mail_port}")
-        with smtplib.SMTP(mail_host, mail_port) as server:
-            server.starttls()
-            current_app.logger.debug("STARTTLS established")
-            server.login(mail_username, mail_password)
-            current_app.logger.debug(f"Login successful for {mail_username}")
-            server.sendmail(mail_sender, mail_recipient, msg.as_string())
-            current_app.logger.info(f"Email sent successfully from {mail_sender} to {mail_recipient}")
-        
-        success_msg = f'Email sent successfully to {mail_recipient}!'
+        with open(mp3_file_path, 'rb') as mp3_file:
+            attachments = [
+                {
+                    'data': pdf_data,
+                    'filename': f'round_{round_id}.pdf',
+                    'mimetype': 'application/pdf',
+                },
+                {
+                    'data': mp3_file.read(),
+                    'filename': f'round_{round_id}.mp3',
+                    'mimetype': 'audio/mpeg',
+                },
+            ]
+
+        success, message = send_quiz_email(
+            mail_recipient,
+            round_title,
+            'Attached please find the MP3 and PDF files for the quiz round.',
+            attachments,
+        )
+        if not success:
+            raise RuntimeError(message)
+
+        success_msg = message
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'success': True, 'message': success_msg})
         else:
             flash(success_msg, 'success')
             return redirect(url_for('rounds.round_detail', round_id=round_id))
             
-    except smtplib.SMTPException as e:
+    except Exception as e:
         error_msg = str(e)
-        current_app.logger.error(f"SMTP Error: {error_msg}")
-        current_app.logger.error(f"Failed to send email from {mail_sender} to {mail_recipient} via {mail_host}:{mail_port}")
+        current_app.logger.error(f"Email send error: {error_msg}")
         
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': error_msg})
