@@ -17,16 +17,17 @@ depends_on = None
 def upgrade():
     # Add new columns to the song table
     op.add_column('song', sa.Column('isrc', sa.String(20), nullable=True))
-    op.add_column('song', sa.Column('album_name', sa.String(100), nullable=True))
-    op.add_column('song', sa.Column('metadata_sources', sa.String(100), nullable=True))
+    op.add_column('song', sa.Column('album_name', sa.String(200), nullable=True))
+    op.add_column('song', sa.Column('metadata_sources', sa.String(500), nullable=True))
     op.add_column('song', sa.Column('import_date', sa.DateTime, nullable=True))
+    op.add_column('song', sa.Column('source', sa.String(20), nullable=True))
     
     # Create index for ISRC
     op.create_index(op.f('ix_song_isrc'), 'song', ['isrc'], unique=False)
     
     # Increase length of existing URL columns
-    op.alter_column('song', 'preview_url', type_=sa.String(255))
-    op.alter_column('song', 'cover_url', type_=sa.String(255))
+    op.alter_column('song', 'preview_url', type_=sa.String(500))
+    op.alter_column('song', 'cover_url', type_=sa.String(500))
 
 def downgrade():
     # Remove the new columns
@@ -35,6 +36,7 @@ def downgrade():
     op.drop_column('song', 'album_name')
     op.drop_column('song', 'metadata_sources')
     op.drop_column('song', 'import_date')
+    op.drop_column('song', 'source')
     
     # Restore original column lengths
     op.alter_column('song', 'preview_url', type_=sa.String(200))
