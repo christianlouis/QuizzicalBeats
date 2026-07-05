@@ -26,6 +26,7 @@ class ImportJob:
     item_type: str = field(compare=False)
     item_id: str = field(compare=False)
     user_id: int = field(compare=False)
+    spotify_token: Optional[str] = field(default=None, compare=False)
     record_id: Optional[int] = field(default=None, compare=False)
 
 
@@ -60,6 +61,7 @@ class ImportQueue:
         item_id: str,
         user_id: int,
         priority: Any = 10,
+        spotify_token: Optional[str] = None,
     ) -> ImportJobRecord:
         """Create a persistent job record and enqueue it for local workers."""
         normalized_priority = self.normalize_priority(priority)
@@ -73,10 +75,10 @@ class ImportQueue:
         )
         db.session.add(record)
         db.session.commit()
-        self.enqueue_record(record)
+        self.enqueue_record(record, spotify_token=spotify_token)
         return record
 
-    def enqueue_record(self, record: ImportJobRecord) -> None:
+    def enqueue_record(self, record: ImportJobRecord, spotify_token: Optional[str] = None) -> None:
         """Enqueue an existing pending job record."""
         self.add_job(
             ImportJob(
@@ -85,6 +87,7 @@ class ImportQueue:
                 item_type=record.item_type,
                 item_id=record.item_id,
                 user_id=record.user_id,
+                spotify_token=spotify_token,
                 record_id=record.id,
             )
         )
@@ -239,7 +242,9 @@ class ImportWorker(threading.Thread):
                 )
                 import_kwargs = {}
                 if job.service_name.lower() == 'spotify':
-                    access_token, _token_source = get_spotify_token()
+                    access_token = job.spotify_token
+                    if not access_token:
+                        access_token, _token_source = get_spotify_token()
                     import_kwargs['spotify_token'] = access_token
 
                 result = ImportHelper.import_item(
@@ -349,6 +354,14 @@ def enqueue_import_job(
     item_id: str,
     user_id: int,
     priority: Any = 10,
+    spotify_token: Optional[str] = None,
 ) -> ImportJobRecord:
     """Create and enqueue an import job using the app-wide queue."""
-    return queue.enqueue(service_name, item_type, item_id, user_id, priority)
+    return queue.enqueue(
+        service_name,
+        item_type,
+        item_id,
+        user_id,
+        priority,
+        spotify_token=spotify_token,
+    )

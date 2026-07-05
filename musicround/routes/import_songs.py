@@ -113,7 +113,7 @@ def import_playlist():
         flash("Please log in to import playlists.", "warning")
         return redirect(url_for('users.login'))
 
-    token_redirect, _spotify_token = _require_spotify_token("playlists")
+    token_redirect, spotify_token = _require_spotify_token("playlists")
     if token_redirect:
         return token_redirect
     
@@ -136,6 +136,7 @@ def import_playlist():
             item_type='playlist',
             item_id=playlist_id,
             user_id=current_user.id,
+            spotify_token=spotify_token,
         )
         flash(f'Playlist import queued as job #{job_record.id}.', 'info')
         return redirect(url_for('core.view_songs'))
