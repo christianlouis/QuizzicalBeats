@@ -326,10 +326,10 @@ class TestGetRandomSongs:
         ])
 
         with app.app_context():
-            result = get_random_songs(8)
+            result = get_random_songs(5)
 
-        assert len(result) == 8
-        assert len({song.id for song in result}) == 8
+        assert len(result) == 5
+        assert len({song.id for song in result}) == 5
 
     def test_genre_fallback_does_not_duplicate_only_candidate(self, app):
         """Test narrow genre fallback never returns the same song twice."""

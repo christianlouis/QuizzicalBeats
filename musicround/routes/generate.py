@@ -165,6 +165,7 @@ def _unique_songs(songs):
     return unique
 
 def _song_decade(song):
+    """Return the song's decade as a string, or None when year is unavailable."""
     if not song.year:
         return None
     return str(song.year)[:3] + '0'
@@ -177,6 +178,7 @@ def _sample_unique_from_preferred(preferred, fallback, x):
 
     preferred_ids = {_song_key(song) for song in preferred}
     fallback = [song for song in _unique_songs(fallback) if _song_key(song) not in preferred_ids]
+    random.shuffle(preferred)
     random.shuffle(fallback)
     return (preferred + fallback)[:x]
 
@@ -207,10 +209,10 @@ def get_random_songs_from_decade(decade, x=5):
 def get_random_songs(x):
     """
     Returns x random songs from the pool of non-overused songs,
-    ensuring some naive diversity constraints:
-     - no artist used more than once
-     - no decade used more than x/3 times
-     - number of unique artists must match number of chosen songs
+    applying best-effort diversity constraints:
+     - prefer no artist used more than once
+     - prefer no decade used more than x/3 times
+     - relax artist and decade constraints when needed to return enough unique songs
     """
     candidates = _unique_songs(get_non_overused_songs())
     random.shuffle(candidates)
