@@ -14,7 +14,7 @@ import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
 from sqlalchemy import or_
-from musicround.models import Round, RoundExport, RoundShare, Song, db
+from musicround.models import Round, RoundAudioScript, RoundExport, RoundShare, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -171,6 +171,35 @@ def _storage_failure_response(round_id, storage_health, status_code=503):
         }), status_code
     flash(error_msg, 'error')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+def _selected_track_hint_audio(round_id):
+    """Load selected per-track hint audio keyed by one-based song position."""
+    hints = {}
+    scripts = (
+        RoundAudioScript.query.filter_by(
+            round_id=round_id,
+            script_type='track_hint',
+            selected=True,
+        )
+        .filter(RoundAudioScript.generated_mp3_path.isnot(None))
+        .order_by(RoundAudioScript.cue_position.asc(), RoundAudioScript.id.asc())
+        .all()
+    )
+    for script in scripts:
+        if not script.cue_position:
+            continue
+        path = os.path.join('/data', script.generated_mp3_path)
+        try:
+            hints[script.cue_position] = AudioSegment.from_mp3(path)
+        except Exception as exc:
+            current_app.logger.warning(
+                "Skipping track hint audio for round %s position %s: %s",
+                round_id,
+                script.cue_position,
+                exc,
+            )
+    return hints
 
 @rounds_bp.route('/')
 @login_required
@@ -339,6 +368,7 @@ def round_mp3(round_id):
         # Store song audio segments for later replay
         song_segments = []
         number_segments = []
+        hint_segments = _selected_track_hint_audio(round_id)
 
         # First pass - append each song's preview with number announcements
         for i, song in enumerate(songs):
@@ -381,6 +411,8 @@ def round_mp3(round_id):
                     
                     # Add to the combined audio for first playthrough
                     combined_audio += number_audio
+                    if i + 1 in hint_segments:
+                        combined_audio += hint_segments[i + 1]
                     combined_audio += song_audio
                 except requests.exceptions.RequestException as e:
                     error_msg = f"Error downloading {song.title} (Deezer ID: {song.deezer_id}): {e}"

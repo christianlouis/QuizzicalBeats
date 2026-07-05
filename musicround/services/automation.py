@@ -1353,11 +1353,29 @@ def _download_preview_audio(
         )
 
 
+def _selected_track_hint_scripts(round_id: int) -> list[RoundAudioScript]:
+    """Return selected generated per-track hints in playback order."""
+    return (
+        RoundAudioScript.query.filter_by(
+            round_id=round_id,
+            script_type="track_hint",
+            selected=True,
+        )
+        .filter(RoundAudioScript.generated_mp3_path.isnot(None))
+        .order_by(RoundAudioScript.cue_position.asc(), RoundAudioScript.id.asc())
+        .all()
+    )
+
+
 def _round_audio_components(
-    user: User, song_count: int
+    user: User, song_count: int, round_id: int | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     issues: list[dict[str, Any]] = []
-    components: dict[str, Any] = {"custom_audio_ms": {}, "number_audio_ms": []}
+    components: dict[str, Any] = {
+        "custom_audio_ms": {},
+        "number_audio_ms": [],
+        "hint_audio_ms": {},
+    }
 
     for mp3_type in ("intro", "replay", "outro"):
         try:
@@ -1382,6 +1400,21 @@ def _round_audio_components(
                     f"Could not load number announcement {index + 1}: {exc}",
                 )
             )
+
+    if round_id is not None:
+        for script in _selected_track_hint_scripts(round_id):
+            if not script.cue_position:
+                continue
+            path = os.path.join("/data", script.generated_mp3_path)
+            try:
+                components["hint_audio_ms"][script.cue_position] = len(AudioSegment.from_mp3(path))
+            except Exception as exc:
+                issues.append(
+                    _quality_issue(
+                        "track_hint_audio_failed",
+                        f"Could not load hint audio for position {script.cue_position}: {exc}",
+                    )
+                )
 
     return components, issues
 
@@ -1688,7 +1721,7 @@ def inspect_round_package(
                     )
             preview_checks.append(check)
 
-    components, component_issues = _round_audio_components(user, len(songs))
+    components, component_issues = _round_audio_components(user, len(songs), round_id=round_id)
     issues.extend(component_issues)
     expected_ms = None
     if not component_issues:
@@ -1698,6 +1731,7 @@ def inspect_round_package(
             + custom_audio_ms.get("replay", 0)
             + custom_audio_ms.get("outro", 0)
             + 2 * sum(components["number_audio_ms"])
+            + sum((components.get("hint_audio_ms") or {}).values())
             + 2 * total_preview_ms
         )
 
@@ -1727,7 +1761,7 @@ def inspect_round_package(
                 (
                     f"Generated MP3 is {actual_seconds:.1f}s, expected about "
                     f"{expected_seconds:.1f}s from intro, replay, outro, number "
-                    "announcements, and two plays of every preview."
+                    "announcements, optional hints, and two plays of every preview."
                 ),
                 details={
                     "actual_seconds": round(actual_seconds, 3),
@@ -2340,6 +2374,7 @@ def _audio_script_summary(script: RoundAudioScript) -> dict[str, Any]:
         "status": script.status,
         "tone": script.tone,
         "theme": script.theme,
+        "cue_position": script.cue_position,
         "quiz_date": _datetime_payload(script.quiz_date),
         "selected": bool(script.selected),
         "generated_mp3_path": script.generated_mp3_path,
@@ -2350,8 +2385,8 @@ def _audio_script_summary(script: RoundAudioScript) -> dict[str, Any]:
 
 def _validate_script_type(script_type: str) -> str:
     normalized = (script_type or "").strip().lower()
-    if normalized not in {"intro", "replay", "outro"}:
-        raise AutomationError("script_type must be intro, replay, or outro.")
+    if normalized not in {"intro", "replay", "outro", "track_hint"}:
+        raise AutomationError("script_type must be intro, replay, outro, or track_hint.")
     return normalized
 
 
@@ -2395,6 +2430,108 @@ def save_round_audio_scripts(
             tone=tone,
             theme=theme,
             quiz_date=parsed_date,
+        )
+        db.session.add(script)
+        created_scripts.append(script)
+    db.session.commit()
+    return {
+        "created": len(created_scripts),
+        "round": _round_summary(round_obj),
+        "scripts": [_audio_script_summary(script) for script in created_scripts],
+    }
+
+
+def _hint_text_for_song(song: Song, position: int, tone: str) -> str:
+    clues: list[str] = [f"Hint for song {position}."]
+    if song.year:
+        clues.append(f"It comes from {song.year}.")
+    if song.genre:
+        clues.append(f"Think {song.genre}.")
+    if song.popularity:
+        clues.append("This one has serious mainstream mileage.")
+    if not song.year and not song.genre:
+        clues.append("Listen for the era, then lock artist and title.")
+    if "funny" in tone.lower() or "humor" in tone.lower() or "humorous" in tone.lower():
+        clues.append("Confidence is welcome; overconfidence is traditional.")
+    return " ".join(clues)
+
+
+def draft_round_track_hints(
+    round_id: int,
+    user_id: int | None = None,
+    tone: str = "concise, playful, no title or artist spoilers",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft per-track hint text that can be played before snippets."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    songs = _ordered_round_songs(round_obj)
+    hints = [
+        {
+            "position": index,
+            "song_id": song.id,
+            "text": _hint_text_for_song(song, index, tone),
+        }
+        for index, song in enumerate(songs, start=1)
+    ]
+    result: dict[str, Any] = {
+        "round": _round_summary(round_obj),
+        "user_id": user.id if user else None,
+        "tone": tone,
+        "hints": hints,
+        "next_step": "Review hints, then call save_round_track_hints and generate_tts_from_script.",
+    }
+    if persist:
+        saved = save_round_track_hints(
+            round_id=round_id,
+            hints=hints,
+            user_id=user.id if user else None,
+            tone=tone,
+            status="draft",
+        )
+        result["script_records"] = saved["scripts"]
+        result["next_step"] = "Approve selected hint scripts, then call generate_tts_from_script for each hint."
+    return result
+
+
+def save_round_track_hints(
+    round_id: int,
+    hints: list[dict[str, Any]],
+    user_id: int | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable per-track hint scripts."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    if not hints:
+        raise AutomationError("hints must include at least one track hint.")
+    song_count = len(round_obj.song_id_list)
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    normalized_status = _validate_script_status(status)
+
+    created_scripts = []
+    for hint in hints:
+        try:
+            position = int(hint.get("position"))
+        except (TypeError, ValueError):
+            raise AutomationError("Each hint needs a numeric position.")
+        if position < 1 or position > song_count:
+            raise AutomationError(f"Hint position {position} is outside this round's song range.")
+        text = (hint.get("text") or "").strip()
+        if not text:
+            raise AutomationError(f"Hint position {position} text must not be empty.")
+        script = RoundAudioScript(
+            round_id=round_obj.id,
+            user_id=user.id if user else None,
+            script_type="track_hint",
+            text=text,
+            status=normalized_status,
+            tone=tone,
+            cue_position=position,
         )
         db.session.add(script)
         created_scripts.append(script)
@@ -2477,16 +2614,37 @@ def generate_tts_from_script(
     if user_id is None:
         raise AutomationError("Script has no user or round owner for audio assignment.")
 
-    generated = generate_tts_snippet(
-        user_id=user_id,
-        mp3_type=script.script_type,
-        text=script.text,
-        service=service,
-        voice=voice,
-        model=model,
-        stability=stability,
-        similarity=similarity,
-    )
+    if script.script_type == "track_hint":
+        user = _find_user(user_id)
+        mp3_type = f"round_{script.round_id}_hint_{script.cue_position or script.id}"
+        path = generate_tts_mp3(
+            text=script.text,
+            username=user.username,
+            mp3_type=mp3_type,
+            service=service,
+            voice=voice,
+            model=model,
+            stability=stability,
+            similarity=similarity,
+        )
+        if not path:
+            raise AutomationError("TTS generation failed.")
+        generated = {
+            "user_id": user.id,
+            "mp3_type": script.script_type,
+            "path": path,
+        }
+    else:
+        generated = generate_tts_snippet(
+            user_id=user_id,
+            mp3_type=script.script_type,
+            text=script.text,
+            service=service,
+            voice=voice,
+            model=model,
+            stability=stability,
+            similarity=similarity,
+        )
     script.generated_mp3_path = generated["path"]
     script.selected = True
     script.status = "used"

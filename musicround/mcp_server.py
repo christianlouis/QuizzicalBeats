@@ -494,6 +494,42 @@ def save_round_audio_scripts(
 
 
 @mcp.tool()
+def draft_round_track_hints(
+    round_id: int,
+    user_id: int | None = None,
+    tone: str = "concise, playful, no title or artist spoilers",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft per-track hint text that can be played before each first-listen snippet."""
+    return _with_app_context(
+        automation.draft_round_track_hints,
+        round_id=round_id,
+        user_id=user_id,
+        tone=tone,
+        persist=persist,
+    )
+
+
+@mcp.tool()
+def save_round_track_hints(
+    round_id: int,
+    hints: list[dict[str, Any]],
+    user_id: int | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable per-track hint scripts with one-based positions."""
+    return _with_app_context(
+        automation.save_round_track_hints,
+        round_id=round_id,
+        hints=hints,
+        user_id=user_id,
+        tone=tone,
+        status=status,
+    )
+
+
+@mcp.tool()
 def list_round_audio_scripts(
     round_id: int | None = None,
     user_id: int | None = None,

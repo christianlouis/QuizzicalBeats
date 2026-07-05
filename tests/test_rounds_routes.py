@@ -3,7 +3,8 @@ import json
 from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
-from musicround.models import db, User, Song, Round, RoundExport, RoundShare
+from pydub import AudioSegment
+from musicround.models import db, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -444,6 +445,75 @@ class TestLegacyEmptyRoundRoutes:
         assert response.get_json()['success'] is False
         assert 'no songs' in response.get_json()['message']
         mock_upload.assert_not_called()
+
+
+class TestRoundMp3Hints:
+    """Tests for optional per-track hint audio in generated MP3s."""
+
+    def test_round_mp3_inserts_selected_track_hint_before_first_play(self, app, client, tmp_path):
+        """Generated MP3 duration should include selected hint audio once."""
+        _login(app, client)
+        song_id = _create_song(app, title='Hinted Song')
+        round_id = _create_round(app, [song_id], name='Hinted Round')
+        with app.app_context():
+            song = db.session.get(Song, song_id)
+            song.deezer_id = 123
+            hint = RoundAudioScript(
+                round_id=round_id,
+                script_type='track_hint',
+                text='A clue before the clip.',
+                status='used',
+                selected=True,
+                cue_position=1,
+                generated_mp3_path='custommp3/roundsuser/round_hint.mp3',
+            )
+            db.session.add(hint)
+            db.session.commit()
+            app.config['ROUND_MP3_DIR'] = str(tmp_path)
+            app.config['deezer'] = type(
+                'FakeDeezer',
+                (),
+                {'get_track': lambda self, deezer_id: {'preview': 'https://example.test/preview.mp3'}},
+            )()
+
+        exported_lengths = []
+
+        def fake_from_mp3(path):
+            path = str(path)
+            if path.endswith('intro.mp3') or path.endswith('replay.mp3') or path.endswith('outro.mp3'):
+                return AudioSegment.silent(duration=1000)
+            if 'song_' in path:
+                return AudioSegment.silent(duration=30000)
+            if path.endswith('1.mp3'):
+                return AudioSegment.silent(duration=100)
+            if path.endswith('round_hint.mp3'):
+                return AudioSegment.silent(duration=2000)
+            return AudioSegment.silent(duration=1)
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=8192):
+                yield b'ID3'
+
+        def fake_export(segment, path, format='mp3'):
+            exported_lengths.append(len(segment))
+            with open(path, 'wb') as handle:
+                handle.write(b'ID3')
+            return None
+
+        with patch('musicround.routes.rounds.AudioSegment.from_mp3', side_effect=fake_from_mp3), \
+                patch('musicround.routes.rounds.requests.get', return_value=FakeResponse()), \
+                patch('pydub.audio_segment.AudioSegment.export', fake_export):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['success'] is True
+        assert exported_lengths == [65200]
 
 
 class TestRoundEmailRoute:

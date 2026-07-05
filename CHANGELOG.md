@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
 - Added readiness and scheduled-delivery badges to the rounds list.
+- Added reviewable per-track hint scripts for music rounds, MCP helpers to draft/save them, TTS generation for hint clips, and MP3 playback support that inserts selected hints before first-listen snippets.
 - Added lazy-loaded preview players in the song library so large libraries do not render one audio element per song.
 - Added visible Spotify reconnect and token-expiry warnings on the profile page.
 - Added import-job retry tracking, dead-letter status, attempt counts, and an idempotent migration for existing databases.

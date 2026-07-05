@@ -245,9 +245,14 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     assert "idx_round_audio_script_round_status" in _index_names(
         database_path, "round_audio_script"
     )
+    assert "idx_round_audio_script_cue" in _index_names(
+        database_path, "round_audio_script"
+    )
+    assert "cue_position" in _column_names(database_path, "round_audio_script")
     assert "user_id" in Round.__table__.columns.keys()
     assert RoundShare.__tablename__ == "round_share"
     assert RoundAudioScript.__tablename__ == "round_audio_script"
+    assert "cue_position" in RoundAudioScript.__table__.columns.keys()
 
 
 def test_round_songs_comment_matches_storage_behavior():

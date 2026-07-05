@@ -92,6 +92,7 @@ def run_migration():
                             status VARCHAR(20) NOT NULL DEFAULT 'draft',
                             tone VARCHAR(200),
                             theme VARCHAR(200),
+                            cue_position INTEGER,
                             quiz_date DATETIME,
                             selected BOOLEAN NOT NULL DEFAULT 0,
                             generated_mp3_path VARCHAR(500),
@@ -104,6 +105,13 @@ def run_migration():
                 changes_made = True
 
             inspector = inspect(db.engine)
+            if _table_exists(inspector, "round_audio_script"):
+                script_columns = _columns(inspector, "round_audio_script")
+                if "cue_position" not in script_columns:
+                    conn.execute(text("ALTER TABLE round_audio_script ADD COLUMN cue_position INTEGER"))
+                    changes_made = True
+
+            inspector = inspect(db.engine)
             for table_name, index_name, columns in (
                 ("round", "idx_round_owner_created", ["user_id", "created_at"]),
                 ("round_share", "idx_round_share_user", ["user_id", "role"]),
@@ -111,6 +119,11 @@ def run_migration():
                     "round_audio_script",
                     "idx_round_audio_script_round_status",
                     ["round_id", "status", "script_type"],
+                ),
+                (
+                    "round_audio_script",
+                    "idx_round_audio_script_cue",
+                    ["round_id", "script_type", "cue_position", "selected"],
                 ),
                 ("round_audio_script", "idx_round_audio_script_user", ["user_id", "created_at"]),
             ):

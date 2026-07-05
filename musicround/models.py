@@ -360,6 +360,7 @@ class RoundAudioScript(db.Model):
     status = db.Column(db.String(20), default='draft', nullable=False)
     tone = db.Column(db.String(200), nullable=True)
     theme = db.Column(db.String(200), nullable=True)
+    cue_position = db.Column(db.Integer, nullable=True)
     quiz_date = db.Column(db.DateTime, nullable=True)
     selected = db.Column(db.Boolean, default=False, nullable=False)
     generated_mp3_path = db.Column(db.String(500), nullable=True)
@@ -368,6 +369,7 @@ class RoundAudioScript(db.Model):
 
     __table_args__ = (
         db.Index('idx_round_audio_script_round_status', 'round_id', 'status', 'script_type'),
+        db.Index('idx_round_audio_script_cue', 'round_id', 'script_type', 'cue_position', 'selected'),
         db.Index('idx_round_audio_script_user', 'user_id', 'created_at'),
     )
 

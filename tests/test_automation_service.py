@@ -1208,6 +1208,53 @@ class TestAgentPlanningAutomation:
             assert result["script_records"][0]["status"] == "draft"
             assert "generate_tts_from_script" in result["next_step"]
 
+    def test_draft_round_track_hints_can_persist_positioned_records(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(
+                title="Secret Song",
+                artist="Known Artist",
+                genre="Rock",
+                year=1994,
+            )
+            round_id = automation.create_round(
+                name="Hinted",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            result = automation.draft_round_track_hints(
+                round_id=round_id,
+                user_id=user.id,
+                persist=True,
+            )
+
+            assert len(result["hints"]) == 1
+            assert result["hints"][0]["position"] == 1
+            assert "1994" in result["hints"][0]["text"]
+            assert "Secret Song" not in result["hints"][0]["text"]
+            assert result["script_records"][0]["script_type"] == "track_hint"
+            assert result["script_records"][0]["cue_position"] == 1
+
+    def test_save_round_track_hints_validates_positions(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="One", artist="Artist")
+            round_id = automation.create_round(
+                name="Hint Positions",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="outside this round"):
+                automation.save_round_track_hints(
+                    round_id=round_id,
+                    user_id=user.id,
+                    hints=[{"position": 2, "text": "Too far"}],
+                )
+
     def test_round_audio_script_review_and_tts_generation(self, app):
         with app.app_context():
             user = _create_user()
@@ -1243,3 +1290,31 @@ class TestAgentPlanningAutomation:
             assert generated["script"]["status"] == "used"
             assert generated["generated"]["path"] == "custommp3/agentuser/intro.mp3"
             assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/intro.mp3"
+
+    def test_track_hint_tts_generation_stores_script_path_without_overwriting_intro(self, app):
+        with app.app_context():
+            user = _create_user()
+            user.intro_mp3 = "custommp3/agentuser/existing-intro.mp3"
+            song = _create_song(title="Hint", artist="Artist")
+            round_id = automation.create_round(
+                name="Hinted TTS",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            saved = automation.save_round_track_hints(
+                round_id=round_id,
+                user_id=user.id,
+                hints=[{"position": 1, "text": "This is the hint."}],
+                status="approved",
+            )
+            script_id = saved["scripts"][0]["id"]
+
+            with patch("musicround.services.automation.generate_tts_mp3") as mock_tts:
+                mock_tts.return_value = "custommp3/agentuser/round_1_hint_1.mp3"
+                generated = automation.generate_tts_from_script(script_id, service="openai")
+
+            assert generated["script"]["status"] == "used"
+            assert generated["generated"]["mp3_type"] == "track_hint"
+            assert generated["generated"]["path"].endswith("round_1_hint_1.mp3")
+            assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/existing-intro.mp3"
