@@ -397,6 +397,42 @@ class TestImportQueueStatusRoute:
         assert response.status_code == 200
         assert page.index('high-priority-playlist') < page.index('low-priority-playlist')
 
+    def test_queue_status_json_requires_admin(self, app, client):
+        """Test queue-status JSON returns a machine-readable admin error."""
+        _login(app, client, 'nonadmin_qs_json', 'nonadmin_qs_json@example.com')
+
+        response = client.get('/import/queue-status.json')
+
+        assert response.status_code == 403
+        assert response.get_json()['error'] == 'Admin access required'
+
+    def test_queue_status_json_returns_polling_payload_for_admin(self, app, client):
+        """Test queue-status JSON exposes pending and recent job state."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='json-pending-playlist',
+                    user_id=user.id,
+                    status='pending',
+                    priority=2,
+                    attempt_count=1,
+                    max_attempts=3,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status.json')
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data['stats']['queue_size'] >= 1
+        assert any(job['item_id'] == 'json-pending-playlist' for job in data['queue'])
+        assert any(job['item_id'] == 'json-pending-playlist' for job in data['recent_jobs'])
+
 
 class TestUserRoutesExtended:
     """Additional user route tests for more coverage."""

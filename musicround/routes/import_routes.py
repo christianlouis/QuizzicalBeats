@@ -762,45 +762,42 @@ def update_direct_token():
     return redirect(return_url)
 
 
-@import_bp.route('/queue-status')
-@login_required
-def queue_status():
-    """
-    Display real-time status of the import queue for administrators
-    """
-    # Check if user is an admin
-    if not current_user.is_admin:
-        flash('Admin access required for Import Queue view.', 'danger')
-        return redirect(url_for('core.index'))
-        
-    # Helper function to get current time
-    from datetime import datetime
-    def now():
-        return datetime.utcnow()
-    
-    # Get the import queue from app config
-    queue = current_app.config.get('import_queue')
-    if not queue:
-        flash("Import queue not initialized.", "danger")
-        return redirect(url_for('core.view_songs'))
-    
+def _import_job_payload(job):
+    """Serialize an import job record for polling APIs."""
+    return {
+        'id': job.id,
+        'service_name': job.service_name,
+        'item_type': job.item_type,
+        'item_id': job.item_id,
+        'priority': job.priority,
+        'user_id': job.user_id,
+        'status': job.status,
+        'created_at': job.created_at.isoformat() if job.created_at else None,
+        'started_at': job.started_at.isoformat() if job.started_at else None,
+        'completed_at': job.completed_at.isoformat() if job.completed_at else None,
+        'duration': job.duration,
+        'error_message': job.error_message,
+        'imported_count': job.imported_count or 0,
+        'skipped_count': job.skipped_count or 0,
+        'attempt_count': job.attempt_count or 0,
+        'max_attempts': job.max_attempts or 3,
+        'item_url': job.item_url,
+    }
+
+
+def _import_queue_status_data(queue):
+    """Collect queue status once for both HTML and JSON views."""
     local_queue_size = queue.qsize()
     queue_snapshot = queue.snapshot()
-    
-    # Get active and recent jobs from database if available
     active_jobs = []
     pending_jobs = []
     recent_jobs = []
     queue_size = local_queue_size
-    
-    # Check if ImportJobRecord is defined
+
     try:
         from musicround.models import ImportJobRecord
-        
-        # Get last 50 jobs from the database, sorted by most recent first
+
         recent_jobs = ImportJobRecord.query.order_by(ImportJobRecord.created_at.desc()).limit(50).all()
-        
-        # Get the active jobs (status='processing')
         active_jobs = ImportJobRecord.query.filter_by(status='processing').all()
         pending_jobs = (
             ImportJobRecord.query.filter_by(status='pending')
@@ -839,10 +836,8 @@ def queue_status():
             )
         )
     except (ImportError, AttributeError):
-        # ImportJobRecord might not be defined yet, handle this case
         pass
-    
-    # Get some basic stats
+
     stats = {
         'queue_size': queue_size,
         'active_jobs': len(active_jobs),
@@ -850,8 +845,7 @@ def queue_status():
         'failed_today': 0,
         'dead_letter_jobs': 0,
     }
-    
-    # If we have ImportJobRecord, get some stats
+
     if recent_jobs:
         import datetime
         today = datetime.datetime.utcnow().date()
@@ -864,12 +858,73 @@ def queue_status():
                 elif job.status == 'dead_letter':
                     stats['dead_letter_jobs'] += 1
 
+    return {
+        'stats': stats,
+        'active_jobs': active_jobs,
+        'recent_jobs': recent_jobs,
+        'queue_snapshot': queue_snapshot,
+    }
+
+
+def _require_import_queue_admin():
+    """Return the configured import queue or a Flask response for common failures."""
+    if not current_user.is_admin:
+        return None, redirect(url_for('core.index'))
+
+    queue = current_app.config.get('import_queue')
+    if not queue:
+        return None, redirect(url_for('core.view_songs'))
+    return queue, None
+
+
+@import_bp.route('/queue-status')
+@login_required
+def queue_status():
+    """
+    Display real-time status of the import queue for administrators
+    """
+    # Check if user is an admin
+    queue, failure_response = _require_import_queue_admin()
+    if failure_response:
+        if not current_user.is_admin:
+            flash('Admin access required for Import Queue view.', 'danger')
+        else:
+            flash("Import queue not initialized.", "danger")
+        return failure_response
+
+    # Helper function to get current time
+    from datetime import datetime
+    def now():
+        return datetime.utcnow()
+
+    data = _import_queue_status_data(queue)
+
     return render_template(
         'import_queue_status.html',
-        stats=stats,
-        active_jobs=active_jobs,
-        recent_jobs=recent_jobs,
-        queue_snapshot=queue_snapshot,
+        stats=data['stats'],
+        active_jobs=data['active_jobs'],
+        recent_jobs=data['recent_jobs'],
+        queue_snapshot=data['queue_snapshot'],
         queue=queue,
         now=now
     )
+
+
+@import_bp.route('/queue-status.json')
+@login_required
+def queue_status_json():
+    """Return import queue status for polling clients and MCP workflows."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    queue = current_app.config.get('import_queue')
+    if not queue:
+        return jsonify({'error': 'Import queue not initialized'}), 503
+
+    data = _import_queue_status_data(queue)
+    return jsonify({
+        'stats': data['stats'],
+        'queue': data['queue_snapshot'],
+        'active_jobs': [_import_job_payload(job) for job in data['active_jobs']],
+        'recent_jobs': [_import_job_payload(job) for job in data['recent_jobs']],
+    })

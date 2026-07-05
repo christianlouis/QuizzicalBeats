@@ -38,18 +38,46 @@ def get_all_genres():
 
 def get_all_tags():
     """
-    Return a list of all tag names in the Tag table.
+    Return normalized, de-duplicated tag names for picker UIs.
     """
-    return [tag.name for tag in Tag.query.all()]
+    normalized_tags = {}
+    for tag in Tag.query.order_by(Tag.name.asc()).all():
+        tag_name = _normalize_tag_name(tag.name)
+        if not tag_name:
+            continue
+        key = tag_name.casefold()
+        normalized_tags.setdefault(key, tag_name)
+    return sorted(normalized_tags.values(), key=str.casefold)
+
+
+def _normalize_tag_name(tag_name):
+    """Trim tag names before matching or showing them in builder controls."""
+    return (tag_name or '').strip()
+
 
 def get_songs_by_tag(tag_name, limit=8):
     """
     Return songs that have the specified tag.
     """
-    tag = Tag.query.filter_by(name=tag_name).first()
-    if tag:
-        return tag.songs[:limit]
-    return []
+    normalized_tag_name = _normalize_tag_name(tag_name)
+    if not normalized_tag_name:
+        return []
+
+    songs = []
+    seen_song_ids = set()
+    for tag in Tag.query.all():
+        if _normalize_tag_name(tag.name).casefold() != normalized_tag_name.casefold():
+            continue
+
+        for song in tag.songs:
+            song_key = song.id or (song.title, song.artist)
+            if song_key in seen_song_ids:
+                continue
+            seen_song_ids.add(song_key)
+            songs.append(song)
+            if len(songs) >= limit:
+                return songs
+    return songs
 
 def get_least_used_genres():
     """
@@ -451,9 +479,9 @@ def build_music_round():
                 round_criteria=round_criteria,
                 genre=genre_used
             )
-            
+
         elif round_type == 'Tag':
-            tag_name = request.form.get('tag_name')
+            tag_name = _normalize_tag_name(request.form.get('tag_name'))
             if tag_name:
                 round_criteria = f'Tag: {tag_name}'
                 songs = get_songs_by_tag(tag_name, songs_per_round)

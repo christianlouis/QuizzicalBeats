@@ -247,12 +247,13 @@ def upload_and_share(file_path, dropbox_path):
         current_app.logger.error(f"Exception in upload_and_share: {str(e)}")
         return None
 
-def refresh_dropbox_token_if_needed(user):
+def refresh_dropbox_token_if_needed(user, force=False):
     """
     Check if user's Dropbox token needs refreshing and refresh it if needed
     
     Args:
         user: The User object with Dropbox token information
+        force: Refresh even when the stored expiry still looks valid.
         
     Returns:
         dict: {'success': True/False, 'message': 'success or error message'}
@@ -261,7 +262,11 @@ def refresh_dropbox_token_if_needed(user):
         return {'success': False, 'message': 'No Dropbox token available'}
     
     # If token is still valid, return success
-    if user.dropbox_token_expiry and user.dropbox_token_expiry > datetime.now() + timedelta(minutes=5):
+    if (
+        not force
+        and user.dropbox_token_expiry
+        and user.dropbox_token_expiry > datetime.now() + timedelta(minutes=5)
+    ):
         return {'success': True, 'message': 'Token is still valid'}
     
     # Token needs refreshing

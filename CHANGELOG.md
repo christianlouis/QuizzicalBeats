@@ -13,11 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added lazy-loaded preview players in the song library so large libraries do not render one audio element per song.
 - Added visible Spotify reconnect and token-expiry warnings on the profile page.
 - Added import-job retry tracking, dead-letter status, attempt counts, and an idempotent migration for existing databases.
+- Added a JSON import queue status endpoint for polling clients and MCP workflows.
+- Added normalized, de-duplicated tag options for the music-round builder.
 
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Made Deezer track import failures return structured import errors instead of escaping from `ImportHelper.import_item`.
 - Normalized OAuth token expiry storage for both `expires_in` and Authlib-style `expires_at` payloads.
+- Made Dropbox folder browsing force-refresh once after a 401 and return a reconnect-required payload when refresh credentials are revoked.
+- Made tag-based round generation match tag names after trimming and case folding.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

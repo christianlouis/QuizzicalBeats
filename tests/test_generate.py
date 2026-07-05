@@ -143,6 +143,21 @@ class TestGetAllTags:
         assert 'Classic' in result
         assert 'Modern' in result
 
+    def test_normalizes_and_deduplicates_tags(self, app):
+        """Test get_all_tags normalizes whitespace and duplicate casing."""
+        from musicround.routes.generate import get_all_tags
+        with app.app_context():
+            db.session.add_all([
+                Tag(name=' rock '),
+                Tag(name='Rock'),
+                Tag(name='Country'),
+            ])
+            db.session.commit()
+
+            result = get_all_tags()
+
+        assert result == ['Country', 'rock']
+
 
 class TestGetSongsByTag:
     """Tests for generate.get_songs_by_tag helper."""
@@ -168,6 +183,24 @@ class TestGetSongsByTag:
             result = get_songs_by_tag('TestTagGen')
         assert len(result) == 1
         assert result[0].title == 'Tagged Generate Song'
+
+    def test_matches_normalized_tag_name(self, app):
+        """Test get_songs_by_tag matches tags after trimming and case folding."""
+        from musicround.routes.generate import get_songs_by_tag
+        with app.app_context():
+            tag1 = Tag(name=' rock ')
+            tag2 = Tag(name='Rock')
+            song1 = Song(title='Trimmed Rock Song', artist='A', genre='Rock')
+            song2 = Song(title='Cased Rock Song', artist='B', genre='Rock')
+            db.session.add_all([tag1, tag2, song1, song2])
+            db.session.commit()
+            song1.tags.append(tag1)
+            song2.tags.append(tag2)
+            db.session.commit()
+
+            result = get_songs_by_tag('ROCK')
+
+        assert {song.title for song in result} == {'Trimmed Rock Song', 'Cased Rock Song'}
 
     def test_respects_limit(self, app):
         """Test get_songs_by_tag respects the limit parameter."""

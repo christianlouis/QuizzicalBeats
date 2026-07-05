@@ -1,6 +1,10 @@
 """Extended API endpoint tests."""
-import pytest
 import json
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from musicround.models import db, User, Song, Tag
 
 
@@ -23,6 +27,17 @@ def _create_song(app, title='Test Song', artist='Test Artist', genre='Rock'):
         db.session.add(song)
         db.session.commit()
         return song.id
+
+
+def _make_response(status_code, json_body=None, text=''):
+    response = MagicMock()
+    response.status_code = status_code
+    response.text = text or str(json_body)
+    if json_body is None:
+        response.json.side_effect = ValueError('no json')
+    else:
+        response.json.return_value = json_body
+    return response
 
 
 class TestTagsApi:
@@ -249,3 +264,68 @@ class TestSongSearchApi:
         data = response.get_json()
         assert len(data) >= 1
         assert any(s['artist'] == 'SpecificArtistABC' for s in data)
+
+
+class TestDropboxFolderApi:
+    """Tests for Dropbox folder browser API error recovery."""
+
+    def _login_dropbox_user(self, app, client):
+        _create_user_and_login(app, client, 'dropboxapi', 'dropboxapi@example.com')
+        with app.app_context():
+            user = User.query.filter_by(username='dropboxapi').one()
+            user.dropbox_id = 'dropbox-account'
+            user.dropbox_token = 'old-dropbox-access'
+            user.dropbox_refresh_token = 'old-dropbox-refresh'
+            user.dropbox_token_expiry = datetime.now() + timedelta(hours=1)
+            db.session.commit()
+
+    def test_list_folders_refreshes_and_retries_after_401(self, app, client):
+        """Folder listing should retry once with a force-refreshed Dropbox token."""
+        self._login_dropbox_user(app, client)
+
+        def fake_refresh(user, force=False):
+            assert force is True
+            user.dropbox_token = 'new-dropbox-access'
+            db.session.commit()
+            return {'success': True, 'message': 'Token refreshed'}
+
+        with patch('musicround.routes.api.requests.post') as mock_post, \
+                patch(
+                    'musicround.helpers.dropbox_helper.refresh_dropbox_token_if_needed',
+                    side_effect=fake_refresh,
+                ):
+            mock_post.side_effect = [
+                _make_response(401, {'error_summary': 'expired_access_token/'}),
+                _make_response(200, {'entries': [{'.tag': 'folder', 'name': 'Rounds', 'path_display': '/Rounds', 'id': 'id:1'}]}),
+            ]
+
+            response = client.get('/api/dropbox/folders')
+
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data['folders'][0]['name'] == 'Rounds'
+        assert mock_post.call_args_list[1].kwargs['headers']['Authorization'] == (
+            'Bearer new-dropbox-access'
+        )
+
+    def test_list_folders_returns_reconnect_required_after_revoked_refresh(self, app, client):
+        """Folder listing should surface an actionable reconnect payload."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post, \
+                patch(
+                    'musicround.helpers.dropbox_helper.refresh_dropbox_token_if_needed',
+                    return_value={
+                        'success': False,
+                        'message': 'Dropbox connection expired. Please reconnect Dropbox.',
+                        'reconnect_required': True,
+                    },
+                ):
+            mock_post.return_value = _make_response(401, {'error_summary': 'expired_access_token/'})
+
+            response = client.get('/api/dropbox/folders')
+
+        data = response.get_json()
+        assert response.status_code == 401
+        assert data['reconnect_required'] is True
+        assert 'reconnect Dropbox' in data['error']

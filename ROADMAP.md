@@ -140,13 +140,14 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.1 - "Progress Pulse" *(Q1 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 1-2 weeks
 
 **Goals**: Real-time import status tracking
 
 **Features**:
+- [x] JSON polling endpoint for queue and job status
 - [ ] WebSocket/SSE progress updates
 - [ ] Progress bars for active imports
 - [x] Detailed error reporting with retry/dead-letter state
@@ -463,7 +464,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Persistent user settings
 - [ ] Default round format preferences
 - [ ] Personal tag system
-- [ ] Tag filtering and sorting
+- [x] Tag filtering and sorting in the round builder
 - [ ] Dark mode toggle
 - [ ] UI customization
 

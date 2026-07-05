@@ -102,6 +102,7 @@
 
 ### 🎯 Milestone 11: **"Progress Pulse" Release** – Import Status Tracking
 
+* [x] JSON polling endpoint for import queue and job status
 * [ ] Real-time progress indicators for active imports
 * [x] Detailed error reporting with retry/dead-letter state
 * [ ] Manual recovery actions for failed imports
@@ -110,6 +111,7 @@
 ### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
 
 * [ ] Improve search algorithm and relevance scoring
+* [x] Normalize and de-duplicate tag choices in the round builder
 * [ ] Add advanced filtering options (year, genre, etc.)
 * [ ] Implement caching for frequent searches
 * [ ] Ensure proper pagination and performance

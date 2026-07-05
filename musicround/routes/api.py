@@ -939,13 +939,13 @@ def list_dropbox_folders():
                 if response.status_code == 401:
                     # Try to refresh the token and retry once
                     current_app.logger.info("Attempting to refresh Dropbox token and retry")
-                    from musicround.helpers.dropbox_helper import refresh_dropbox_token
+                    from musicround.helpers.dropbox_helper import refresh_dropbox_token_if_needed
                     
                     if current_user.dropbox_refresh_token:
-                        new_token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
-                        if new_token_info and 'access_token' in new_token_info:
+                        refresh_result = refresh_dropbox_token_if_needed(current_user, force=True)
+                        if refresh_result.get('success') and current_user.dropbox_token:
                             # Try again with the new token
-                            headers['Authorization'] = f"Bearer {new_token_info['access_token']}"
+                            headers['Authorization'] = f"Bearer {current_user.dropbox_token}"
                             response = requests.post(
                                 'https://api.dropboxapi.com/2/files/list_folder',
                                 headers=headers,
@@ -960,6 +960,16 @@ def list_dropbox_folders():
                                 return jsonify({'error': error_message, 'details': error_data}), response.status_code
                         else:
                             current_app.logger.error("Token refresh failed")
+                            payload = {
+                                'error': refresh_result.get(
+                                    'message',
+                                    'Dropbox token refresh failed.',
+                                ),
+                                'details': error_data,
+                            }
+                            if refresh_result.get('reconnect_required'):
+                                payload['reconnect_required'] = True
+                            return jsonify(payload), 401
                 
                 if response.status_code != 200:  # If we're still having an error
                     return jsonify({'error': error_message, 'details': error_data}), response.status_code
