@@ -983,8 +983,16 @@ def update_bearer_token():
 @users_bp.route('/use-refresh-token', methods=['POST'])
 @login_required
 def use_refresh_token():
-    # This will be reviewed and updated for authlib
-    pass
+    """Legacy refresh-token endpoint kept safe for old forms/bookmarks."""
+    current_app.logger.info(
+        "User %s called legacy Spotify refresh-token endpoint; refresh is automatic",
+        current_user.id,
+    )
+    flash(
+        'Spotify tokens are refreshed automatically when needed. Please reconnect Spotify if it is expired.',
+        'info',
+    )
+    return redirect(url_for('users.profile'))
 
 @users_bp.route('/setup')
 @login_required
