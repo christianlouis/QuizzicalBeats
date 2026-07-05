@@ -241,7 +241,23 @@ class TestSecureDefaults:
 
         monkeypatch.setenv('USE_HTTPS', 'False')
         importlib.reload(musicround.config)
-    
+
+    def test_rate_limit_settings_fall_back_when_env_is_invalid(self, monkeypatch):
+        """Test invalid numeric rate-limit settings do not break config import."""
+        monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-security-test')
+        monkeypatch.setenv('AUTOMATION_TOKEN', 'test-automation-token-for-security-test')
+        monkeypatch.setenv('LOGIN_RATE_LIMIT_ATTEMPTS', 'not-a-number')
+        monkeypatch.setenv('LOGIN_RATE_LIMIT_WINDOW_SECONDS', 'bad-window')
+        monkeypatch.setenv('AUTOMATION_RATE_LIMIT_ATTEMPTS', 'bad-attempts')
+        monkeypatch.setenv('AUTOMATION_RATE_LIMIT_WINDOW_SECONDS', 'bad-window')
+
+        config_module = importlib.reload(musicround.config)
+
+        assert config_module.Config.LOGIN_RATE_LIMIT_ATTEMPTS == 5
+        assert config_module.Config.LOGIN_RATE_LIMIT_WINDOW_SECONDS == 900
+        assert config_module.Config.AUTOMATION_RATE_LIMIT_ATTEMPTS == 10
+        assert config_module.Config.AUTOMATION_RATE_LIMIT_WINDOW_SECONDS == 300
+
     def test_https_recommended(self):
         """Test that HTTPS is documented as recommended."""
         security_md_path = os.path.join(os.path.dirname(__file__), '..', 'SECURITY.md')
@@ -256,6 +272,17 @@ class TestSecureDefaults:
 
 class TestAuthRateLimiting:
     """Test authentication throttling."""
+
+    def test_rate_limit_id_uses_proxy_normalized_remote_addr(self, app):
+        """Test raw X-Forwarded-For does not directly control Flask rate limits."""
+        from musicround.routes import users as users_routes
+
+        with app.test_request_context(
+            '/users/login',
+            headers={'X-Forwarded-For': '203.0.113.20'},
+            environ_base={'REMOTE_ADDR': '10.0.0.5'},
+        ):
+            assert users_routes._client_rate_limit_id() == '10.0.0.5'
 
     def test_login_rate_limit_blocks_repeated_failures(self, app, client):
         """Test repeated bad logins are throttled."""
@@ -283,6 +310,41 @@ class TestAuthRateLimiting:
             response = client.post(
                 '/users/create-backup',
                 headers={'X-Automation-Token': 'automation-secret'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['status'] == 'success'
+        mock_create.assert_called_once()
+
+    def test_admin_backup_ignores_stale_automation_header(self, app, client):
+        """Test admin sessions are not blocked by stale automation headers."""
+        from musicround.models import db, User
+        from musicround.routes import users as users_routes
+
+        users_routes._AUTOMATION_FAILURES.clear()
+        app.config['AUTOMATION_TOKEN'] = 'automation-secret'
+        with app.app_context():
+            user = User(
+                username='automation-admin',
+                email='automation-admin@example.com',
+                is_admin=True,
+            )
+            user.password = 'AdminPass123!'
+            db.session.add(user)
+            db.session.commit()
+        client.post(
+            '/users/login',
+            data={'username': 'automation-admin', 'password': 'AdminPass123!'},
+        )
+
+        with patch('musicround.helpers.backup_helper.create_backup') as mock_create:
+            mock_create.return_value = {'status': 'success', 'message': 'created'}
+            response = client.post(
+                '/users/create-backup',
+                headers={
+                    'Accept': 'application/json',
+                    'X-Automation-Token': 'stale-token',
+                },
             )
 
         assert response.status_code == 200

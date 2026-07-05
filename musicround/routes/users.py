@@ -22,9 +22,8 @@ _AUTOMATION_FAILURES = {}
 
 
 def _client_rate_limit_id():
-    forwarded_for = request.headers.get('X-Forwarded-For', '')
-    if forwarded_for:
-        return forwarded_for.split(',')[0].strip()
+    # create_app installs ProxyFix, so remote_addr is already normalized by the
+    # trusted proxy configuration instead of trusting raw client-supplied XFF.
     return request.remote_addr or 'unknown'
 
 
@@ -77,6 +76,10 @@ def _valid_automation_token():
 def automation_or_admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if current_user.is_authenticated and current_user.is_admin:
+            g.automation_request = False
+            return f(*args, **kwargs)
+
         automation_key = _automation_rate_limit_key()
         max_attempts = current_app.config.get('AUTOMATION_RATE_LIMIT_ATTEMPTS', 10)
         window_seconds = current_app.config.get('AUTOMATION_RATE_LIMIT_WINDOW_SECONDS', 300)

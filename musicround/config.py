@@ -13,6 +13,14 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Get the base directory of the application
 basedir = os.path.abspath(os.path.dirname(__file__))
 
+
+def _int_from_env(name, default):
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 class Config:
     # Debug settings
     DEBUG = os.getenv("DEBUG", "False") == "True"
@@ -98,10 +106,10 @@ class Config:
 
     # Minimal in-app authentication throttles. These are per-process safety nets,
     # not a replacement for edge/WAF rate limiting.
-    LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5"))
-    LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900"))
-    AUTOMATION_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTOMATION_RATE_LIMIT_ATTEMPTS", "10"))
-    AUTOMATION_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTOMATION_RATE_LIMIT_WINDOW_SECONDS", "300"))
+    LOGIN_RATE_LIMIT_ATTEMPTS = _int_from_env("LOGIN_RATE_LIMIT_ATTEMPTS", 5)
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS = _int_from_env("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900)
+    AUTOMATION_RATE_LIMIT_ATTEMPTS = _int_from_env("AUTOMATION_RATE_LIMIT_ATTEMPTS", 10)
+    AUTOMATION_RATE_LIMIT_WINDOW_SECONDS = _int_from_env("AUTOMATION_RATE_LIMIT_WINDOW_SECONDS", 300)
     
     # Static OAuth URL configuration (for production environments)
     STATIC_OAUTH_URLS = os.getenv("STATIC_OAUTH_URLS", "False") == "True"
@@ -110,4 +118,3 @@ class Config:
     OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")
     OAUTH_AUTHENTIK_URL = os.getenv("OAUTH_AUTHENTIK_URL")
     OAUTH_DROPBOX_URL = os.getenv("OAUTH_DROPBOX_URL")
-

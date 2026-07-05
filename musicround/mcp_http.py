@@ -46,9 +46,17 @@ def _clear_auth_failures(key: str) -> None:
     _AUTH_FAILURES.pop(key, None)
 
 
+def _int_from_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _client_rate_limit_id(scope: Scope, headers: dict[bytes, bytes]) -> str:
+    trust_x_forwarded_for = os.getenv("MCP_TRUST_X_FORWARDED_FOR", "False") == "True"
     forwarded_for = headers.get(b"x-forwarded-for", b"").decode("latin1")
-    if forwarded_for:
+    if trust_x_forwarded_for and forwarded_for:
         return forwarded_for.split(",")[0].strip()
     client = scope.get("client")
     if client:
@@ -81,17 +89,13 @@ class BearerAuthMiddleware:
 
         headers = dict(scope.get("headers", []))
         rate_limit_key = _client_rate_limit_id(scope, headers)
-        max_attempts = int(
-            os.getenv(
-                "MCP_AUTH_RATE_LIMIT_ATTEMPTS",
-                os.getenv("AUTOMATION_RATE_LIMIT_ATTEMPTS", "10"),
-            )
+        max_attempts = _int_from_env(
+            "MCP_AUTH_RATE_LIMIT_ATTEMPTS",
+            _int_from_env("AUTOMATION_RATE_LIMIT_ATTEMPTS", 10),
         )
-        window_seconds = int(
-            os.getenv(
-                "MCP_AUTH_RATE_LIMIT_WINDOW_SECONDS",
-                os.getenv("AUTOMATION_RATE_LIMIT_WINDOW_SECONDS", "300"),
-            )
+        window_seconds = _int_from_env(
+            "MCP_AUTH_RATE_LIMIT_WINDOW_SECONDS",
+            _int_from_env("AUTOMATION_RATE_LIMIT_WINDOW_SECONDS", 300),
         )
         if _rate_limited(rate_limit_key, max_attempts, window_seconds):
             await JSONResponse(
