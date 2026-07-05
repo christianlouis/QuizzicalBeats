@@ -330,8 +330,11 @@ class ImportHelper:
                     }
             elif item_type.lower() == 'playlist':
                 try:
-                    imported_songs = deezer_client.import_playlist(item_id, lastfm_api_key=lastfm_api_key)
-                    if not imported_songs or len(imported_songs) == 0:
+                    result = deezer_client.import_playlist(item_id, lastfm_api_key=lastfm_api_key)
+                    imported_count = result.get('imported_count', 0)
+                    skipped_count = result.get('skipped_count', 0)
+
+                    if imported_count == 0 and skipped_count == 0:
                         current_app.logger.warning(f"Deezer playlist import returned empty result for playlist ID: {item_id}")
                         return {
                             'imported_count': 0,
@@ -340,8 +343,8 @@ class ImportHelper:
                             'errors': [f"No songs found in Deezer playlist {item_id} or playlist import failed."]
                         }
                     return {
-                        'imported_count': len(imported_songs),
-                        'skipped_count': 0,
+                        'imported_count': imported_count,
+                        'skipped_count': skipped_count,
                         'error_count': 0,
                         'errors': []
                     }
