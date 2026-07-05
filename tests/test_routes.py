@@ -246,6 +246,108 @@ class TestAuthenticatedRoutes:
         assert b'manual-spotify-secret-token' not in response.data
         assert b'Manual token saved' in response.data
 
+    def test_update_bearer_token_invalid_token_is_not_stored(self, app, client, monkeypatch):
+        """Invalid manual Spotify tokens must not poison later Spotify calls."""
+        from musicround.routes import users as users_routes
+
+        self._login(app, client)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'old-manual-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+            sess['token_source'] = 'manual'
+            sess['client_token_expiry'] = (datetime.now() + timedelta(hours=1)).timestamp()
+
+        class FakeResponse:
+            ok = False
+            status_code = 401
+
+            def json(self):
+                return {}
+
+        fake_spotify = MagicMock()
+        fake_spotify.get.return_value = FakeResponse()
+        monkeypatch.setattr(users_routes.oauth, 'spotify', fake_spotify, raising=False)
+
+        response = client.post(
+            '/users/update-bearer-token',
+            data={'bearer_token': 'bad-token'},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        assert b'bad-token' not in response.data
+        assert b'Token validation failed. The token was not saved.' in response.data
+        with client.session_transaction() as sess:
+            assert 'access_token' not in sess
+            assert 'bearer_token_added' not in sess
+            assert 'token_source' not in sess
+            assert 'client_token_expiry' not in sess
+
+    def test_update_bearer_token_valid_user_token_is_stored(self, app, client, monkeypatch):
+        """A validated user OAuth token may be stored as a manual session token."""
+        from musicround.routes import users as users_routes
+
+        self._login(app, client)
+
+        class FakeResponse:
+            ok = True
+
+            def json(self):
+                return {'id': 'spotify-user-id', 'display_name': 'Manual User'}
+
+        fake_spotify = MagicMock()
+        fake_spotify.get.return_value = FakeResponse()
+        monkeypatch.setattr(users_routes.oauth, 'spotify', fake_spotify, raising=False)
+
+        response = client.post(
+            '/users/update-bearer-token',
+            data={'bearer_token': ' valid-user-token '},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        with client.session_transaction() as sess:
+            assert sess['access_token'] == 'valid-user-token'
+            assert sess['token_source'] == 'user_manual'
+            assert 'bearer_token_added' in sess
+            assert 'client_token_expiry' not in sess
+
+    def test_update_bearer_token_valid_client_token_is_stored(self, app, client, monkeypatch):
+        """A validated client-credentials token remains supported for shared searches."""
+        from musicround.routes import users as users_routes
+
+        self._login(app, client)
+
+        class FakeUserResponse:
+            ok = True
+            status_code = 200
+
+            def json(self):
+                return {}
+
+        class FakeBrowseResponse:
+            ok = True
+
+            def json(self):
+                return {'albums': {'items': []}}
+
+        fake_spotify = MagicMock()
+        fake_spotify.get.side_effect = [FakeUserResponse(), FakeBrowseResponse()]
+        monkeypatch.setattr(users_routes.oauth, 'spotify', fake_spotify, raising=False)
+
+        response = client.post(
+            '/users/update-bearer-token',
+            data={'bearer_token': 'client-token'},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        with client.session_transaction() as sess:
+            assert sess['access_token'] == 'client-token'
+            assert sess['token_source'] == 'client_credentials_manual'
+            assert 'bearer_token_added' in sess
+            assert 'client_token_expiry' in sess
+
     def test_profile_debug_panels_do_not_render_token_fragments(self, app, client):
         """Admin profile diagnostics should show token presence without token previews."""
         from musicround.models import SystemSetting

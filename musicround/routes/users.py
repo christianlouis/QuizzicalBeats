@@ -19,6 +19,12 @@ from musicround.helpers.spotify_helper import get_spotify_token, get_current_use
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 _LOGIN_FAILURES = {}
 _AUTOMATION_FAILURES = {}
+_MANUAL_SPOTIFY_SESSION_KEYS = (
+    'access_token',
+    'token_source',
+    'bearer_token_added',
+    'client_token_expiry',
+)
 
 
 def _client_rate_limit_id():
@@ -119,6 +125,21 @@ def _spotify_display_name(spotify_user_data, fallback=None):
         if value:
             return value
     return fallback
+
+
+def _clear_manual_spotify_session_token():
+    for key in _MANUAL_SPOTIFY_SESSION_KEYS:
+        session.pop(key, None)
+
+
+def _store_manual_spotify_session_token(bearer_token, token_source):
+    session['access_token'] = bearer_token
+    session['token_source'] = token_source
+    session['bearer_token_added'] = datetime.now().timestamp()
+    if token_source == 'client_credentials_manual':
+        session['client_token_expiry'] = (datetime.now() + timedelta(hours=1)).timestamp()
+    else:
+        session.pop('client_token_expiry', None)
 
 
 # Helper function for processing Spotify account linking
@@ -969,9 +990,7 @@ def update_bearer_token():
     """Update the Spotify bearer token in the session"""
     # Check if clearing token was requested
     if request.form.get('clear_token'):
-        session.pop('access_token', None)
-        session.pop('token_source', None)
-        session.pop('bearer_token_added', None)
+        _clear_manual_spotify_session_token()
         current_app.logger.info(f"User {current_user.id} cleared Spotify bearer token from session")
         flash('Spotify bearer token has been cleared', 'success')
         return redirect(url_for('users.profile'))
@@ -983,16 +1002,11 @@ def update_bearer_token():
         return redirect(url_for('users.profile'))
     
     try:
-        # Store the token in session with timestamp and mark as manual initially
-        session['access_token'] = bearer_token
-        session['token_source'] = 'manual' # Initial assumption
-        session['bearer_token_added'] = datetime.now().timestamp()
-        
         current_app.logger.info(
-            "User %s added a manual bearer token to session. Validating token presence only.",
+            "User %s submitted a manual Spotify bearer token. Validating before storing.",
             current_user.id,
         )
-        
+
         try:
             resp_me = oauth.spotify.get('https://api.spotify.com/v1/me', token={'access_token': bearer_token, 'token_type': 'Bearer'})
             user_info = resp_me.json() if resp_me.ok else None
@@ -1000,9 +1014,7 @@ def update_bearer_token():
             if user_info and 'id' in user_info:
                 # This is a user OAuth token
                 username = user_info.get('display_name') or user_info.get('id')
-                
-                # Update token source to reflect it's a user token
-                session['token_source'] = 'user_manual'
+                _store_manual_spotify_session_token(bearer_token, 'user_manual')
                 current_app.logger.info(f"Token identified as user OAuth token for: {username} (ID: {user_info.get('id')})")
                 flash(f'Successfully authenticated with Spotify as {username}', 'success')
                 current_app.logger.info(f"Manual bearer token added for Spotify user: {username} (ID: {user_info.get('id')})")
@@ -1018,18 +1030,21 @@ def update_bearer_token():
 
                 if browse_results and 'albums' in browse_results:
                     # This looks like a client credentials token
-                    session['token_source'] = 'client_credentials_manual'
+                    _store_manual_spotify_session_token(bearer_token, 'client_credentials_manual')
                     current_app.logger.info("Token identified as client credentials token (manual)")
                     flash('Token saved as client credentials token. This type of token cannot access user-specific data.', 'warning')
                 else:
-                    flash('Token saved but validation failed (cannot fetch new releases). The token may be invalid or expired.', 'warning')
+                    _clear_manual_spotify_session_token()
+                    flash('Token validation failed. The token was not saved.', 'warning')
                     current_app.logger.warning(f"Manual token validation as client_credentials failed. Response: {resp_browse.status_code if not resp_browse.ok else 'OK, but no albums or browse_results was None'}")
             except Exception as e_browse:
+                _clear_manual_spotify_session_token()
                 current_app.logger.error(f"Error validating bearer token as client credentials: {e_browse}")
-                flash(f'Token saved but error during client credentials validation: {str(e_browse)}', 'warning')
+                flash('Token validation failed. The token was not saved.', 'warning')
     except Exception as e_main:
+        _clear_manual_spotify_session_token()
         current_app.logger.error(f"Error processing bearer token: {e_main}")
-        flash(f'Error processing token: {str(e_main)}', 'warning')
+        flash('Error processing token. The token was not saved.', 'warning')
     
     return redirect(url_for('users.profile'))
 
