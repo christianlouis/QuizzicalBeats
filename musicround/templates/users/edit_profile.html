@@ -527,22 +527,23 @@
             
             errorDetails.textContent = errorMessage;
             
-            // Show technical details
+            // Show sanitized technical details without provider raw bodies or stack traces.
             let debugText = '';
             if (error.data) {
-                if (error.data.details) {
-                    debugText += "Error Details:\n" + JSON.stringify(error.data.details, null, 2) + "\n\n";
+                const safeDetails = {};
+                for (const [key, value] of Object.entries(error.data)) {
+                    if (['error', 'traceback', 'raw_response'].includes(key)) {
+                        continue;
+                    }
+                    safeDetails[key] = value;
                 }
-                if (error.data.traceback) {
-                    debugText += "Traceback:\n" + error.data.traceback + "\n\n";
-                }
-                if (error.data.raw_response) {
-                    debugText += "Raw Response:\n" + error.data.raw_response + "\n\n";
+                if (Object.keys(safeDetails).length > 0) {
+                    debugText = "Error Details:\n" + JSON.stringify(safeDetails, null, 2);
                 }
             }
             
             if (!debugText) {
-                debugText = JSON.stringify(error, null, 2);
+                debugText = error.status ? `HTTP ${error.status}` : 'No additional diagnostics available.';
             }
             
             debugInfo.textContent = debugText;

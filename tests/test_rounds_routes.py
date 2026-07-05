@@ -446,6 +446,35 @@ class TestLegacyEmptyRoundRoutes:
         assert 'no songs' in response.get_json()['message']
         mock_upload.assert_not_called()
 
+    def test_dropbox_export_blocks_unhealthy_storage_before_dropbox_calls(self, app, client):
+        """Dropbox export must stop before render or upload when artifact storage is unhealthy."""
+        _login(app, client)
+        song_id = _create_song(app, title='Dropbox Storage Gate Song')
+        round_id = _create_round(app, [song_id], name='Dropbox Storage Gate Round')
+        app.config['ROUND_PDF_DIR'] = f"{app.instance_path}/missing-dropbox-export-test"
+
+        with app.app_context():
+            user = User.query.filter_by(username='roundsuser').one()
+            user.dropbox_token = 'dropbox-access-token'
+            user.dropbox_refresh_token = 'dropbox-refresh-token'
+            db.session.commit()
+
+        with patch('musicround.helpers.dropbox_helper.refresh_dropbox_token_if_needed') as mock_refresh, \
+                patch('musicround.helpers.dropbox_helper.upload_to_dropbox') as mock_upload:
+            response = client.post(
+                f'/rounds/{round_id}/export-to-dropbox',
+                data={'include_mp3s': 'false', 'include_pdf': 'true'},
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 503
+        payload = response.get_json()
+        assert payload['success'] is False
+        assert 'storage' in payload['error'].lower()
+        assert payload['storage']['ok'] is False
+        mock_refresh.assert_not_called()
+        mock_upload.assert_not_called()
+
 
 class TestRoundMp3Hints:
     """Tests for optional per-track hint audio in generated MP3s."""

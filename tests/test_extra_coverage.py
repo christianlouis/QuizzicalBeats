@@ -497,6 +497,18 @@ class TestUserRoutesExtended:
         response = client.get('/users/edit-profile')
         assert response.status_code == 200
 
+    def test_edit_profile_error_ui_does_not_render_raw_provider_fields(self, app, client):
+        """The Dropbox folder-picker UI must not surface raw provider payloads."""
+        _login(app, client)
+
+        response = client.get('/users/edit-profile')
+
+        assert response.status_code == 200
+        assert b'error.data.traceback' not in response.data
+        assert b'error.data.raw_response' not in response.data
+        assert b'Traceback:' not in response.data
+        assert b'Raw Response:' not in response.data
+
     def test_change_password_accessible_when_logged_in(self, app, client):
         """Test change-password page loads for authenticated users."""
         _login(app, client)
