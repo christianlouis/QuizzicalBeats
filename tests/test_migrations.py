@@ -5,7 +5,7 @@ import sqlite3
 from flask import Flask
 
 from musicround import db
-from musicround.models import ImportJobRecord, Round, Song
+from musicround.models import ImportJobRecord, Round, RoundExport, Song
 
 
 def _legacy_app(database_path):
@@ -23,6 +23,11 @@ def _legacy_app(database_path):
 def _column_names(database_path, table_name):
     with sqlite3.connect(database_path) as conn:
         return [column[1] for column in conn.execute(f"PRAGMA table_info({table_name})")]
+
+
+def _index_names(database_path, table_name):
+    with sqlite3.connect(database_path) as conn:
+        return [row[1] for row in conn.execute(f"PRAGMA index_list({table_name})").fetchall()]
 
 
 def test_add_song_fields_adds_model_isrc_to_legacy_song_table(tmp_path):
@@ -110,6 +115,92 @@ def test_add_import_job_attempts_adds_retry_columns_to_legacy_table(tmp_path):
     expected_columns = {"attempt_count", "max_attempts"}
     assert expected_columns.issubset(columns)
     assert expected_columns.issubset(ImportJobRecord.__table__.columns.keys())
+
+
+def test_add_query_performance_indexes_to_existing_tables(tmp_path):
+    """Existing databases get indexes for catalog, queue, and scheduled-send reads."""
+    database_path = tmp_path / "legacy-performance.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE song (
+                id INTEGER PRIMARY KEY,
+                title VARCHAR(200) NOT NULL,
+                artist VARCHAR(200) NOT NULL,
+                genre VARCHAR(100),
+                year INTEGER,
+                preview_url VARCHAR(500),
+                spotify_preview_url VARCHAR(500),
+                deezer_preview_url VARCHAR(500),
+                used_count INTEGER,
+                last_used DATETIME
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE round (
+                id INTEGER PRIMARY KEY,
+                round_type VARCHAR(50) NOT NULL,
+                round_criteria_used VARCHAR(500) NOT NULL,
+                songs TEXT NOT NULL,
+                created_at DATETIME,
+                mp3_generated BOOLEAN,
+                pdf_generated BOOLEAN
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE round_export (
+                id INTEGER PRIMARY KEY,
+                round_id INTEGER NOT NULL,
+                export_type VARCHAR(20) NOT NULL,
+                timestamp DATETIME,
+                status VARCHAR(20),
+                scheduled_for DATETIME
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE import_job_record (
+                id INTEGER PRIMARY KEY,
+                priority INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                status VARCHAR(20),
+                created_at DATETIME
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_query_performance_indexes
+
+        assert add_query_performance_indexes.run_migration() is True
+        assert add_query_performance_indexes.run_migration() is None
+
+    assert "idx_song_artist_title" in _index_names(database_path, "song")
+    assert "idx_song_genre_year" in _index_names(database_path, "song")
+    assert "idx_song_usage" in _index_names(database_path, "song")
+    assert "idx_round_generation_status" in _index_names(database_path, "round")
+    assert "idx_round_export_schedule" in _index_names(database_path, "round_export")
+    assert "idx_import_job_claim" in _index_names(database_path, "import_job_record")
+
+    model_index_names = {
+        index.name
+        for table in (
+            Song.__table__,
+            Round.__table__,
+            RoundExport.__table__,
+            ImportJobRecord.__table__,
+        )
+        for index in table.indexes
+    }
+    assert "idx_song_artist_title" in model_index_names
+    assert "idx_round_export_schedule" in model_index_names
+    assert "idx_import_job_claim" in model_index_names
 
 
 def test_round_songs_comment_matches_storage_behavior():

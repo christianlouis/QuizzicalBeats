@@ -198,6 +198,12 @@ class Song(db.Model):
     
     # Additional properties as JSON strings
     additional_data = db.Column(db.Text, nullable=True)  # Store additional data as JSON
+
+    __table_args__ = (
+        db.Index('idx_song_artist_title', 'artist', 'title'),
+        db.Index('idx_song_genre_year', 'genre', 'year'),
+        db.Index('idx_song_usage', 'used_count', 'last_used'),
+    )
     
     # Relationship with tags
     tags = db.relationship('Tag', secondary='song_tag', back_populates='songs')
@@ -262,6 +268,11 @@ class Round(db.Model):
     pdf_generated = db.Column(db.Boolean, default=False)  # Track if PDF has been generated
     last_generated_at = db.Column(db.DateTime, nullable=True)  # When files were last generated
 
+    __table_args__ = (
+        db.Index('idx_round_created_at', 'created_at'),
+        db.Index('idx_round_generation_status', 'mp3_generated', 'pdf_generated'),
+    )
+
     def __repr__(self):
         return (
             f"Round('{self.name or self.id}', '{self.round_type}', '{self.round_criteria_used}', "
@@ -323,6 +334,11 @@ class RoundExport(db.Model):
     processed_at = db.Column(db.DateTime, nullable=True)
     subject = db.Column(db.String(500), nullable=True)
     body_text = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_round_export_schedule', 'status', 'scheduled_for', 'export_type'),
+        db.Index('idx_round_export_round_timestamp', 'round_id', 'timestamp'),
+    )
     
     # Relationships
     round = db.relationship('Round', backref=db.backref('exports', lazy='dynamic'))
@@ -377,6 +393,11 @@ class ImportJobRecord(db.Model):
     skipped_count = db.Column(db.Integer, default=0)
     attempt_count = db.Column(db.Integer, default=0)
     max_attempts = db.Column(db.Integer, default=3)
+
+    __table_args__ = (
+        db.Index('idx_import_job_claim', 'status', 'priority', 'created_at'),
+        db.Index('idx_import_job_user_status', 'user_id', 'status', 'created_at'),
+    )
     
     # Relationships
     user = db.relationship('User', backref=db.backref('import_jobs', lazy=True))

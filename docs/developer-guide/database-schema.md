@@ -161,6 +161,11 @@ The `Song` table stores detailed information about music tracks from various sou
 | analysis_url          | String(500)  | URL to full audio analysis                      |
 | additional_data       | Text         | Additional data as JSON                         |
 
+**Query indexes:**
+- `idx_song_artist_title` supports catalog ordering and artist/title lookup.
+- `idx_song_genre_year` supports genre/year round planning and filters.
+- `idx_song_usage` supports least-used and recent-usage selection.
+
 ### Tag
 
 The `Tag` table stores tags for categorizing songs.
@@ -191,7 +196,7 @@ The `Round` table stores music quiz rounds.
 | name                  | String(200)  | Round name                                       |
 | round_type            | String(50)   | Type of round (genre, decade, etc.)              |
 | round_criteria_used   | String(500)  | Criteria used to generate the round              |
-| songs                 | Text         | JSON string of song IDs in order                 |
+| songs                 | Text         | Comma-separated song IDs in saved order          |
 | genre                 | String(100)  | Genre of the round (if applicable)               |
 | decade                | String(10)   | Decade of the round (if applicable)              |
 | tag                   | String(50)   | Tag of the round (if applicable)                 |
@@ -200,6 +205,10 @@ The `Round` table stores music quiz rounds.
 | mp3_generated         | Boolean      | Flag indicating if MP3 has been generated        |
 | pdf_generated         | Boolean      | Flag indicating if PDF has been generated        |
 | last_generated_at     | DateTime     | When files were last generated                   |
+
+**Query indexes:**
+- `idx_round_created_at` supports recent-round lists.
+- `idx_round_generation_status` supports readiness and repair views.
 
 ### RoundExport
 
@@ -216,6 +225,14 @@ The `RoundExport` table tracks exports of rounds to various destinations.
 | include_mp3s  | Boolean      | Whether MP3s were included                       |
 | status        | String(20)   | Export status (success, failed)                  |
 | error_message | Text         | Error message if export failed                   |
+| scheduled_for | DateTime     | Deferred email send time                         |
+| processed_at  | DateTime     | When a scheduled export was processed            |
+| subject       | String(500)  | Scheduled or sent email subject                  |
+| body_text     | Text         | Scheduled or sent email body                     |
+
+**Query indexes:**
+- `idx_round_export_schedule` supports due scheduled-email processing.
+- `idx_round_export_round_timestamp` supports round export history views.
 
 ### SystemSetting
 

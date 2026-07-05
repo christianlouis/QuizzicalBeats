@@ -147,7 +147,8 @@
 ### 🎯 Milestone 16: **"Database Durability" Release** – Concurrent Operations
 
 * [ ] Implement connection pooling
-* [ ] Add database query optimizations and indexing
+* [x] Add database indexes for catalog, import queue, and scheduled export queries
+* [ ] Add broader database query optimizations after profiling production traffic
 * [ ] Configure database for concurrent write operations
 * [ ] Set up monitoring for database performance
 * [ ] Implement read/write splitting if necessary
