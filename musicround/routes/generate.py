@@ -329,21 +329,57 @@ def get_songs_from_deezer_playlist(playlist_id):
     Fetch songs from a Deezer playlist, properly import them with metadata, and return them
     """
     try:
-        deezer_client = current_app.config['deezer']
-        songs_per_round = current_app.config.get('SONGS_PER_ROUND', 10)
-        
-        imported_songs = ImportHelper.import_item(
-            item_id=playlist_id,
-            item_type='playlist',
-            source='deezer',
-            deezer_client=deezer_client
-        )
-
-        if not imported_songs:
-            current_app.logger.warning(f"No songs returned from ImportHelper.import_item for Deezer playlist {playlist_id}")
+        if not current_app.config.get('deezer'):
+            current_app.logger.error("Deezer client not configured for playlist import.")
             return []
 
-        return imported_songs[:songs_per_round]
+        songs_per_round = current_app.config.get('SONGS_PER_ROUND', 10)
+
+        import_result = ImportHelper.import_item(
+            service_name='deezer',
+            item_type='playlist',
+            item_id=playlist_id,
+        )
+
+        if (
+            not import_result
+            or (
+                import_result.get('error_count', 0) > 0
+                and import_result.get('imported_count', 0) == 0
+                and import_result.get('skipped_count', 0) == 0
+            )
+        ):
+            current_app.logger.warning(f"No songs imported from Deezer playlist {playlist_id}: {import_result}")
+            return []
+
+        song_ids = []
+        seen_song_ids = set()
+        for song_id in import_result.get('song_ids', []):
+            if song_id is None:
+                continue
+            try:
+                song_id = int(song_id)
+            except (TypeError, ValueError):
+                continue
+            if song_id in seen_song_ids:
+                continue
+            song_ids.append(song_id)
+            seen_song_ids.add(song_id)
+
+        if not song_ids:
+            current_app.logger.warning(f"No song IDs returned after importing Deezer playlist {playlist_id}")
+            return []
+
+        songs_by_id = {
+            song.id: song
+            for song in Song.query.filter(Song.id.in_(song_ids)).all()
+        }
+        ordered_songs = [songs_by_id[song_id] for song_id in song_ids if song_id in songs_by_id]
+        if not ordered_songs:
+            current_app.logger.warning(f"No imported songs resolved for Deezer playlist {playlist_id}")
+            return []
+
+        return ordered_songs[:songs_per_round]
     except Exception as e:
         current_app.logger.error(f"Error fetching or importing Deezer playlist {playlist_id}: {e}")
         import traceback

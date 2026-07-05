@@ -24,6 +24,7 @@ class TestImportHelperDeezer:
             'skipped_songs': ['duplicate-a'],
             'imported_count': 2,
             'skipped_count': 1,
+            'song_ids': [10, 11, 12],
         }
         deezer = DeezerPlaylistStub(result)
 
@@ -38,6 +39,7 @@ class TestImportHelperDeezer:
             'skipped_count': 1,
             'error_count': 0,
             'errors': [],
+            'song_ids': [10, 11, 12],
         }
         assert deezer.calls == [('playlist-123', 'lastfm-test-key')]
 

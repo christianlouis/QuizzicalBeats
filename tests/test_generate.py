@@ -332,3 +332,51 @@ class TestBuildMusicRoundRoute:
         _login(app, client)
         response = client.get('/build-music-round')
         assert response.status_code == 200
+
+    def test_import_deezer_playlist_returns_imported_songs(self, app, client, monkeypatch):
+        """Test Deezer playlist imports from the Generate page return songs for review."""
+        with app.app_context():
+            app.config['deezer'] = object()
+            app.config['SONGS_PER_ROUND'] = 2
+            second_song = Song(title='Second In Database', artist='Artist B', deezer_id=501, source='deezer')
+            first_song = Song(title='First In Playlist', artist='Artist A', deezer_id=502, source='deezer')
+            missing_from_playlist = Song(title='Not In Playlist', artist='Artist C', deezer_id=503, source='deezer')
+            db.session.add_all([second_song, first_song, missing_from_playlist])
+            db.session.commit()
+            first_song_id = first_song.id
+            second_song_id = second_song.id
+
+        import_calls = []
+
+        def fake_import_item(**kwargs):
+            import_calls.append(kwargs)
+            return {
+                'imported_count': 1,
+                'skipped_count': 1,
+                'error_count': 0,
+                'errors': [],
+                'song_ids': [first_song_id, second_song_id, 999999],
+            }
+
+        monkeypatch.setattr('musicround.routes.generate.ImportHelper.import_item', fake_import_item)
+        _login(app, client)
+
+        response = client.post(
+            '/import-playlist',
+            data={
+                'platform': 'deezer',
+                'playlist_url': 'https://www.deezer.com/playlist/playlist123?utm=test',
+                'round_name': 'Deezer Regression',
+            },
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert import_calls == [{
+            'service_name': 'deezer',
+            'item_type': 'playlist',
+            'item_id': 'playlist123',
+        }]
+        assert body.index('First In Playlist') < body.index('Second In Database')
+        assert 'Not In Playlist' not in body
+        assert 'Deezer Playlist: playlist123' in body
