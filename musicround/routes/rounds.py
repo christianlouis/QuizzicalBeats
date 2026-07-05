@@ -40,12 +40,7 @@ def round_detail(round_id):
     rnd = Round.query.get(round_id)
     
     if rnd:
-        song_ids = rnd.songs.split(',')
-        songs = Song.query.filter(Song.id.in_(song_ids)).all()
-        
-        # Ensure songs are in the same order as in the round's song list
-        song_id_to_obj = {str(song.id): song for song in songs}
-        ordered_songs = [song_id_to_obj.get(song_id) for song_id in song_ids if song_id in song_id_to_obj]
+        ordered_songs = rnd.song_list
         
         email_error = session.pop('email_error', None)  # Retrieve and remove the error message from the session
         
@@ -113,7 +108,14 @@ def round_mp3(round_id):
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
     round = Round.query.get_or_404(round_id)
-    song_ids = [int(song_id) for song_id in round.songs.split(',')]
+    song_ids = round.song_id_list
+    if not song_ids:
+        error_msg = 'Round contains no songs. Please add songs before generating an MP3.'
+        current_app.logger.warning(error_msg)
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'error': error_msg}), 400
+        flash(error_msg, 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
     
     # Create a dict mapping song_id to Song object for all songs in the round
     songs_dict = {song.id: song for song in Song.query.filter(Song.id.in_(song_ids)).all()}
@@ -328,7 +330,9 @@ def generate_pdf(round_id):
             return file.read()
 
     # Get songs data in the correct order
-    song_ids = [int(sid) for sid in rnd.songs.split(',')]
+    song_ids = rnd.song_id_list
+    if not song_ids:
+        return 'Round contains no songs'
     
     # Create a dict mapping song_id to Song object for all songs in the round
     songs_dict = {song.id: song for song in Song.query.filter(Song.id.in_(song_ids)).all()}
@@ -498,6 +502,11 @@ def round_pdf(round_id):
     rnd = db.session.get(Round, round_id)
     if not rnd:
         return jsonify({'success': False, 'error': 'Round not found'})
+    if not rnd.song_id_list:
+        return jsonify({
+            'success': False,
+            'error': 'Round contains no songs',
+        }), 400
     
     # Define path for the PDF file
     pdfs_dir = '/data/pdfs'
@@ -524,8 +533,8 @@ def round_pdf(round_id):
     
     try:
         pdf_data = generate_pdf(round_id)
-        if isinstance(pdf_data, str) and pdf_data.startswith('Round not found'):
-            return jsonify({'success': False, 'error': pdf_data})
+        if isinstance(pdf_data, str):
+            return jsonify({'success': False, 'error': pdf_data}), 400
 
         with open(pdf_file_path, 'wb') as f:
             f.write(pdf_data)
@@ -820,9 +829,20 @@ def export_to_dropbox(round_id):
         except Exception as song_err:
             current_app.logger.error(f"Error getting song list: {str(song_err)}")
             # Fallback method to get songs
-            song_ids = [int(sid) for sid in round_obj.songs.split(',')]
-            songs = Song.query.filter(Song.id.in_(song_ids)).all()
+            song_ids = round_obj.song_id_list
+            songs_by_id = {
+                song.id: song
+                for song in Song.query.filter(Song.id.in_(song_ids)).all()
+            }
+            songs = [
+                songs_by_id[song_id]
+                for song_id in song_ids
+                if song_id in songs_by_id
+            ]
             current_app.logger.debug(f"Fallback method retrieved {len(songs)} songs")
+
+        if not songs:
+            raise Exception('Round contains no songs')
         
         # 1. Export song metadata as JSON
         song_data = []
@@ -888,7 +908,7 @@ def export_to_dropbox(round_id):
             if not round_obj.pdf_generated:
                 current_app.logger.debug("PDF not generated yet, generating now")
                 pdf_data = generate_pdf(round_id)
-                if isinstance(pdf_data, str) and pdf_data.startswith('Round not found'):
+                if isinstance(pdf_data, str):
                     current_app.logger.error(f"Error generating PDF: {pdf_data}")
                     raise Exception(f"Error generating PDF: {pdf_data}")
             else:

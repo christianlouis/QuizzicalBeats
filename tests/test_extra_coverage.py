@@ -202,6 +202,20 @@ class TestSaveRoundRoute:
             round_ = Round.query.filter_by(name='Saved Round').first()
             assert round_ is not None
 
+    def test_save_round_rejects_empty_song_selection(self, app, client):
+        """Test that save_round does not persist empty rounds."""
+        _login(app, client)
+
+        response = client.post('/save_round', data={
+            'round_criteria': 'Empty criteria',
+            'round_name': 'Empty Round',
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'at least one song' in response.data
+        with app.app_context():
+            assert Round.query.filter_by(name='Empty Round').first() is None
+
     def test_save_round_increments_used_count(self, app, client):
         """Test that save_round increments used_count for songs."""
         _login(app, client)

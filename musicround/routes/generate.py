@@ -533,13 +533,29 @@ def save_round():
     tag = request.form.get('tag')
     
     # get list of song IDs from form
-    song_ids = request.form.getlist('song_id')
+    raw_song_ids = [song_id.strip() for song_id in request.form.getlist('song_id') if song_id.strip()]
+    if not raw_song_ids:
+        flash('Please select at least one song before saving a round.', 'error')
+        return redirect(url_for('generate.build_music_round'))
 
-    # get list of song objects from database
-    songs = Song.query.filter(Song.id.in_(song_ids)).all()
+    try:
+        song_ids = [int(song_id) for song_id in raw_song_ids]
+    except ValueError:
+        flash('Invalid song selection. Please build the round again.', 'error')
+        return redirect(url_for('generate.build_music_round'))
+
+    # get list of song objects from database while preserving the submitted order
+    songs_by_id = {
+        song.id: song
+        for song in Song.query.filter(Song.id.in_(song_ids)).all()
+    }
+    songs = [songs_by_id[song_id] for song_id in song_ids if song_id in songs_by_id]
+    if len(songs) != len(song_ids):
+        flash('One or more selected songs could not be found. Please build the round again.', 'error')
+        return redirect(url_for('generate.build_music_round'))
 
     # create string representation of song IDs
-    song_ids_str = ','.join(song_id for song_id in song_ids)
+    song_ids_str = ','.join(str(song_id) for song_id in song_ids)
 
     # determine round type
     if genre:
