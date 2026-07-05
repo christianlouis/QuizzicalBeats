@@ -1,7 +1,7 @@
 # Quizzical Beats - Project Roadmap
 
-**Version**: 2026.Q1  
-**Last Updated**: February 2026
+**Version**: 2026.Q3
+**Last Updated**: July 5, 2026
 
 ## Vision Statement
 
@@ -9,8 +9,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 ## Current Status
 
-**Latest Release**: v1.9 - "Documentation Dynamo"  
-**Active Development**: v2.0 - Scaling & Performance  
+**Latest Release**: v1.10 - "Import Infrastructure"
+**Active Development**: v2.x - Reliability, Performance, and Agentic Round Production
 **Repository Health**: ✅ Production-Ready
 
 ---
@@ -109,6 +109,14 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - ✅ .env.example template
 - ✅ Security documentation
 
+#### v1.10 - "Import Infrastructure"
+*Released: Q2 2026*
+- ✅ Database-backed import queue foundation
+- ✅ Background import workers
+- ✅ Import queue status surfaces for users and agents
+- ✅ Initial MCP automation support for round production workflows
+- ✅ Server-side catalog pagination and filters
+
 ---
 
 ### 🚀 Upcoming Releases
@@ -118,7 +126,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Priority**: Critical  
 **Effort**: 2-3 weeks
 
-**Goals**: Background processing for large imports
+**Goals**: Harden the v1.10 import infrastructure foundation for production-scale autonomous workflows.
 
 **Features**:
 - [x] Database-backed import queue system
@@ -607,6 +615,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 | Date | Change |
 |------|--------|
+| 2026-07 | Realigned roadmap status with v1.10 Import Infrastructure and PR #142 reliability work |
 | 2026-02 | Added v1.9 Security Hardening release |
 | 2026-02 | Initial comprehensive roadmap created |
 | 2025-12 | v1.8 Documentation Dynamo completed |

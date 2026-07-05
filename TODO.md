@@ -255,4 +255,4 @@
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: May 27, 2025*
+*Last updated: July 5, 2026*
