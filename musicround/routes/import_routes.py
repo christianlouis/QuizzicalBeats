@@ -128,6 +128,7 @@ def filter_playlists_by_keywords(playlists, keywords, debug_info=None):
     return filtered
 
 @import_bp.route('/official-playlists', methods=['GET', 'POST'])
+@login_required
 def import_official_playlists():
     """Display and import official Spotify playlists from multiple regional accounts"""
     # Resolve the best available Spotify token: a manually-supplied bearer token
@@ -290,6 +291,7 @@ def import_official_playlists():
     )
 
 @import_bp.route('/direct-official-playlists', methods=['GET', 'POST'])
+@login_required
 def direct_official_playlists():
     """Display and import official Spotify playlists using the direct client with bearer token"""
     # Check if user has provided a bearer token
@@ -465,6 +467,7 @@ def direct_official_playlists():
     )
 
 @import_bp.route('/test-spotify-client', methods=['GET'])
+@login_required
 def test_spotify_client():
     """Test route to compare different Spotify client implementations"""
     if 'access_token' not in session:
@@ -586,6 +589,7 @@ def test_spotify_client():
     )
 
 @import_bp.route('/raw-playlists', methods=['GET'])
+@login_required
 def get_raw_playlists():
     """
     Get raw playlists from Spotify without any pagination logic.
@@ -673,6 +677,7 @@ def get_raw_playlists():
     )
 
 @import_bp.route('/direct-auth', methods=['GET', 'POST'])
+@login_required
 def direct_spotify_auth():
     """
     Allow users to manually enter a Spotify bearer token for direct API access.
@@ -720,6 +725,7 @@ def direct_spotify_auth():
     )
 
 @import_bp.route('/update-direct-token', methods=['POST'])
+@login_required
 def update_direct_token():
     """Update the direct bearer token and redirect back to the referring page"""
     # Get return URL from form or default to playlist page

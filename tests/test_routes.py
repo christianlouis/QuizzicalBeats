@@ -306,6 +306,28 @@ class TestAuthenticatedRoutes:
         assert response.status_code == 302
         assert response.headers['Location'].endswith('/users/profile')
 
+    def test_spotify_link_page_normalizes_oauth_profile_name(self, app, client):
+        """Spotify link page should display OAuth profile names even without display_name."""
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.spotify_id = 'spotify-account-id'
+            user.spotify_token = 'access-token'
+            user.spotify_refresh_token = 'refresh-token'
+            user.spotify_token_expiry = datetime.now() + timedelta(hours=1)
+            db.session.commit()
+
+        with client.session_transaction() as sess:
+            sess['spotify_user_info'] = {
+                'id': 'spotify-account-id',
+                'name': 'Christian Spotify',
+            }
+
+        response = client.get('/users/spotify-link')
+
+        assert response.status_code == 200
+        assert b'Display Name: Christian Spotify' in response.data
+
     def test_api_tags_accessible_when_logged_in(self, app, client):
         """Test that API tags endpoint is accessible when logged in."""
         self._login(app, client)

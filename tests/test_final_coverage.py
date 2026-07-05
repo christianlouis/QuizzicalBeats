@@ -140,12 +140,29 @@ class TestImportRoutesAccess:
     def test_official_playlists_requires_login(self, client):
         """Test that import official playlists requires authentication."""
         response = client.get('/import/official-playlists')
-        assert response.status_code in (200, 302)
+        assert response.status_code == 302
+        assert 'login' in response.headers['Location'].lower()
 
     def test_direct_official_playlists_requires_login(self, client):
         """Test that direct official playlists requires authentication."""
         response = client.get('/import/direct-official-playlists')
-        assert response.status_code in (200, 302)
+        assert response.status_code == 302
+        assert 'login' in response.headers['Location'].lower()
+
+    def test_spotify_diagnostic_routes_require_login(self, client):
+        """Direct-token and diagnostic Spotify import routes must not be anonymous."""
+        for path in (
+            '/import/test-spotify-client',
+            '/import/raw-playlists',
+            '/import/direct-auth',
+        ):
+            response = client.get(path)
+            assert response.status_code == 302
+            assert 'login' in response.headers['Location'].lower()
+
+        response = client.post('/import/update-direct-token', data={'bearer_token': 'token'})
+        assert response.status_code == 302
+        assert 'login' in response.headers['Location'].lower()
 
     def test_import_songs_page_accessible(self, app, client):
         """Test that import official playlists requires Spotify or redirects."""

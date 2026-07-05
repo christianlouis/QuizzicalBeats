@@ -110,6 +110,17 @@ def automation_or_admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def _spotify_display_name(spotify_user_data, fallback=None):
+    """Return a stable display name from Spotify's mixed profile payload shapes."""
+    if not isinstance(spotify_user_data, dict):
+        return fallback
+    for key in ('display_name', 'name', 'id'):
+        value = spotify_user_data.get(key)
+        if value:
+            return value
+    return fallback
+
+
 # Helper function for processing Spotify account linking
 def _process_spotify_link(user, token_payload, spotify_user_data):
     """Processes the linking of a Spotify account to a user."""
@@ -126,7 +137,12 @@ def _process_spotify_link(user, token_payload, spotify_user_data):
     update_oauth_tokens(user, token_payload, 'spotify') # Saves token, refresh_token, expiry to user model
 
     # Store comprehensive user info in session
-    session['spotify_user_info'] = spotify_user_data
+    spotify_display_name = _spotify_display_name(spotify_user_data, spotify_id)
+    session['spotify_user_info'] = {
+        **spotify_user_data,
+        'display_name': spotify_display_name,
+    }
+    session['spotify_display_name'] = spotify_display_name
 
     db.session.commit()
     flash('Your Spotify account has been successfully linked!', 'success')
@@ -896,15 +912,24 @@ def spotify_link():
         return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
 
     # GET: Show management UI
-    spotify_user_details = None 
+    spotify_user_info = session.get('spotify_user_info') or None
+    spotify_display_name = _spotify_display_name(spotify_user_info, current_user.spotify_id)
+    if spotify_user_info and spotify_display_name and not spotify_user_info.get('display_name'):
+        spotify_user_info = {
+            **spotify_user_info,
+            'display_name': spotify_display_name,
+        }
+        session['spotify_user_info'] = spotify_user_info
+        session['spotify_display_name'] = spotify_display_name
+
+    spotify_user_details = None
     if current_user.spotify_id:
         spotify_user_details = {
             "id": current_user.spotify_id,
-            "display_name": session.get('spotify_display_name', current_user.spotify_id) 
+            "display_name": spotify_display_name,
         }
     
     now = datetime.now()
-    spotify_user_info = session.get('spotify_user_info')
     return render_template('users/manage_spotify.html', 
                            spotify_user_details=spotify_user_details, 
                            now=now, 
