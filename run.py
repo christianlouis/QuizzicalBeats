@@ -24,6 +24,10 @@ def main():
     # Retention policy action
     retention_parser = backup_subparsers.add_parser('retention', help='Apply backup retention policy')
     retention_parser.add_argument('--days', type=int, default=30, help='Number of days to keep backups')
+
+    database_parser = subparsers.add_parser('database', help='Database diagnostics')
+    database_subparsers = database_parser.add_subparsers(dest='database_action', help='Database action to perform')
+    database_subparsers.add_parser('status', help='Print the configured database backend without credentials')
     
     # Parse the arguments
     args = parser.parse_args()
@@ -50,6 +54,19 @@ def main():
                 else:
                     print(f"Retention policy failed: {result['message']}")
                     return 1
+    elif args.command == 'database':
+        from flask import Flask
+        from musicround import _configure_database_uri
+        from musicround.config import Config
+        from musicround.helpers.database_config import database_summary
+
+        app = Flask(__name__)
+        app.config.from_object(Config)
+        _configure_database_uri(app)
+        summary = database_summary(app.config.get('SQLALCHEMY_DATABASE_URI'))
+        print(f"Database backend: {summary['backend']}")
+        print(f"Database target: {summary['redacted_uri']}")
+        return 0
     else:
         # Default: Run the Flask app
         app = create_app()

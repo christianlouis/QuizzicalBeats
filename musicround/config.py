@@ -42,6 +42,7 @@ class Config:
     
     SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    DATABASE_REQUIRE_MANAGED = os.getenv("DATABASE_REQUIRE_MANAGED", "False") == "True"
 
     
     # Spotify API credentials    

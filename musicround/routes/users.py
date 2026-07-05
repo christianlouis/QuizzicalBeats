@@ -1619,6 +1619,7 @@ def system_health():
     import flask
     import sqlite3
     from datetime import datetime
+    from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
     from musicround.helpers.storage_health import round_mp3_dir, round_pdf_dir
     from musicround.models import Song, Round, User, db
     from musicround.version import VERSION_INFO
@@ -1633,15 +1634,24 @@ def system_health():
         database_stats["round_count"] = Round.query.count()
         database_stats["user_count"] = User.query.count()
         
-        # Get database file size
-        db_path = current_app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
-        if os.path.exists(db_path):
-            size_bytes = os.path.getsize(db_path)
-            size_mb = size_bytes / (1024 * 1024)
-            database_stats["file_size"] = f"{size_mb:.2f} MB"
+        db_uri = current_app.config['SQLALCHEMY_DATABASE_URI']
+        summary = database_summary(db_uri)
+        database_stats["backend"] = summary["backend"]
+        database_stats["database"] = summary["database"] or "Local SQLite file"
+        database_stats["host"] = summary["host"] or "local"
+        database_stats["redacted_uri"] = summary["redacted_uri"]
+
+        if is_sqlite_database_uri(db_uri):
+            db_path = db_uri.replace('sqlite:///', '')
+            if os.path.exists(db_path):
+                size_bytes = os.path.getsize(db_path)
+                size_mb = size_bytes / (1024 * 1024)
+                database_stats["file_size"] = f"{size_mb:.2f} MB"
+            else:
+                database_stats["file_size"] = "Unknown"
+                database_status = {"color": "yellow", "message": "SQLite database file not found at expected location."}
         else:
-            database_stats["file_size"] = "Unknown"
-            database_status = {"color": "yellow", "message": "Database file not found at expected location."}
+            database_stats["file_size"] = "Managed database"
     except Exception as e:
         current_app.logger.error(f"Error checking database status: {str(e)}")
         database_status = {"color": "red", "message": f"Database error: {str(e)}"}

@@ -7,6 +7,7 @@ os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
 os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 
 from musicround import _configure_database_uri, _import_workers_enabled
+from musicround.helpers.database_config import database_summary, redact_database_uri
 
 
 def test_configure_database_uri_preserves_explicit_env_uri(monkeypatch):
@@ -28,6 +29,7 @@ def test_configure_database_uri_preserves_explicit_config_uri(monkeypatch):
     _configure_database_uri(app)
 
     assert app.config['SQLALCHEMY_DATABASE_URI'] == 'postgresql://db.example/qb'
+    assert app.config['DATABASE_BACKEND'] == 'postgresql'
 
 
 def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
@@ -45,7 +47,44 @@ def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
     _configure_database_uri(app)
 
     assert app.config['SQLALCHEMY_DATABASE_URI'] == 'sqlite:////data/song_data.db'
+    assert app.config['DATABASE_BACKEND'] == 'sqlite'
     assert created_paths == [('/data', True)]
+
+
+def test_configure_database_uri_requires_managed_database(monkeypatch):
+    """Production guard fails fast when managed DB mode has no URI."""
+    monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
+    app = Flask(__name__)
+    app.config['DATABASE_REQUIRE_MANAGED'] = True
+
+    import pytest
+    with pytest.raises(RuntimeError, match='SQLALCHEMY_DATABASE_URI is not configured'):
+        _configure_database_uri(app)
+
+
+def test_configure_database_uri_rejects_sqlite_when_managed_required(monkeypatch):
+    """Production guard prevents accidentally keeping SQLite in managed DB mode."""
+    monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', 'sqlite:////data/song_data.db')
+    app = Flask(__name__)
+    app.config['DATABASE_REQUIRE_MANAGED'] = True
+
+    import pytest
+    with pytest.raises(RuntimeError, match='points at SQLite'):
+        _configure_database_uri(app)
+
+
+def test_database_uri_redaction_hides_credentials():
+    """Credential-safe summaries must never expose database passwords."""
+    uri = 'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+
+    redacted = redact_database_uri(uri)
+    summary = database_summary(uri)
+
+    assert 'super-secret' not in redacted
+    assert 'super-secret' not in summary['redacted_uri']
+    assert summary['backend'] == 'postgresql'
+    assert summary['host'] == 'postgres.example'
+    assert summary['database'] == 'quizzicalbeats'
 
 
 def test_create_app_honors_env_database_uri(monkeypatch):

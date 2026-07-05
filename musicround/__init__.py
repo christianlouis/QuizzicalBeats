@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
 from importlib import import_module
 from musicround.config import Config
+from musicround.helpers.database_config import (
+    bool_from_config,
+    database_backend,
+    database_summary,
+    is_sqlite_database_uri,
+)
 from musicround.version import VERSION_INFO, get_version_str
 from datetime import datetime
 from musicround.helpers.auth_helpers import oauth # Import the oauth object
@@ -29,16 +35,31 @@ DEFAULT_DATABASE_PATH = os.path.join(DEFAULT_DATABASE_DIR, 'song_data.db')
 
 def _configure_database_uri(app):
     """Use an explicit database URI when configured, otherwise fall back to SQLite."""
+    require_managed = bool_from_config(app.config.get('DATABASE_REQUIRE_MANAGED'))
     configured_uri = os.environ.get('SQLALCHEMY_DATABASE_URI') or app.config.get(
         'SQLALCHEMY_DATABASE_URI'
     )
     if configured_uri:
+        if require_managed and is_sqlite_database_uri(configured_uri):
+            raise RuntimeError(
+                "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
+                "points at SQLite. Configure a managed SQL URI via secrets."
+            )
         app.config['SQLALCHEMY_DATABASE_URI'] = configured_uri
+        app.config['DATABASE_BACKEND'] = database_backend(configured_uri)
+        app.config['DATABASE_URI_REDACTED'] = database_summary(configured_uri)['redacted_uri']
         return
+
+    if require_managed:
+        raise RuntimeError(
+            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI is not configured."
+        )
 
     if not os.path.exists(DEFAULT_DATABASE_DIR):
         os.makedirs(DEFAULT_DATABASE_DIR, exist_ok=True)
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DEFAULT_DATABASE_PATH}'
+    app.config['DATABASE_BACKEND'] = 'sqlite'
+    app.config['DATABASE_URI_REDACTED'] = 'sqlite:///[local-file]'
     app.logger.warning(
         "SQLALCHEMY_DATABASE_URI is not configured; using local SQLite fallback at %s",
         DEFAULT_DATABASE_PATH,
