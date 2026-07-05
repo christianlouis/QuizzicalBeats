@@ -1,5 +1,5 @@
 import traceback
-from flask import render_template, session, request, current_app, jsonify
+from flask import render_template, request, current_app, jsonify
 from flask_wtf.csrf import CSRFError
 from flask_login import current_user
 import json
@@ -7,6 +7,31 @@ import openai
 
 # Import the csrf instance from the package
 from musicround import csrf
+
+SENSITIVE_FORM_FIELD_PARTS = (
+    'password',
+    'passwd',
+    'token',
+    'secret',
+    'api_key',
+    'apikey',
+    'access_key',
+    'private_key',
+)
+REDACTED_VALUE = '[redacted]'
+
+
+def redact_sensitive_form_data(form_data):
+    """Return form data with credentials and secret-like fields redacted."""
+    redacted = {}
+    for key, value in form_data.items():
+        normalized_key = key.lower()
+        if any(part in normalized_key for part in SENSITIVE_FORM_FIELD_PARTS):
+            redacted[key] = REDACTED_VALUE
+        else:
+            redacted[key] = value
+    return redacted
+
 
 def generate_friendly_error_message(error_info, app=None):
     """
@@ -169,15 +194,18 @@ def handle_error(error, code, default_message):
     """
     Common error handler that renders the error.html template with appropriate context
     """
-    # Get the error message
-    message = getattr(error, 'description', str(error)) or default_message
+    show_admin_debug = (
+        current_user.is_authenticated
+        and getattr(current_user, 'is_admin', False)
+    )
+    raw_message = getattr(error, 'description', str(error)) or default_message
+    message = raw_message if (show_admin_debug or code < 500) else default_message
     
-    # Prepare debug info for logged-in users
+    # Prepare debug info for admins only.
     debug_info = None
     tb = None
     
-    # Use Flask-Login instead of checking for access_token in session
-    if current_user.is_authenticated:
+    if show_admin_debug:
         # Include request details in debug info
         debug_info = {
             'error_type': error.__class__.__name__,
@@ -188,8 +216,9 @@ def handle_error(error, code, default_message):
         }
         
         # Include POST data if it's form data (not for file uploads)
-        if request.form and 'multipart/form-data' not in request.content_type:
-            debug_info['request_form'] = request.form.to_dict()
+        request_content_type = request.content_type or ''
+        if request.form and 'multipart/form-data' not in request_content_type:
+            debug_info['request_form'] = redact_sensitive_form_data(request.form.to_dict())
             
         # Include JSON data if applicable
         if request.is_json:
@@ -205,9 +234,14 @@ def handle_error(error, code, default_message):
         debug_info_str = json.dumps(debug_info, indent=2)
     
     # We'll pass the error info to the template so JavaScript can request a friendly message
+    error_type = (
+        error.__class__.__name__
+        if (show_admin_debug or code < 500)
+        else default_message
+    )
     error_info_for_js = json.dumps({
-        'error_type': error.__class__.__name__,
-        'error_message': str(error),
+        'error_type': error_type,
+        'error_message': message,
         'code': code
     })
     
