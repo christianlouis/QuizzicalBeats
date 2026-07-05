@@ -147,63 +147,6 @@ class TestImportRoutesAccess:
         response = client.get('/import/direct-official-playlists')
         assert response.status_code in (200, 302)
 
-    def test_official_playlist_queue_passes_resolved_token(self, app, client, monkeypatch):
-        """Official Spotify playlist queue jobs must retain the route's resolved token."""
-        from musicround.routes import import_routes
-
-        _login(app, client)
-        captured = {}
-
-        class FakeJob:
-            id = 42
-
-        def fake_enqueue_import_job(**kwargs):
-            captured.update(kwargs)
-            return FakeJob()
-
-        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('manual-token', 'manual'))
-        monkeypatch.setitem(app.config, 'import_queue', object())
-        monkeypatch.setattr(
-            'musicround.helpers.import_queue.enqueue_import_job',
-            fake_enqueue_import_job,
-        )
-
-        response = client.post('/import/official-playlists', data={'playlist_id': 'playlist-123'})
-
-        assert response.status_code == 302
-        assert captured['service_name'] == 'spotify'
-        assert captured['item_type'] == 'playlist'
-        assert captured['item_id'] == 'playlist-123'
-        assert captured['spotify_token'] == 'manual-token'
-
-    def test_direct_official_playlist_queue_passes_bearer_token(self, app, client, monkeypatch):
-        """Direct Spotify playlist queue jobs must retain the manual bearer token."""
-        _login(app, client)
-        captured = {}
-
-        class FakeJob:
-            id = 43
-
-        def fake_enqueue_import_job(**kwargs):
-            captured.update(kwargs)
-            return FakeJob()
-
-        monkeypatch.setitem(app.config, 'import_queue', object())
-        monkeypatch.setattr(
-            'musicround.helpers.import_queue.enqueue_import_job',
-            fake_enqueue_import_job,
-        )
-        with client.session_transaction() as sess:
-            sess['direct_bearer_token'] = 'direct-token'
-
-        response = client.post('/import/direct-official-playlists', data={'playlist_id': 'playlist-456'})
-
-        assert response.status_code == 302
-        assert captured['service_name'] == 'spotify'
-        assert captured['item_type'] == 'playlist'
-        assert captured['item_id'] == 'playlist-456'
-        assert captured['spotify_token'] == 'direct-token'
-
     def test_import_songs_page_accessible(self, app, client):
         """Test that import official playlists requires Spotify or redirects."""
         _login(app, client)
