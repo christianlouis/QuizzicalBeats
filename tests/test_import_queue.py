@@ -192,6 +192,29 @@ class TestImportQueue:
             assert snapshot[0]['record_id'] == record.id
             assert snapshot[0]['item_id'] == 'playlist123'
 
+    def test_enqueue_can_attach_ephemeral_spotify_token(self, app):
+        """Manual Spotify tokens should be carried in memory without persisting them."""
+        with app.app_context():
+            user = User(username='manualqueue', email='manualqueue@example.com')
+            user.password = 'QueuePass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='playlist123',
+                user_id=user.id,
+                priority='4',
+                spotify_token='manual-token',
+            )
+
+            assert not hasattr(record, 'spotify_token')
+            job = queue.get_job(timeout=0.1)
+            assert job.spotify_token == 'manual-token'
+
     def test_enqueue_pending_records_loads_database_jobs(self, app):
         """Test startup can reload pending jobs from the database."""
         with app.app_context():
@@ -294,6 +317,37 @@ class TestImportWorker:
                 'playlist',
                 'playlist-123',
                 spotify_token='system-token',
+            )
+
+    def test_process_job_prefers_ephemeral_spotify_token(self, app):
+        """Worker jobs should use the token captured when the playlist was queued."""
+        with app.app_context():
+            user = User(username='manualworker', email='manualworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='playlist-123',
+                user_id=user.id,
+                spotify_token='manual-token',
+            )
+
+            with (
+                patch('musicround.helpers.import_queue.get_spotify_token', return_value=('fallback-token', 'system')),
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+            ):
+                worker._process_job(job)
+
+            mock_import.assert_called_once_with(
+                'spotify',
+                'playlist',
+                'playlist-123',
+                spotify_token='manual-token',
             )
 
     def test_process_job_updates_record_status(self, app):

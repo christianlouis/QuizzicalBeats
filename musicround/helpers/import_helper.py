@@ -74,11 +74,25 @@ class ImportHelper:
         }
 
     @staticmethod
+    def _enrich_user_spotify_token(auth_token):
+        """Add refresh metadata when an explicit token is the logged-in user's token."""
+        user = ImportHelper._authenticated_current_user()
+        if not user or auth_token.get('access_token') != user.spotify_token:
+            return auth_token
+        enriched_token = dict(auth_token)
+        if user.spotify_refresh_token:
+            enriched_token.setdefault('refresh_token', user.spotify_refresh_token)
+        expires_at = ImportHelper._token_expiry_timestamp(user.spotify_token_expiry)
+        if expires_at:
+            enriched_token.setdefault('expires_at', expires_at)
+        return enriched_token
+
+    @staticmethod
     def _resolve_spotify_auth_token(token=None):
         """Resolve Spotify auth via explicit token, manual session, user token, or system fallback."""
         explicit_token = ImportHelper._coerce_spotify_auth_token(token)
         if explicit_token:
-            return explicit_token
+            return ImportHelper._enrich_user_spotify_token(explicit_token)
 
         from musicround.helpers.spotify_helper import get_spotify_token
 

@@ -120,3 +120,34 @@ class TestSpotifySongImportRoute:
         assert captured['item_type'] == 'track'
         assert captured['item_id'] == 'spotify-track-1'
         assert captured['spotify_token'] == 'manual-token'
+
+    def test_spotify_playlist_queue_passes_resolved_manual_token(self, app, client, monkeypatch):
+        """Queued playlist imports must retain the manual token accepted by the route gate."""
+        from musicround.routes import import_songs
+
+        captured = {}
+
+        class FakeJob:
+            id = 42
+
+        def fake_enqueue_import_job(**kwargs):
+            captured.update(kwargs)
+            return FakeJob()
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        monkeypatch.setattr(import_songs, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setitem(app.config, 'import_queue', object())
+        monkeypatch.setattr(
+            'musicround.helpers.import_queue.enqueue_import_job',
+            fake_enqueue_import_job,
+        )
+
+        response = client.post('/import/playlist', data={'playlist_id': 'playlist-123'})
+
+        assert response.status_code == 302
+        assert captured['service_name'] == 'spotify'
+        assert captured['item_type'] == 'playlist'
+        assert captured['item_id'] == 'playlist-123'
+        assert captured['spotify_token'] == 'manual-token'

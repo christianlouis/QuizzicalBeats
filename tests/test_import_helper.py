@@ -1,8 +1,10 @@
 """Tests for unified import helper behavior."""
 from datetime import datetime, timedelta
 
+from flask_login import login_user
+
 from musicround.helpers.import_helper import ImportHelper
-from musicround.models import Song, SystemSetting, db
+from musicround.models import Song, SystemSetting, User, db
 
 
 class DeezerPlaylistStub:
@@ -162,3 +164,23 @@ class TestImportHelperSpotifyTokens:
 
         assert response['imported_count'] == 1
         assert spotify.calls[0][1]['access_token'] == 'system-token'
+
+    def test_explicit_user_spotify_token_keeps_refresh_metadata(self, app):
+        """Explicit user tokens must still allow Authlib refresh persistence."""
+        expiry = datetime.now() + timedelta(hours=1)
+
+        with app.test_request_context():
+            user = User(username='refreshuser', email='refresh@example.com')
+            user.password = 'ImportPass123!'
+            user.spotify_token = 'user-access-token'
+            user.spotify_refresh_token = 'user-refresh-token'
+            user.spotify_token_expiry = expiry
+            db.session.add(user)
+            db.session.commit()
+            login_user(user)
+
+            token = ImportHelper._resolve_spotify_auth_token('user-access-token')
+
+        assert token['access_token'] == 'user-access-token'
+        assert token['refresh_token'] == 'user-refresh-token'
+        assert token['expires_at'] == int(expiry.timestamp())
