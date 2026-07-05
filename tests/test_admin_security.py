@@ -87,3 +87,72 @@ def test_admin_system_settings_list_and_export_hide_values(app, client):
     _assert_values_absent(list_response, ['system-refresh-secret'])
     _assert_values_absent(details_response, ['system-refresh-secret'])
     _assert_values_absent(csv_export_response, ['system-refresh-secret'])
+
+
+def test_system_settings_page_hides_fallback_refresh_token_value(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    response = client.get('/users/system-settings')
+
+    assert response.status_code == 200
+    _assert_values_absent(response, ['system-refresh-secret'])
+    assert 'Refresh token stored' in response.get_data(as_text=True)
+
+
+def test_system_settings_empty_fallback_token_keeps_existing_value(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': '',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': 'DE',
+        'max_songs_per_round': '8',
+        'enable_public_rounds': 'true',
+        'allow_signups': 'true',
+    })
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == 'system-refresh-secret'
+        assert SystemSetting.get('spotify_region') == 'DE'
+
+
+def test_system_settings_can_replace_and_clear_fallback_refresh_token(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    replace_response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': 'new-system-refresh-secret',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': '',
+        'max_songs_per_round': '8',
+        'allow_signups': 'true',
+    })
+
+    assert replace_response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == 'new-system-refresh-secret'
+
+    clear_response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': '',
+        'clear_fallback_spotify_refresh_token': 'true',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': '',
+        'max_songs_per_round': '8',
+        'allow_signups': 'true',
+    })
+
+    assert clear_response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == ''

@@ -1289,6 +1289,16 @@ def system_settings():
                 value = 'true' if key in request.form else 'false'
                 current_app.logger.debug(f"Setting {key} to {value}")
                 SystemSetting.set(key, value)
+            elif key == 'fallback_spotify_refresh_token':
+                value = request.form.get(key, '').strip()
+                if request.form.get('clear_fallback_spotify_refresh_token') == 'true':
+                    current_app.logger.info("Clearing fallback Spotify refresh token")
+                    SystemSetting.set(key, '')
+                elif value:
+                    current_app.logger.info("Updating fallback Spotify refresh token")
+                    SystemSetting.set(key, value)
+                else:
+                    current_app.logger.debug("Keeping existing fallback Spotify refresh token")
             else:
                 # Normal text/select fields
                 value = request.form.get(key, '')
