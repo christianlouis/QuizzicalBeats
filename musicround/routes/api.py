@@ -15,6 +15,154 @@ from musicround.helpers.logging_utils import redact_authorization_header
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
+
+def _song_payload(song):
+    """Return compact song JSON for list/search endpoints."""
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
+    return {
+        'id': song.id,
+        'title': song.title,
+        'artist': song.artist,
+        'year': song.year,
+        'genre': song.genre,
+        'cover_url': song.cover_url,
+        'preview_url': preview_url,
+        'used_count': song.used_count or 0,
+        'last_used': song.last_used.isoformat() if song.last_used else None,
+        'source': song.source,
+        'spotify_id': song.spotify_id,
+        'deezer_id': song.deezer_id,
+    }
+
+
+def _bool_arg(name):
+    value = request.args.get(name)
+    if value is None:
+        return None
+    return value.lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _int_arg(name, default=None, minimum=None, maximum=None):
+    raw_value = request.args.get(name)
+    if raw_value in (None, ''):
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _filtered_song_query():
+    """Apply common catalog filters from request query parameters."""
+    query = Song.query
+    search = (request.args.get('q') or request.args.get('query') or '').strip()
+    if search:
+        pattern = f'%{search}%'
+        query = query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+
+    genre = (request.args.get('genre') or '').strip()
+    if genre:
+        query = query.filter(Song.genre.ilike(genre))
+
+    year = _int_arg('year')
+    if year is not None:
+        query = query.filter(Song.year == year)
+    year_min = _int_arg('year_min')
+    if year_min is not None:
+        query = query.filter(Song.year >= year_min)
+    year_max = _int_arg('year_max')
+    if year_max is not None:
+        query = query.filter(Song.year <= year_max)
+
+    has_preview = _bool_arg('has_preview')
+    if has_preview is True:
+        query = query.filter(or_(
+            Song.preview_url.isnot(None),
+            Song.spotify_preview_url.isnot(None),
+            Song.deezer_preview_url.isnot(None),
+            Song.apple_preview_url.isnot(None),
+            Song.youtube_preview_url.isnot(None),
+        ))
+    elif has_preview is False:
+        query = query.filter(
+            Song.preview_url.is_(None),
+            Song.spotify_preview_url.is_(None),
+            Song.deezer_preview_url.is_(None),
+            Song.apple_preview_url.is_(None),
+            Song.youtube_preview_url.is_(None),
+        )
+
+    unused_only = _bool_arg('unused_only')
+    if unused_only:
+        query = query.filter(or_(Song.used_count == 0, Song.used_count.is_(None)))
+
+    return query
+
+
+def _ordered_song_query(query):
+    sort = request.args.get('sort', 'artist')
+    direction = request.args.get('direction', 'asc')
+    descending = direction == 'desc' or sort.startswith('-')
+    sort = sort[1:] if sort.startswith('-') else sort
+    allowed = {
+        'artist': Song.artist,
+        'title': Song.title,
+        'genre': Song.genre,
+        'year': Song.year,
+        'used_count': Song.used_count,
+        'last_used': Song.last_used,
+        'id': Song.id,
+    }
+    column = allowed.get(sort, Song.artist)
+    query = query.order_by(column.desc() if descending else column.asc())
+    if sort not in {'artist', 'title'}:
+        query = query.order_by(Song.artist.asc(), Song.title.asc())
+    return query
+
+
+@api_bp.route('/songs', methods=['GET'])
+@login_required
+def list_songs():
+    """List songs with server-side filters and pagination."""
+    page = _int_arg('page', default=1, minimum=1)
+    per_page = _int_arg('per_page', default=50, minimum=1, maximum=200)
+    query = _ordered_song_query(_filtered_song_query())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({
+        'status': 'success',
+        'data': [_song_payload(song) for song in pagination.items],
+        'pagination': {
+            'page': pagination.page,
+            'per_page': pagination.per_page,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'has_next': pagination.has_next,
+            'has_prev': pagination.has_prev,
+        },
+        'filters': {
+            'query': request.args.get('q') or request.args.get('query'),
+            'genre': request.args.get('genre'),
+            'year': request.args.get('year'),
+            'year_min': request.args.get('year_min'),
+            'year_max': request.args.get('year_max'),
+            'has_preview': request.args.get('has_preview'),
+            'unused_only': request.args.get('unused_only'),
+            'sort': request.args.get('sort', 'artist'),
+            'direction': request.args.get('direction', 'asc'),
+        },
+    })
+
 @api_bp.route('/songs/<int:song_id>', methods=['GET'])
 def song_detail(song_id):
     """API endpoint for getting song details."""
@@ -691,28 +839,8 @@ def search_songs():
     
     current_app.logger.info(f"User {current_user.username} searching for songs with query: {query}")
         
-    # Search for songs by title or artist
-    songs = Song.query.filter(
-        or_(
-            Song.title.ilike(f'%{query}%'),
-            Song.artist.ilike(f'%{query}%')
-        )
-    ).limit(20).all()
-    
-    # Convert songs to JSON
-    results = []
-    for song in songs:
-        results.append({
-            'id': song.id,
-            'title': song.title,
-            'artist': song.artist,
-            'year': song.year,
-            'genre': song.genre,
-            'cover_url': song.cover_url,
-            'preview_url': song.preview_url
-        })
-    
-    return jsonify(results)
+    songs = _ordered_song_query(_filtered_song_query()).limit(20).all()
+    return jsonify([_song_payload(song) for song in songs])
 
 @api_bp.route('/songs/update-audio-features', methods=['POST'])
 @login_required

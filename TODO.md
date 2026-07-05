@@ -113,9 +113,10 @@
 
 * [ ] Improve search algorithm and relevance scoring
 * [x] Normalize and de-duplicate tag choices in the round builder
-* [ ] Add advanced filtering options (year, genre, etc.)
+* [x] Add advanced song catalog filtering options (year, genre, preview, usage)
 * [ ] Implement caching for frequent searches
-* [ ] Ensure proper pagination and performance
+* [x] Add server-side song catalog pagination for API and agent workflows
+* [ ] Ensure proper pagination and performance across all large views
 
 ### 🎯 Milestone 13: **"Textual Transport" Release** – Text-Based Playlist Import
 
@@ -222,7 +223,8 @@
 ### 🎯 Milestone 23: **"Performance Pulse" Release** – Scaling & Speed
 
 * [ ] Index high-traffic database fields (tags, dates, users)
-* [ ] Paginate round/song lists
+* [ ] Paginate round/song lists in browser views
+* [x] Paginate song catalog API responses
 * [ ] Lazy load MP3 previews and large content
 * [ ] Add Redis/memory cache layer for read-heavy endpoints
 * [ ] Load test with simulated users and large playlists

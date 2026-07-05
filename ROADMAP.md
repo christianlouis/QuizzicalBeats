@@ -223,7 +223,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.4 - "Search Supercharge" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 2 weeks
 
@@ -232,7 +232,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Full-text search (PostgreSQL FTS or Elasticsearch)
 - [ ] Relevance scoring improvements
-- [ ] Advanced filters (year, genre, artist, BPM)
+- [x] Advanced song catalog filters (title/artist query, year, genre, preview, usage)
 - [ ] Search result caching
 - [ ] Faceted search
 - [ ] Search suggestions/autocomplete
@@ -250,7 +250,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.5 - "Performance Pulse" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 1-2 weeks
 
@@ -260,6 +260,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Database index optimization
 - [ ] Lazy loading for lists
 - [ ] Pagination for all large datasets
+- [x] Server-side pagination for the song catalog API
 - [ ] MP3 preview streaming
 - [x] Catalog analytics summary for usage and preview coverage
 - [ ] Redis caching layer

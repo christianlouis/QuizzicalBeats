@@ -56,6 +56,13 @@ def _ordered_round_songs(round_obj: Round) -> list[Song]:
 
 def _song_summary(song: Song) -> dict[str, Any]:
     data = song.to_dict()
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
     return {
         "id": data["id"],
         "title": data["title"],
@@ -63,7 +70,7 @@ def _song_summary(song: Song) -> dict[str, Any]:
         "genre": data["genre"],
         "year": data["year"],
         "source": song.source,
-        "preview_url": data["preview_url"],
+        "preview_url": preview_url,
         "spotify_id": data["spotify_id"],
         "deezer_id": data["deezer_id"],
         "isrc": data["isrc"],
@@ -487,6 +494,14 @@ def find_songs(
     query: str | None = None,
     title: str | None = None,
     artist: str | None = None,
+    genre: str | None = None,
+    year: int | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_preview: bool | None = None,
+    unused_only: bool = False,
+    offset: int = 0,
+    order_by: str = "artist",
     spotify_id: str | None = None,
     deezer_id: str | None = None,
     isrc: str | None = None,
@@ -495,6 +510,8 @@ def find_songs(
     """Search the local catalog before adding or importing tracks."""
     if limit < 1 or limit > 100:
         raise AutomationError("limit must be between 1 and 100.")
+    if offset < 0:
+        raise AutomationError("offset must not be negative.")
 
     filters = []
     if query:
@@ -504,6 +521,32 @@ def find_songs(
         filters.append(Song.title.ilike(f"%{title.strip()}%"))
     if artist:
         filters.append(Song.artist.ilike(f"%{artist.strip()}%"))
+    if genre:
+        filters.append(Song.genre.ilike(genre.strip()))
+    if year is not None:
+        filters.append(Song.year == int(year))
+    if year_min is not None:
+        filters.append(Song.year >= int(year_min))
+    if year_max is not None:
+        filters.append(Song.year <= int(year_max))
+    if has_preview is True:
+        filters.append(or_(
+            Song.preview_url.isnot(None),
+            Song.spotify_preview_url.isnot(None),
+            Song.deezer_preview_url.isnot(None),
+            Song.apple_preview_url.isnot(None),
+            Song.youtube_preview_url.isnot(None),
+        ))
+    elif has_preview is False:
+        filters.extend([
+            Song.preview_url.is_(None),
+            Song.spotify_preview_url.is_(None),
+            Song.deezer_preview_url.is_(None),
+            Song.apple_preview_url.is_(None),
+            Song.youtube_preview_url.is_(None),
+        ])
+    if unused_only:
+        filters.append(or_(Song.used_count == 0, Song.used_count.is_(None)))
     if spotify_id:
         filters.append(Song.spotify_id == spotify_id)
     if deezer_id:
@@ -514,8 +557,51 @@ def find_songs(
     song_query = Song.query
     for condition in filters:
         song_query = song_query.filter(condition)
-    songs = song_query.order_by(Song.artist, Song.title).limit(limit).all()
-    return {"count": len(songs), "songs": [_song_summary(song) for song in songs]}
+    total = song_query.count()
+
+    descending = order_by.startswith("-")
+    field_name = order_by[1:] if descending else order_by
+    allowed_order = {
+        "artist": Song.artist,
+        "title": Song.title,
+        "genre": Song.genre,
+        "year": Song.year,
+        "used_count": Song.used_count,
+        "last_used": Song.last_used,
+        "id": Song.id,
+    }
+    column = allowed_order.get(field_name)
+    if column is None:
+        raise AutomationError(
+            "order_by must be one of artist, title, genre, year, used_count, last_used, id."
+        )
+    song_query = song_query.order_by(column.desc() if descending else column.asc())
+    if field_name not in {"artist", "title"}:
+        song_query = song_query.order_by(Song.artist.asc(), Song.title.asc())
+
+    songs = song_query.offset(offset).limit(limit).all()
+    return {
+        "count": len(songs),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "query": query,
+            "title": title,
+            "artist": artist,
+            "genre": genre,
+            "year": year,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_preview": has_preview,
+            "unused_only": unused_only,
+            "spotify_id": spotify_id,
+            "deezer_id": deezer_id,
+            "isrc": isrc,
+            "order_by": order_by,
+        },
+        "songs": [_song_summary(song) for song in songs],
+    }
 
 
 def import_catalog_item(

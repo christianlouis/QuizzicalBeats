@@ -61,6 +61,7 @@ class TestSongAutomation:
                 title="Blue Monday",
                 artist="New Order",
                 genre="Synthpop",
+                deezer_preview_url="https://example.test/blue.mp3",
                 used_count=3,
             )
 
@@ -68,9 +69,62 @@ class TestSongAutomation:
 
             assert result["count"] == 1
             assert result["songs"][0]["title"] == "Blue Monday"
+            assert result["songs"][0]["preview_url"] == "https://example.test/blue.mp3"
             assert result["songs"][0]["used_count"] == 3
             assert result["songs"][0]["usage_frequency"] == 3
             assert "last_used" in result["songs"][0]
+
+    def test_find_songs_filters_catalog_for_agent_selection(self, app):
+        with app.app_context():
+            _create_song(
+                title="Filtered Rock 1999",
+                artist="Alpha",
+                genre="Rock",
+                year=1999,
+                preview_url="https://example.test/alpha.mp3",
+                used_count=0,
+            )
+            _create_song(
+                title="Filtered Rock 2001",
+                artist="Beta",
+                genre="Rock",
+                year=2001,
+                preview_url="https://example.test/beta.mp3",
+                used_count=0,
+            )
+            _create_song(
+                title="Filtered Pop 1998",
+                artist="Gamma",
+                genre="Pop",
+                year=1998,
+                used_count=2,
+            )
+
+            result = automation.find_songs(
+                query="Filtered",
+                genre="Rock",
+                year_min=1990,
+                year_max=2000,
+                has_preview=True,
+                unused_only=True,
+                order_by="-year",
+                limit=10,
+            )
+
+            assert result["count"] == 1
+            assert result["total"] == 1
+            assert result["filters"]["genre"] == "Rock"
+            assert result["filters"]["has_preview"] is True
+            assert result["filters"]["unused_only"] is True
+            assert result["songs"][0]["title"] == "Filtered Rock 1999"
+
+    def test_find_songs_rejects_invalid_pagination_and_sort(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="offset"):
+                automation.find_songs(offset=-1)
+
+            with pytest.raises(automation.AutomationError, match="order_by"):
+                automation.find_songs(order_by="popularity")
 
     def test_add_song_reuses_existing_by_isrc_and_adds_tags(self, app):
         with app.app_context():

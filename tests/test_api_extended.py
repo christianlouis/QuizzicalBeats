@@ -216,6 +216,51 @@ class TestSongTagsApi:
 class TestSongSearchApi:
     """Tests for /api/songs/search endpoint."""
 
+    def test_list_songs_filters_and_paginates(self, app, client):
+        """Test catalog listing applies server-side filters and pagination."""
+        _create_user_and_login(app, client, 'listfilter', 'listfilter@example.com')
+        with app.app_context():
+            songs = [
+                Song(
+                    title='Filtered Rock 1999',
+                    artist='Alpha',
+                    genre='Rock',
+                    year=1999,
+                    preview_url='https://example.test/alpha.mp3',
+                    used_count=0,
+                ),
+                Song(
+                    title='Filtered Pop 2005',
+                    artist='Beta',
+                    genre='Pop',
+                    year=2005,
+                    used_count=3,
+                ),
+                Song(
+                    title='Other Rock 2010',
+                    artist='Gamma',
+                    genre='Rock',
+                    year=2010,
+                    deezer_preview_url='https://example.test/gamma.mp3',
+                ),
+            ]
+            db.session.add_all(songs)
+            db.session.commit()
+
+        response = client.get(
+            '/api/songs?q=Filtered&genre=Rock&year_min=1990&year_max=2000'
+            '&has_preview=true&unused_only=true&per_page=5'
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['status'] == 'success'
+        assert data['pagination']['total'] == 1
+        assert data['pagination']['page'] == 1
+        assert data['pagination']['per_page'] == 5
+        assert data['data'][0]['title'] == 'Filtered Rock 1999'
+        assert data['data'][0]['preview_url'] == 'https://example.test/alpha.mp3'
+
     def test_search_songs_authenticated(self, app, client):
         """Test song search returns results when authenticated."""
         _create_user_and_login(app, client, 'searchapiuser', 'searchapi@example.com')
@@ -234,6 +279,45 @@ class TestSongSearchApi:
         assert isinstance(data, list)
         assert any('Rock' in song.get('title', '') or 'Rock' in song.get('artist', '')
                    for song in data)
+
+    def test_search_songs_supports_catalog_filters(self, app, client):
+        """Test legacy search endpoint can use the shared catalog filters."""
+        _create_user_and_login(app, client, 'searchfilters', 'searchfilters@example.com')
+        with app.app_context():
+            songs = [
+                Song(
+                    title='Filtered Rock Legacy',
+                    artist='Rock Band',
+                    genre='Rock',
+                    preview_url='https://example.test/legacy.mp3',
+                ),
+                Song(title='Filtered Pop Legacy', artist='Pop Band', genre='Pop'),
+            ]
+            db.session.add_all(songs)
+            db.session.commit()
+
+        response = client.get('/api/songs/search?q=Filtered&genre=Rock&has_preview=true')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert [song['title'] for song in data] == ['Filtered Rock Legacy']
+
+    def test_search_songs_returns_platform_preview_fallback(self, app, client):
+        """Test compact song payload exposes any available platform preview."""
+        _create_user_and_login(app, client, 'previewfallback', 'previewfallback@example.com')
+        with app.app_context():
+            song = Song(
+                title='Fallback Preview Song',
+                artist='Preview Artist',
+                genre='Rock',
+                deezer_preview_url='https://example.test/deezer.mp3',
+            )
+            db.session.add(song)
+            db.session.commit()
+
+        response = client.get('/api/songs/search?q=Fallback&has_preview=true')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data[0]['preview_url'] == 'https://example.test/deezer.mp3'
 
     def test_search_songs_short_query(self, app, client):
         """Test song search returns empty for too-short query."""

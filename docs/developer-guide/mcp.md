@@ -72,8 +72,12 @@ The MCP server exposes these tools:
 | `process_due_scheduled_round_emails` | Send scheduled round emails that are due. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
 
-`find_songs` includes `used_count`, `usage_frequency`, and `last_used` for each
-result so agents can see how often songs have already appeared in rounds.
+`find_songs` supports `query`, `title`, `artist`, `genre`, `year`,
+`year_min`, `year_max`, `has_preview`, `unused_only`, platform IDs,
+`limit`, `offset`, and `order_by`. It includes `used_count`,
+`usage_frequency`, and `last_used` for each result so agents can see how often
+songs have already appeared in rounds and avoid tracks without playable
+previews.
 
 The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
 `song`, `round`, `tag`, `song_tag`, `user`, `role`, `user_preferences`,
