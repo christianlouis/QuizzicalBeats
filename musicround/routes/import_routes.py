@@ -12,6 +12,7 @@ from musicround.routes.import_songs import import_pl
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.services import automation
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
 
@@ -928,3 +929,21 @@ def queue_status_json():
         'active_jobs': [_import_job_payload(job) for job in data['active_jobs']],
         'recent_jobs': [_import_job_payload(job) for job in data['recent_jobs']],
     })
+
+
+@import_bp.route('/jobs/<int:job_id>/retry', methods=['POST'])
+@login_required
+def retry_import_job(job_id):
+    """Retry a failed or dead-letter import job from the admin queue view."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    reset_attempts = request.form.get('reset_attempts') == '1'
+    if request.is_json:
+        reset_attempts = bool((request.get_json(silent=True) or {}).get('reset_attempts'))
+
+    try:
+        result = automation.retry_import_job(job_id, reset_attempts=reset_attempts)
+    except automation.AutomationError as exc:
+        return jsonify({'error': str(exc), 'details': exc.details}), 400
+    return jsonify(result)

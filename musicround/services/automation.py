@@ -1675,6 +1675,40 @@ def import_progress_events(
     }
 
 
+def retry_import_job(job_id: int, reset_attempts: bool = False) -> dict[str, Any]:
+    """Move a failed or dead-letter import job back to pending and enqueue it."""
+    record = db.session.get(ImportJobRecord, job_id)
+    if not record:
+        raise AutomationError(f"Import job {job_id} was not found.")
+    if record.status not in {"failed", "dead_letter"}:
+        raise AutomationError(
+            f"Import job {job_id} is {record.status}; only failed or dead_letter jobs can retry."
+        )
+
+    record.status = "pending"
+    record.started_at = None
+    record.completed_at = None
+    record.error_message = None
+    if reset_attempts:
+        record.attempt_count = 0
+    db.session.commit()
+
+    queue = current_app.config.get("IMPORT_QUEUE") or current_app.config.get("import_queue")
+    enqueued = False
+    if queue:
+        queue.enqueue_record(record)
+        enqueued = True
+
+    return {
+        "retried": True,
+        "enqueued": enqueued,
+        "job": _import_job_summary(record),
+        "hints": [] if enqueued else [
+            "No in-process import queue is configured; a database-backed worker can still pick up this pending job."
+        ],
+    }
+
+
 def _split_playlist_line(line: str) -> tuple[str | None, str | None, float, list[str]]:
     text = re.sub(r"^\s*(?:\d+[\).\-\s]+|[-*]\s+)", "", line).strip()
     text = text.strip("\"'")
@@ -1745,6 +1779,104 @@ def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     }
 
 
+def _catalog_match_for_candidate(candidate: dict[str, Any]) -> Song | None:
+    title = (candidate.get("title") or "").strip()
+    artist = (candidate.get("artist") or "").strip()
+    if not title or not artist:
+        return None
+    return (
+        Song.query.filter(Song.title.ilike(title), Song.artist.ilike(artist))
+        .order_by(Song.used_count.asc(), Song.id.asc())
+        .first()
+    )
+
+
+def resolve_text_playlist(
+    text: str,
+    limit: int = 100,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Parse a text playlist and resolve confident rows against the catalog."""
+    parsed = parse_text_playlist(text, limit=limit)
+    resolved = []
+    unresolved = []
+    for candidate in parsed["candidates"]:
+        match = None
+        if candidate["confidence"] >= min_confidence and not candidate["needs_review"]:
+            match = _catalog_match_for_candidate(candidate)
+
+        item = dict(candidate)
+        if match:
+            item["song"] = _song_summary(match)
+            item["song_id"] = match.id
+            resolved.append(item)
+        else:
+            item["song"] = None
+            item["song_id"] = None
+            if candidate["confidence"] < min_confidence:
+                item.setdefault("issues", []).append("below_min_confidence")
+            elif candidate["artist"]:
+                item.setdefault("issues", []).append("not_found_in_catalog")
+            unresolved.append(item)
+
+    return {
+        "parsed": parsed,
+        "resolved_count": len(resolved),
+        "unresolved_count": len(unresolved),
+        "resolved": resolved,
+        "unresolved": unresolved,
+        "ready_for_round": parsed["count"] > 0 and not unresolved,
+        "hints": [
+            "Resolve or correct every unresolved row before creating a round.",
+            "Use add_song or import_catalog_item to add missing catalog entries.",
+        ],
+    }
+
+
+def create_round_from_text_playlist(
+    text: str,
+    name: str | None = None,
+    count: int = 8,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Create a manual round from a parsed text playlist only when all rows resolve."""
+    resolved = resolve_text_playlist(text, limit=max(count, 1), min_confidence=min_confidence)
+    if resolved["unresolved_count"]:
+        raise AutomationError(
+            "Text playlist has unresolved rows.",
+            details={
+                "created": False,
+                "status": "needs_review",
+                "resolution": resolved,
+            },
+        )
+    song_ids = [item["song_id"] for item in resolved["resolved"]]
+    if len(song_ids) != count:
+        message = f"Text playlist resolved {len(song_ids)} songs; expected exactly {count}."
+        raise AutomationError(
+            message,
+            details={
+                "created": False,
+                "status": "song_count_mismatch",
+                "expected_song_count": count,
+                "resolved_song_count": len(song_ids),
+                "resolution": resolved,
+            },
+        )
+
+    round_result = create_round(
+        name=name,
+        round_type="manual",
+        count=count,
+        song_ids=song_ids,
+    )
+    return {
+        "created": True,
+        "resolution": resolved,
+        "round": round_result["round"],
+    }
+
+
 def _song_usage_warning(song: Song, window_start: datetime) -> dict[str, Any] | None:
     if not song.last_used:
         return None
@@ -1799,6 +1931,55 @@ def recent_usage_summary(
         "guidance": [
             "Avoid selected_song_warnings unless there is a strong thematic reason.",
             "Prefer lower used_count songs when quality and recognizability are comparable.",
+        ],
+    }
+
+
+def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+    """Return catalog and round analytics useful for planning and backlog decisions."""
+    if months < 1 or months > 36:
+        raise AutomationError("months must be between 1 and 36.")
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+
+    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    recent_rounds = Round.query.filter(Round.created_at >= window_start).count()
+    most_used = (
+        Song.query.order_by(Song.used_count.desc(), Song.artist.asc(), Song.title.asc())
+        .limit(limit)
+        .all()
+    )
+    stale_candidates = (
+        Song.query.filter((Song.used_count == 0) | (Song.used_count.is_(None)))
+        .order_by(Song.artist.asc(), Song.title.asc())
+        .limit(limit)
+        .all()
+    )
+    missing_preview_count = Song.query.filter(
+        Song.preview_url.is_(None),
+        Song.deezer_preview_url.is_(None),
+        Song.spotify_preview_url.is_(None),
+    ).count()
+
+    genre_rows = db.session.query(Song.genre, db.func.count(Song.id)).group_by(Song.genre).all()
+    genre_counts = {
+        genre or "Unknown": count
+        for genre, count in sorted(genre_rows, key=lambda item: (-(item[1] or 0), item[0] or ""))
+    }
+
+    return {
+        "window_months": months,
+        "window_start": _datetime_payload(window_start),
+        "song_count": Song.query.count(),
+        "round_count": Round.query.count(),
+        "recent_round_count": recent_rounds,
+        "missing_preview_count": missing_preview_count,
+        "genre_counts": genre_counts,
+        "most_used_songs": [_song_summary(song) for song in most_used],
+        "unused_candidates": [_song_summary(song) for song in stale_candidates],
+        "guidance": [
+            "Prefer unused_candidates when they fit the theme and have usable previews.",
+            "Treat missing_preview_count as replacement pressure before scheduling email delivery.",
         ],
     }
 

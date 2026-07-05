@@ -151,7 +151,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] WebSocket/SSE progress updates
 - [ ] Progress bars for active imports
 - [x] Detailed error reporting with retry/dead-letter state
-- [ ] Manual recovery options for failed imports
+- [x] Manual recovery options for failed imports
 - [ ] Email notifications on completion
 - [ ] Import history dashboard
 
@@ -261,6 +261,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Lazy loading for lists
 - [ ] Pagination for all large datasets
 - [ ] MP3 preview streaming
+- [x] Catalog analytics summary for usage and preview coverage
 - [ ] Redis caching layer
 - [ ] Query result caching
 - [ ] CDN for static assets
@@ -289,6 +290,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] CSV format support
 - [x] Artist/song detection algorithms
 - [x] Confidence scoring for matches
+- [x] MCP review payload for unresolved text rows
 - [ ] Manual review interface
 - [ ] Bulk import workflow
 - [ ] Format templates
@@ -312,6 +314,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Multiple quiz formats (MCQ, clips, open-ended)
 - [x] Theme-based planning brief for agentic generation
 - [ ] Metadata-driven questions
+- [x] Complete round creation from fully resolved text playlists
 - [ ] User review/edit interface
 - [x] Recent usage and fatigue context for prompt optimization
 - [x] Draft intro/replay/outro script support for generated rounds

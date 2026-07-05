@@ -45,7 +45,9 @@ The MCP server exposes these tools:
 | `delete_datastore_object` | Delete one persisted object by primary key. |
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
 | `import_progress_events` | Return queue and job progress for polling clients. |
+| `retry_import_job` | Requeue a failed or dead-letter import job for manual recovery. |
 | `parse_text_playlist` | Parse pasted text or CSV-like playlists into reviewable song candidates. |
+| `resolve_text_playlist` | Match parsed text rows against existing catalog songs. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
@@ -57,6 +59,8 @@ The MCP server exposes these tools:
 | `round_planning_brief` | Build an agent-readable brief for a robust themed round. |
 | `draft_round_audio_scripts` | Draft intro, replay, and outro text before TTS generation. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
+| `create_round_from_text_playlist` | Create a complete round from text rows after every row resolves. |
+| `round_analytics_summary` | Summarize catalog health, usage frequency, and unused candidates. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
@@ -85,8 +89,9 @@ fields whose names contain `password`, `token`, or `secret` unless
 2. Search with `find_songs` to avoid duplicates.
 3. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
-   For pasted lists, run `parse_text_playlist` first and review any
-   low-confidence rows before importing.
+   For pasted lists, run `parse_text_playlist` first, then
+   `resolve_text_playlist`; use `create_round_from_text_playlist` only after
+   every row resolves.
 4. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
    round when fewer than the requested eight tracks resolve.

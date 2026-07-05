@@ -921,6 +921,87 @@ class TestAgentPlanningAutomation:
             assert result["low_confidence"][0]["issues"] == ["missing_artist"]
             assert result["ready_for_import"] is False
 
+    def test_retry_import_job_requeues_dead_letter_job(self, app):
+        with app.app_context():
+            user = _create_user()
+            queue = ImportQueue()
+            app.config["IMPORT_QUEUE"] = queue
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist123",
+                priority=5,
+                user_id=user.id,
+                status="dead_letter",
+                attempt_count=3,
+                max_attempts=3,
+                error_message="manual review required",
+                completed_at=datetime.utcnow(),
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            result = automation.retry_import_job(record.id, reset_attempts=True)
+
+            assert result["retried"] is True
+            assert result["enqueued"] is True
+            assert result["job"]["status"] == "pending"
+            assert result["job"]["attempt_count"] == 0
+            assert queue.snapshot()[0]["record_id"] == record.id
+
+    def test_resolve_text_playlist_matches_catalog_songs(self, app):
+        with app.app_context():
+            song = _create_song(title="As It Was", artist="Harry Styles")
+
+            result = automation.resolve_text_playlist("Harry Styles - As It Was")
+
+            assert result["resolved_count"] == 1
+            assert result["unresolved_count"] == 0
+            assert result["resolved"][0]["song_id"] == song.id
+            assert result["ready_for_round"] is True
+
+    def test_create_round_from_text_playlist_requires_exact_count(self, app):
+        with app.app_context():
+            _create_song(title="One", artist="A")
+            _create_song(title="Two", artist="B")
+
+            result = automation.create_round_from_text_playlist(
+                "A - One\nB - Two",
+                name="Text Round",
+                count=2,
+            )
+
+            assert result["created"] is True
+            assert result["round"]["name"] == "Text Round"
+            assert result["round"]["song_ids"]
+
+    def test_create_round_from_text_playlist_returns_review_payload(self, app):
+        with app.app_context():
+            _create_song(title="One", artist="A")
+
+            with pytest.raises(automation.AutomationError) as exc_info:
+                automation.create_round_from_text_playlist(
+                    "A - One\nUnknown - Missing",
+                    count=2,
+                )
+
+            assert exc_info.value.details["status"] == "needs_review"
+            assert exc_info.value.details["resolution"]["unresolved_count"] == 1
+
+    def test_round_analytics_summary_reports_catalog_health(self, app):
+        with app.app_context():
+            _create_song(title="Used", artist="A", genre="Rock", used_count=4)
+            _create_song(title="Unused", artist="B", genre="Pop", used_count=0)
+            _create_song(title="No Preview", artist="C", genre="Rock")
+
+            result = automation.round_analytics_summary(months=6, limit=5)
+
+            assert result["song_count"] == 3
+            assert result["missing_preview_count"] == 3
+            assert result["genre_counts"]["Rock"] == 2
+            assert result["most_used_songs"][0]["title"] == "Used"
+            assert any(song["title"] == "Unused" for song in result["unused_candidates"])
+
     def test_recent_usage_summary_warns_for_recently_used_selected_songs(self, app):
         with app.app_context():
             user = _create_user()

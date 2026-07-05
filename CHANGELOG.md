@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a JSON import queue status endpoint for polling clients and MCP workflows.
 - Added normalized, de-duplicated tag options for the music-round builder.
 - Added MCP automation helpers for import progress polling, text playlist parsing, recent usage warnings, quizmaster planning context, and draft intro/replay/outro scripts.
+- Added manual import-job retry recovery, text-playlist catalog resolution, text-to-round creation, and catalog analytics MCP helpers.
 
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.

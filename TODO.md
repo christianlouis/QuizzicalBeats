@@ -106,7 +106,7 @@
 * [x] MCP polling payload for active and recent import jobs
 * [ ] Real-time progress indicators for active imports
 * [x] Detailed error reporting with retry/dead-letter state
-* [ ] Manual recovery actions for failed imports
+* [x] Manual recovery actions for failed imports
 * [ ] Email notifications when imports complete
 
 ### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
@@ -122,8 +122,10 @@
 * [x] Support for pasting plain text playlists
 * [x] Line-by-line parsing with artist/song detection
 * [x] Confidence scoring for matches
+* [x] MCP review payload for low-confidence matches
 * [ ] Manual review interface for low-confidence matches
 * [x] Support for various text formats (CSV, plain text, etc.)
+* [x] Create complete rounds from fully resolved text playlists
 
 ### 🎯 Milestone 14: **"Curated Collector" Release** – Playlist Scraper
 
@@ -173,7 +175,7 @@
 * [ ] Develop AI module to generate full quiz rounds
   * [ ] Use existing song metadata (genre, year, tempo, artist)
   * [ ] Support different quiz formats: multiple-choice, guess-the-clip, open-ended
-  * [ ] Create quiz rounds from a playlist
+  * [x] Create quiz rounds from fully resolved text playlists
   * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
   * [x] Provide recent usage/fatigue context for agentic song selection
   * [x] Draft intro/replay/outro scripts for later TTS generation
@@ -243,6 +245,7 @@
 * [ ] REST API for third-party integration (e.g., with trivia bots)
 * [ ] Audio fingerprint validation for user-uploaded MP3s
 * [ ] Round analytics: usage frequency, popularity, ratings
+* [x] MCP catalog analytics summary for usage frequency and preview coverage
 * [ ] Documentation enhancements:
   * [ ] Create video tutorials for complex workflows
   * [ ] Implement keyboard shortcuts in the application

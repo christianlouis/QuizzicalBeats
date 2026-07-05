@@ -204,9 +204,34 @@ def import_progress_events(
 
 
 @mcp.tool()
+def retry_import_job(job_id: int, reset_attempts: bool = False) -> dict[str, Any]:
+    """Retry a failed or dead-letter import job."""
+    return _with_app_context(
+        automation.retry_import_job,
+        job_id=job_id,
+        reset_attempts=reset_attempts,
+    )
+
+
+@mcp.tool()
 def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     """Parse pasted text or CSV-like playlists into reviewable song candidates."""
     return _with_app_context(automation.parse_text_playlist, text=text, limit=limit)
+
+
+@mcp.tool()
+def resolve_text_playlist(
+    text: str,
+    limit: int = 100,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Resolve a parsed text playlist against existing catalog songs."""
+    return _with_app_context(
+        automation.resolve_text_playlist,
+        text=text,
+        limit=limit,
+        min_confidence=min_confidence,
+    )
 
 
 @mcp.tool()
@@ -403,6 +428,38 @@ def create_round_from_playlist(
         if exc.details:
             return exc.details
         raise
+
+
+@mcp.tool()
+def create_round_from_text_playlist(
+    text: str,
+    name: str | None = None,
+    count: int = 8,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Create a complete manual round from text rows that all resolve to catalog songs."""
+    try:
+        return _with_app_context(
+            automation.create_round_from_text_playlist,
+            text=text,
+            name=name,
+            count=count,
+            min_confidence=min_confidence,
+        )
+    except automation.AutomationError as exc:
+        if exc.details:
+            return exc.details
+        raise
+
+
+@mcp.tool()
+def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+    """Return catalog and round analytics for planning and fatigue checks."""
+    return _with_app_context(
+        automation.round_analytics_summary,
+        months=months,
+        limit=limit,
+    )
 
 
 @mcp.tool()

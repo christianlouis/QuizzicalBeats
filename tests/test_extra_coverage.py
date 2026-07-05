@@ -433,6 +433,45 @@ class TestImportQueueStatusRoute:
         assert any(job['item_id'] == 'json-pending-playlist' for job in data['queue'])
         assert any(job['item_id'] == 'json-pending-playlist' for job in data['recent_jobs'])
 
+    def test_retry_import_job_requires_admin(self, app, client):
+        """Test retrying an import job requires admin access."""
+        _login(app, client, 'nonadmin_retry', 'nonadmin_retry@example.com')
+
+        response = client.post('/import/jobs/1/retry')
+
+        assert response.status_code == 403
+        assert response.get_json()['error'] == 'Admin access required'
+
+    def test_retry_import_job_requeues_dead_letter_for_admin(self, app, client):
+        """Test admin retry endpoint moves a dead-letter job back to pending."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            record = ImportJobRecord(
+                service_name='spotify',
+                item_type='playlist',
+                item_id='retry-playlist',
+                user_id=user.id,
+                status='dead_letter',
+                attempt_count=3,
+                max_attempts=3,
+                error_message='manual review required',
+            )
+            db.session.add(record)
+            db.session.commit()
+            record_id = record.id
+
+        response = client.post(
+            f'/import/jobs/{record_id}/retry',
+            json={'reset_attempts': True},
+        )
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data['retried'] is True
+        assert data['job']['status'] == 'pending'
+        assert data['job']['attempt_count'] == 0
+
 
 class TestUserRoutesExtended:
     """Additional user route tests for more coverage."""
