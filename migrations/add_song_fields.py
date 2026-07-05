@@ -15,32 +15,35 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
-    # Add new columns to the song table
-    op.add_column('song', sa.Column('isrc', sa.String(20), nullable=True))
-    op.add_column('song', sa.Column('album_name', sa.String(200), nullable=True))
-    op.add_column('song', sa.Column('metadata_sources', sa.String(500), nullable=True))
-    op.add_column('song', sa.Column('import_date', sa.DateTime, nullable=True))
-    op.add_column('song', sa.Column('source', sa.String(20), nullable=True))
-    
+    with op.batch_alter_table('song') as batch_op:
+        # Add new columns to the song table
+        batch_op.add_column(sa.Column('isrc', sa.String(20), nullable=True))
+        batch_op.add_column(sa.Column('album_name', sa.String(200), nullable=True))
+        batch_op.add_column(sa.Column('metadata_sources', sa.String(500), nullable=True))
+        batch_op.add_column(sa.Column('import_date', sa.DateTime, nullable=True))
+        batch_op.add_column(sa.Column('source', sa.String(20), nullable=True))
+
+        # Increase length of existing URL columns
+        batch_op.alter_column('preview_url', type_=sa.String(500))
+        batch_op.alter_column('cover_url', type_=sa.String(500))
+
     # Create index for ISRC
     op.create_index(op.f('ix_song_isrc'), 'song', ['isrc'], unique=False)
-    
-    # Increase length of existing URL columns
-    op.alter_column('song', 'preview_url', type_=sa.String(500))
-    op.alter_column('song', 'cover_url', type_=sa.String(500))
 
 def downgrade():
-    # Remove the new columns
     op.drop_index(op.f('ix_song_isrc'), table_name='song')
-    op.drop_column('song', 'isrc')
-    op.drop_column('song', 'album_name')
-    op.drop_column('song', 'metadata_sources')
-    op.drop_column('song', 'import_date')
-    op.drop_column('song', 'source')
-    
-    # Restore original column lengths
-    op.alter_column('song', 'preview_url', type_=sa.String(200))
-    op.alter_column('song', 'cover_url', type_=sa.String(200))
+
+    with op.batch_alter_table('song') as batch_op:
+        # Remove the new columns
+        batch_op.drop_column('isrc')
+        batch_op.drop_column('album_name')
+        batch_op.drop_column('metadata_sources')
+        batch_op.drop_column('import_date')
+        batch_op.drop_column('source')
+
+        # Restore original column lengths
+        batch_op.alter_column('preview_url', type_=sa.String(200))
+        batch_op.alter_column('cover_url', type_=sa.String(200))
 
 def run_migration():
     """
