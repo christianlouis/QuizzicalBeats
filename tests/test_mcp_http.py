@@ -10,6 +10,7 @@ os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 
 from musicround.mcp_http import (  # noqa: E402
     _AUTH_FAILURES,
+    _client_rate_limit_id,
     BearerAuthMiddleware,
     build_app,
     mcp,
@@ -62,6 +63,34 @@ def test_mcp_rate_limits_failed_bearer_attempts(monkeypatch):
     assert first.status_code == 401
     assert blocked.status_code == 429
     assert accepted.status_code == 204
+
+
+def test_mcp_rate_limit_id_ignores_x_forwarded_for_by_default(monkeypatch):
+    monkeypatch.delenv("MCP_TRUST_X_FORWARDED_FOR", raising=False)
+    scope = {"type": "http", "client": ("10.0.0.8", 4567)}
+    headers = {b"x-forwarded-for": b"203.0.113.9"}
+
+    assert _client_rate_limit_id(scope, headers) == "10.0.0.8"
+
+
+def test_mcp_rate_limit_id_can_explicitly_trust_x_forwarded_for(monkeypatch):
+    monkeypatch.setenv("MCP_TRUST_X_FORWARDED_FOR", "True")
+    scope = {"type": "http", "client": ("10.0.0.8", 4567)}
+    headers = {b"x-forwarded-for": b"203.0.113.9, 198.51.100.1"}
+
+    assert _client_rate_limit_id(scope, headers) == "203.0.113.9"
+
+
+def test_mcp_rate_limit_env_falls_back_when_invalid(monkeypatch):
+    monkeypatch.setenv("MCP_BEARER_TOKEN", "test-mcp-token")
+    monkeypatch.setenv("MCP_AUTH_RATE_LIMIT_ATTEMPTS", "bad")
+    monkeypatch.setenv("MCP_AUTH_RATE_LIMIT_WINDOW_SECONDS", "bad")
+    _AUTH_FAILURES.clear()
+    client = TestClient(BearerAuthMiddleware(_dummy_app))
+
+    response = client.get("/mcp", headers={"Authorization": "Bearer test-mcp-token"})
+
+    assert response.status_code == 204
 
 
 def test_mcp_falls_back_to_automation_token(monkeypatch):
