@@ -99,6 +99,26 @@ class TestRoundsListRoute:
         assert b'Scheduled' in response.data
         assert b'2026-07-09 17:00' in response.data
 
+    def test_rounds_list_is_paginated(self, app, client):
+        """Round list should only render the requested page of rounds."""
+        _login(app, client)
+        song_id = _create_song(app, title='Paged Song')
+        for index in range(30):
+            _create_round(app, [song_id], name=f'Paged Round {index:02d}')
+
+        first_page = client.get('/rounds/?per_page=25')
+        second_page = client.get('/rounds/?per_page=25&page=2')
+
+        assert first_page.status_code == 200
+        assert b'Paged Round 29' in first_page.data
+        assert b'Paged Round 00' not in first_page.data
+        assert b'Page 1 of 2' in first_page.data
+
+        assert second_page.status_code == 200
+        assert b'Paged Round 00' in second_page.data
+        assert b'Paged Round 29' not in second_page.data
+        assert b'Page 2 of 2' in second_page.data
+
 
 class TestRoundDetailRoute:
     """Tests for GET /rounds/<id> (round_detail)."""

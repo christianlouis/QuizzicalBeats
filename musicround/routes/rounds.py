@@ -28,6 +28,21 @@ from musicround.helpers.storage_health import (
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
 
+def _int_arg(name, default=None, minimum=None, maximum=None):
+    raw_value = request.args.get(name)
+    if raw_value in (None, ''):
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
 def _rounds_list_statuses(rounds):
     """Build compact readiness and schedule metadata for the rounds list."""
     round_ids = [round_.id for round_ in rounds]
@@ -107,9 +122,21 @@ def _storage_failure_response(round_id, storage_health, status_code=503):
 @rounds_bp.route('/')
 @login_required
 def rounds_list():
-    """Display a list of all rounds"""
-    rounds = Round.query.order_by(Round.created_at.desc(), Round.id.desc()).all()
-    return render_template('rounds.html', rounds=rounds, round_statuses=_rounds_list_statuses(rounds))
+    """Display a paginated list of rounds."""
+    page = _int_arg('page', default=1, minimum=1)
+    per_page = _int_arg('per_page', default=25, minimum=1, maximum=100)
+    query = Round.query.order_by(Round.created_at.desc(), Round.id.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    rounds = pagination.items
+    query_args = {'per_page': per_page}
+    return render_template(
+        'rounds.html',
+        rounds=rounds,
+        pagination=pagination,
+        query_args=query_args,
+        filters={'per_page': per_page},
+        round_statuses=_rounds_list_statuses(rounds),
+    )
 
 @rounds_bp.route('/<int:round_id>')
 @login_required

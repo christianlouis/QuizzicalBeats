@@ -224,7 +224,7 @@
 ### 🎯 Milestone 23: **"Performance Pulse" Release** – Scaling & Speed
 
 * [ ] Index high-traffic database fields (tags, dates, users)
-* [ ] Paginate round/song lists in browser views
+* [x] Paginate song and round browser lists server-side
 * [x] Paginate song catalog API responses
 * [x] Paginate and filter the browser song library server-side
 * [ ] Lazy load MP3 previews and large content

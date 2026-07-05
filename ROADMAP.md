@@ -262,6 +262,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Pagination for all large datasets
 - [x] Server-side pagination for the song catalog API
 - [x] Server-side pagination and filters for the browser song library
+- [x] Server-side pagination for the browser rounds list
 - [ ] MP3 preview streaming
 - [x] Catalog analytics summary for usage and preview coverage
 - [ ] Redis caching layer
