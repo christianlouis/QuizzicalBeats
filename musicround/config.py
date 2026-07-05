@@ -119,6 +119,7 @@ class Config:
     
     # Static OAuth URL configuration (for production environments)
     STATIC_OAUTH_URLS = os.getenv("STATIC_OAUTH_URLS", "False") == "True"
+    ENABLE_OAUTH_DEBUG = os.getenv("ENABLE_OAUTH_DEBUG", "False") == "True"
     OAUTH_SPOTIFY_AUTH_URL = os.getenv("OAUTH_SPOTIFY_AUTH_URL")
     OAUTH_SPOTIFY_LINK_URL = os.getenv("OAUTH_SPOTIFY_LINK_URL")
     OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")

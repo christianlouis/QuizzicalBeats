@@ -1,8 +1,8 @@
 """
 Debug route for OAuth URL generation
 """
-from flask import Blueprint, render_template, jsonify, current_app, request, url_for
-from flask_login import login_required
+from flask import Blueprint, abort, render_template, jsonify, current_app, request, url_for
+from flask_login import current_user, login_required
 from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 
 # Create blueprint
@@ -18,7 +18,13 @@ def debug_oauth_urls():
     Formats:
     - HTML: Default view with pretty UI
     - JSON: Add ?format=json or use Accept: application/json header
-    """    # Get config settings
+    """
+    if not current_app.config.get('ENABLE_OAUTH_DEBUG'):
+        abort(404)
+    if not current_user.is_admin:
+        abort(403)
+
+    # Get config settings
     use_https = current_app.config.get('USE_HTTPS', False)
     preferred_scheme = current_app.config.get('PREFERRED_URL_SCHEME', 'http')
     static_oauth_urls = current_app.config.get('STATIC_OAUTH_URLS', False)
