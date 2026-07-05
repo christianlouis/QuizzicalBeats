@@ -333,6 +333,11 @@ class ImportHelper:
                     result = deezer_client.import_playlist(item_id, lastfm_api_key=lastfm_api_key)
                     imported_count = result.get('imported_count', 0)
                     skipped_count = result.get('skipped_count', 0)
+                    song_ids = result.get('song_ids') or [
+                        song.id
+                        for song in result.get('songs', [])
+                        if getattr(song, 'id', None) is not None
+                    ]
 
                     if imported_count == 0 and skipped_count == 0:
                         current_app.logger.warning(f"Deezer playlist import returned empty result for playlist ID: {item_id}")
@@ -346,7 +351,8 @@ class ImportHelper:
                         'imported_count': imported_count,
                         'skipped_count': skipped_count,
                         'error_count': 0,
-                        'errors': []
+                        'errors': [],
+                        'song_ids': song_ids,
                     }
                 except Exception as e:
                     current_app.logger.error(f"Exception occurred while importing Deezer playlist {item_id}: {str(e)}")

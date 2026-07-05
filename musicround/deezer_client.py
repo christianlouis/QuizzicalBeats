@@ -315,12 +315,14 @@ class DeezerClient:
         tracks = self.get_playlist_tracks(playlist_id)
         imported_songs = []
         skipped_songs = []
+        playlist_songs = []
         
         for track in tracks:
             track_id = track.get('id')
             if track_id:
                 song, was_new = self.import_track(track_id, lastfm_api_key)
                 if song:
+                    playlist_songs.append(song)
                     if was_new:
                         imported_songs.append(song)
                     else:
@@ -330,6 +332,8 @@ class DeezerClient:
                 time.sleep(0.2)
         
         return {
+            'songs': playlist_songs,
+            'song_ids': [song.id for song in playlist_songs if getattr(song, 'id', None) is not None],
             'imported_songs': imported_songs,
             'skipped_songs': skipped_songs,
             'imported_count': len(imported_songs),
