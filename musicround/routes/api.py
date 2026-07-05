@@ -41,6 +41,15 @@ def _song_payload(song):
     }
 
 
+def _safe_dropbox_api_error(status_code, message='Dropbox API error'):
+    """Return a stable Dropbox API error without provider raw bodies or tracebacks."""
+    return jsonify({
+        'error': message,
+        'code': 'dropbox_api_error',
+        'status_code': status_code,
+    })
+
+
 def _bool_arg(name):
     value = request.args.get(name)
     if value is None:
@@ -997,7 +1006,6 @@ def list_dropbox_folders():
     from musicround.helpers.dropbox_helper import get_current_user_dropbox_token
     import requests
     import json
-    import traceback
     
     # Check if user has Dropbox connected
     if not current_user.dropbox_token:
@@ -1112,7 +1120,11 @@ def list_dropbox_folders():
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")
-                return jsonify({'error': f'Dropbox API error: {response.status_code}', 'raw_response': response.text}), 500
+                current_app.logger.error(
+                    "Dropbox list_folder non-JSON error body: %s",
+                    response.text[:1000],
+                )
+                return _safe_dropbox_api_error(response.status_code), 502
         
         # Process the successful response
         result = response.json()
@@ -1140,8 +1152,8 @@ def list_dropbox_folders():
         current_app.logger.error(f"Error listing Dropbox folders: {str(e)}")
         current_app.logger.error(f"Traceback: {error_traceback}")
         return jsonify({
-            'error': str(e),
-            'traceback': error_traceback,
+            'error': 'Unexpected Dropbox folder listing error.',
+            'code': 'dropbox_folder_list_failed',
             'message': 'An unexpected error occurred while listing Dropbox folders'
         }), 500
 
@@ -1153,7 +1165,6 @@ def create_dropbox_folder():
     from musicround.helpers.dropbox_helper import get_current_user_dropbox_token
     import requests
     import json
-    import traceback
     
     # Check if user has Dropbox connected
     if not current_user.dropbox_token:
@@ -1233,10 +1244,11 @@ def create_dropbox_folder():
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")
-                return jsonify({
-                    'error': f'Dropbox API error: {response.status_code}',
-                    'raw_response': response.text
-                }), 500
+                current_app.logger.error(
+                    "Dropbox create_folder non-JSON error body: %s",
+                    response.text[:1000],
+                )
+                return _safe_dropbox_api_error(response.status_code), 502
         
         # Process the successful response
         result = response.json()
@@ -1259,8 +1271,8 @@ def create_dropbox_folder():
         current_app.logger.error(f"Error creating Dropbox folder: {str(e)}")
         current_app.logger.error(f"Traceback: {error_traceback}")
         return jsonify({
-            'error': str(e),
-            'traceback': error_traceback,
+            'error': 'Unexpected Dropbox folder creation error.',
+            'code': 'dropbox_folder_create_failed',
             'message': 'An unexpected error occurred while creating Dropbox folder'
         }), 500
 

@@ -353,6 +353,55 @@ class TestImportRoutesAccess:
         assert captured['item_id'] == 'playlist-456'
         assert captured['spotify_token'] == 'direct-token'
 
+    def test_official_playlist_page_hides_stored_direct_token(self, app, client, monkeypatch):
+        """Direct bearer tokens must never be rendered into OAuth-mode playlist HTML."""
+        from musicround.routes import import_routes
+
+        _login(app, client)
+        with client.session_transaction() as sess:
+            sess['direct_bearer_token'] = 'direct-secret-token'
+            sess['direct_spotify_username'] = 'Spotify User'
+
+        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('oauth-token', 'user'))
+        monkeypatch.setattr(import_routes, 'fetch_all_user_playlists', lambda *args, **kwargs: [])
+
+        response = client.get('/import/official-playlists')
+
+        assert response.status_code == 200
+        assert b'direct-secret-token' not in response.data
+        assert b'Direct token saved' in response.data
+        assert b'name="bearer_token" value=' not in response.data
+
+    def test_direct_playlist_page_posts_import_forms_to_direct_endpoint(self, app, client, monkeypatch):
+        """Direct-mode playlist imports must not fall back to the OAuth import route."""
+        class FakeDirectClient:
+            def __init__(self, bearer_token):
+                self.bearer_token = bearer_token
+
+            def fetch_all_user_playlists(self, account):
+                return [{
+                    'id': 'playlist-direct',
+                    'name': 'Direct Playlist',
+                    'description': '',
+                    'images': [],
+                    'owner': {'id': account},
+                    'tracks': {'total': 8},
+                }]
+
+        _login(app, client)
+        with client.session_transaction() as sess:
+            sess['direct_bearer_token'] = 'direct-secret-token'
+            sess['direct_spotify_username'] = 'Spotify User'
+
+        monkeypatch.setattr('musicround.helpers.spotify_direct.SpotifyDirectClient', FakeDirectClient)
+
+        response = client.get('/import/direct-official-playlists?account=spotify')
+
+        assert response.status_code == 200
+        assert b'direct-secret-token' not in response.data
+        assert b'action="/import/direct-official-playlists"' in response.data
+        assert b'action="/import/official-playlists"' not in response.data
+
     def test_queue_status_requires_login(self, client):
         """Test that queue status requires authentication."""
         response = client.get('/import/queue-status')

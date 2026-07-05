@@ -324,8 +324,6 @@ def import_official_playlists():
     if not all_playlists:
         flash('No Spotify playlists found matching your criteria', 'warning')
     
-    # Get the bearer token from the session to display in the form
-    session_bearer_token = session.get('direct_bearer_token', '')
     spotify_username = session.get('direct_spotify_username')
     
     return render_template(
@@ -336,7 +334,7 @@ def import_official_playlists():
         spotify_accounts=spotify_accounts,
         debug_info=debug_info,
         debug_mode=debug_mode,
-        session_bearer_token=session_bearer_token,
+        has_direct_bearer_token=bool(session.get('direct_bearer_token')),
         spotify_username=spotify_username,
         direct_mode=False
     )
@@ -514,6 +512,7 @@ def direct_official_playlists():
         debug_info=debug_info,
         debug_mode=debug_mode,
         direct_mode=True,
+        has_direct_bearer_token=True,
         spotify_username=session.get('direct_spotify_username')
     )
 

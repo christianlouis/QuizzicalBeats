@@ -413,3 +413,62 @@ class TestDropboxFolderApi:
         assert response.status_code == 401
         assert data['reconnect_required'] is True
         assert 'reconnect Dropbox' in data['error']
+
+    def test_list_folders_non_json_dropbox_error_hides_raw_provider_body(self, app, client):
+        """Non-JSON Dropbox errors should not expose provider bodies to the browser."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                503,
+                json_body=None,
+                text='provider-secret-body old-dropbox-access traceback',
+            )
+
+            response = client.get('/api/dropbox/folders')
+
+        data = response.get_json()
+        assert response.status_code == 502
+        assert data['code'] == 'dropbox_api_error'
+        assert data['status_code'] == 503
+        assert 'raw_response' not in data
+        assert 'traceback' not in data
+        assert 'provider-secret-body' not in response.get_data(as_text=True)
+
+    def test_list_folders_unexpected_error_hides_traceback(self, app, client):
+        """Unexpected Dropbox folder errors should stay generic client-side."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post', side_effect=RuntimeError('secret failure')):
+            response = client.get('/api/dropbox/folders')
+
+        data = response.get_json()
+        assert response.status_code == 500
+        assert data['code'] == 'dropbox_folder_list_failed'
+        assert 'traceback' not in data
+        assert 'secret failure' not in response.get_data(as_text=True)
+
+    def test_create_folder_non_json_dropbox_error_hides_raw_provider_body(self, app, client):
+        """Create-folder Dropbox errors should not expose raw provider bodies."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                502,
+                json_body=None,
+                text='provider-create-secret old-dropbox-access traceback',
+            )
+
+            response = client.post(
+                '/api/dropbox/create-folder',
+                data=json.dumps({'parent_path': '/', 'folder_name': 'Rounds'}),
+                content_type='application/json',
+            )
+
+        data = response.get_json()
+        assert response.status_code == 502
+        assert data['code'] == 'dropbox_api_error'
+        assert data['status_code'] == 502
+        assert 'raw_response' not in data
+        assert 'traceback' not in data
+        assert 'provider-create-secret' not in response.get_data(as_text=True)

@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Normalized Spotify profile display names on the connection-management page and removed the obsolete admin token-wizard template.
 - Required login for Spotify playlist import, direct-token, and diagnostic routes before resolving user, manual, or system fallback tokens.
 - Hardened Spotify direct-token handling with admin-only diagnostics, safe local return URLs, validation-before-store behavior, invalid-token cleanup, and a non-empty client diagnostic page.
+- Stopped rendering Spotify, Dropbox, and manual bearer token fragments in profile/import HTML, fixed direct Spotify import form targets, and removed raw Dropbox provider bodies and tracebacks from browser-facing API errors.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.
 - Moved verbose metadata-refresh diagnostics from info logs to debug logs.

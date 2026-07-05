@@ -436,12 +436,6 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% if system_refresh_token %}
-                        <tr>
-                            <td class="py-2 font-medium">Token Preview:</td>
-                            <td class="py-2 font-mono">{{ system_refresh_token[:10] }}...{{ system_refresh_token[-5:] }}</td>
-                        </tr>
-                        {% endif %}
                     </table>
                 </div>
                 
@@ -463,8 +457,8 @@
                         </tr>
                         {% if session_bearer %}
                         <tr class="border-b border-gray-200">
-                            <td class="py-2 font-medium">Token Preview:</td>
-                            <td class="py-2 font-mono">{{ session_bearer[:10] }}...{{ session_bearer[-5:] }}</td>
+                            <td class="py-2 font-medium">Token Visibility:</td>
+                            <td class="py-2 text-gray-600">Hidden for security</td>
                         </tr>
                         {% if token_source == 'manual' and active_token_expiry %}
                         <tr class="border-b border-gray-200">
@@ -722,17 +716,13 @@
                     <h4 class="font-semibold mb-2">Token Information</h4>
                     <table class="w-full text-sm">
                         <tr class="border-b border-gray-200">
-                            <td class="py-2 font-medium">Access Token Preview:</td>
-                            <td class="py-2 font-mono">
-                                {{ current_user.dropbox_token[:10] }}...{{ current_user.dropbox_token[-5:] if current_user.dropbox_token|length > 15 else '' }}
-                            </td>
+                            <td class="py-2 font-medium">Access Token:</td>
+                            <td class="py-2 text-gray-600">Stored and hidden for security</td>
                         </tr>
                         {% if current_user.dropbox_refresh_token %}
                         <tr class="border-b border-gray-200">
-                            <td class="py-2 font-medium">Refresh Token Preview:</td>
-                            <td class="py-2 font-mono">
-                                {{ current_user.dropbox_refresh_token[:10] }}...{{ current_user.dropbox_refresh_token[-5:] if current_user.dropbox_refresh_token|length > 15 else '' }}
-                            </td>
+                            <td class="py-2 font-medium">Refresh Token:</td>
+                            <td class="py-2 text-gray-600">Stored and hidden for security</td>
                         </tr>
                         {% endif %}
                         <tr>

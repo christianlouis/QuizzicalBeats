@@ -246,6 +246,44 @@ class TestAuthenticatedRoutes:
         assert b'manual-spotify-secret-token' not in response.data
         assert b'Manual token saved' in response.data
 
+    def test_profile_debug_panels_do_not_render_token_fragments(self, app, client):
+        """Admin profile diagnostics should show token presence without token previews."""
+        from musicround.models import SystemSetting
+
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.is_admin = True
+            user.spotify_id = 'spotify-account-id'
+            user.spotify_token = 'spotify-access-secret-token'
+            user.spotify_refresh_token = 'spotify-refresh-secret-token'
+            user.dropbox_id = 'dropbox-account-id'
+            user.dropbox_token = 'dropbox-access-secret-token'
+            user.dropbox_refresh_token = 'dropbox-refresh-secret-token'
+            SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret-token')
+            db.session.commit()
+
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'manual-profile-secret-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+            sess['token_source'] = 'manual'
+
+        response = client.get('/users/profile')
+
+        body = response.data
+        assert response.status_code == 200
+        for secret in (
+            b'spotify-access-secret-token',
+            b'spotify-refresh-secret-token',
+            b'dropbox-access-secret-token',
+            b'dropbox-refresh-secret-token',
+            b'system-refresh-secret-token',
+            b'manual-profile-secret-token',
+        ):
+            assert secret not in body
+        assert b'Hidden for security' in body
+        assert b'Stored and hidden for security' in body
+
     def test_profile_shows_dropbox_reconnect_when_credentials_cleared(self, app, client):
         """A preserved Dropbox id without tokens should become actionable."""
         self._login(app, client)
