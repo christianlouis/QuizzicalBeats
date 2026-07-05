@@ -17,26 +17,47 @@ def _require_spotify_token(item_type):
     """Redirect users without any usable Spotify token before import."""
     access_token, _token_source = get_spotify_token()
     if access_token:
-        return None
+        return None, access_token
 
     flash(f"Please connect your Spotify account to import {item_type}.", "warning")
-    return redirect(url_for('users.spotify_link'))
+    return redirect(url_for('users.spotify_link')), None
 
 # Legacy function retained for backward compatibility
 def import_track(track_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    result = ImportHelper.import_item(service_name='spotify', item_type='track', item_id=track_id, oauth_spotify=oauth.spotify)
+    access_token, _token_source = get_spotify_token()
+    result = ImportHelper.import_item(
+        service_name='spotify',
+        item_type='track',
+        item_id=track_id,
+        oauth_spotify=oauth.spotify,
+        spotify_token=access_token,
+    )
     return result.get('imported_count', 0) > 0
 
 # Legacy function retained for backward compatibility
 def import_pl(playlist_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    ImportHelper.import_item(service_name='spotify', item_type='playlist', item_id=playlist_id, oauth_spotify=oauth.spotify)
+    access_token, _token_source = get_spotify_token()
+    ImportHelper.import_item(
+        service_name='spotify',
+        item_type='playlist',
+        item_id=playlist_id,
+        oauth_spotify=oauth.spotify,
+        spotify_token=access_token,
+    )
 
 # Legacy function retained for backward compatibility
 def import_al(album_id):
     """Legacy helper function that now uses the new ImportHelper"""
-    ImportHelper.import_item(service_name='spotify', item_type='album', item_id=album_id, oauth_spotify=oauth.spotify)
+    access_token, _token_source = get_spotify_token()
+    ImportHelper.import_item(
+        service_name='spotify',
+        item_type='album',
+        item_id=album_id,
+        oauth_spotify=oauth.spotify,
+        spotify_token=access_token,
+    )
 
 @import_songs_bp.route('/song', methods=['GET', 'POST'])
 @login_required
@@ -45,7 +66,7 @@ def import_song():
         flash("Please log in to import songs.", "warning")
         return redirect(url_for('users.login'))
 
-    token_redirect = _require_spotify_token("songs")
+    token_redirect, spotify_token = _require_spotify_token("songs")
     if token_redirect:
         return token_redirect
 
@@ -55,7 +76,13 @@ def import_song():
             flash("No song ID provided for import.", "danger")
             return redirect(request.referrer or url_for('core.search'))
             
-        result = ImportHelper.import_item(service_name='spotify', item_type='track', item_id=track_id, oauth_spotify=oauth.spotify)
+        result = ImportHelper.import_item(
+            service_name='spotify',
+            item_type='track',
+            item_id=track_id,
+            oauth_spotify=oauth.spotify,
+            spotify_token=spotify_token,
+        )
         
         imported_count = result.get('imported_count', 0)
         skipped_count = result.get('skipped_count', 0)
@@ -86,7 +113,7 @@ def import_playlist():
         flash("Please log in to import playlists.", "warning")
         return redirect(url_for('users.login'))
 
-    token_redirect = _require_spotify_token("playlists")
+    token_redirect, _spotify_token = _require_spotify_token("playlists")
     if token_redirect:
         return token_redirect
     
@@ -129,7 +156,7 @@ def import_album():
         flash("Please log in to import albums.", "warning")
         return redirect(url_for('users.login'))
 
-    token_redirect = _require_spotify_token("albums")
+    token_redirect, spotify_token = _require_spotify_token("albums")
     if token_redirect:
         return token_redirect
     
@@ -139,7 +166,13 @@ def import_album():
             flash("No album ID provided for import.", "danger")
             return redirect(request.referrer or url_for('core.search'))
             
-        result = ImportHelper.import_item(service_name='spotify', item_type='album', item_id=album_id, oauth_spotify=oauth.spotify)
+        result = ImportHelper.import_item(
+            service_name='spotify',
+            item_type='album',
+            item_id=album_id,
+            oauth_spotify=oauth.spotify,
+            spotify_token=spotify_token,
+        )
         
         imported_count = result.get('imported_count', 0)
         skipped_count = result.get('skipped_count', 0)

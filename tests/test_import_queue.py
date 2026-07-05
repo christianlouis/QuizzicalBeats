@@ -266,6 +266,36 @@ class TestImportWorker:
 
             mock_import.assert_called_once_with('deezer', 'track', '123')
 
+    def test_process_job_passes_resolved_spotify_token(self, app):
+        """Spotify jobs must pass the worker-resolved fallback token into ImportHelper."""
+        with app.app_context():
+            user = User(username='spotifyworker', email='spotifyworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            worker = ImportWorker(app, ImportQueue())
+            job = ImportJob(
+                priority=1,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='playlist-123',
+                user_id=user.id,
+            )
+
+            with (
+                patch('musicround.helpers.import_queue.get_spotify_token', return_value=('system-token', 'system')),
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+            ):
+                worker._process_job(job)
+
+            mock_import.assert_called_once_with(
+                'spotify',
+                'playlist',
+                'playlist-123',
+                spotify_token='system-token',
+            )
+
     def test_process_job_updates_record_status(self, app):
         """Test that worker writes processing and completed state to ImportJobRecord."""
         with app.app_context():

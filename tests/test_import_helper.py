@@ -1,5 +1,8 @@
 """Tests for unified import helper behavior."""
+from datetime import datetime, timedelta
+
 from musicround.helpers.import_helper import ImportHelper
+from musicround.models import Song, SystemSetting, db
 
 
 class DeezerPlaylistStub:
@@ -12,6 +15,52 @@ class DeezerPlaylistStub:
     def import_playlist(self, playlist_id, lastfm_api_key=None):
         self.calls.append((playlist_id, lastfm_api_key))
         return self.result
+
+
+class FakeSpotifyResponse:
+    """Minimal response object for Authlib-style Spotify client calls."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeSpotifyClient:
+    """Spotify client stub that records the token used for each call."""
+
+    token = None
+
+    def __init__(self):
+        self.calls = []
+
+    def get(self, path, token=None):
+        self.calls.append((path, token))
+        if path == 'tracks/spotify-track-1':
+            return FakeSpotifyResponse({
+                'id': 'spotify-track-1',
+                'name': 'Fallback Track',
+                'artists': [{'name': 'Reliable Artist'}],
+                'album': {
+                    'name': 'Reliable Album',
+                    'release_date': '1999-01-01',
+                    'images': [{'url': 'https://example.com/cover.jpg'}],
+                },
+                'external_ids': {},
+                'preview_url': 'https://example.com/preview.mp3',
+                'popularity': 80,
+            })
+        if path == 'audio-features/spotify-track-1':
+            return FakeSpotifyResponse({
+                'danceability': 0.5,
+                'energy': 0.7,
+                'duration_ms': 240000,
+            })
+        raise AssertionError(f'Unexpected Spotify path: {path}')
 
 
 class TestImportHelperDeezer:
@@ -61,3 +110,55 @@ class TestImportHelperDeezer:
         assert response['skipped_count'] == 0
         assert response['error_count'] == 1
         assert 'No songs found in Deezer playlist playlist-empty' in response['errors'][0]
+
+
+class TestImportHelperSpotifyTokens:
+    """Regression tests for the Spotify token resolution cascade."""
+
+    def test_spotify_track_import_uses_manual_session_token(self, app):
+        """Manual bearer tokens must reach the actual Spotify import call."""
+        spotify = FakeSpotifyClient()
+
+        with app.test_request_context():
+            from flask import session
+
+            session['access_token'] = 'manual-token'
+            session['bearer_token_added'] = datetime.now().timestamp()
+
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-track-1',
+                oauth_spotify=spotify,
+            )
+
+        assert response['imported_count'] == 1
+        assert spotify.calls[0][1]['access_token'] == 'manual-token'
+
+        with app.app_context():
+            song = Song.query.filter_by(spotify_id='spotify-track-1').one_or_none()
+            assert song is not None
+            assert song.title == 'Fallback Track'
+
+    def test_spotify_track_import_uses_system_fallback_token(self, app):
+        """System fallback tokens must work when no user token exists."""
+        spotify = FakeSpotifyClient()
+
+        with app.test_request_context():
+            SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-token')
+            SystemSetting.set('system_spotify_token', 'system-token')
+            SystemSetting.set(
+                'system_spotify_token_expiry',
+                (datetime.now() + timedelta(hours=1)).isoformat(),
+            )
+            db.session.commit()
+
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-track-1',
+                oauth_spotify=spotify,
+            )
+
+        assert response['imported_count'] == 1
+        assert spotify.calls[0][1]['access_token'] == 'system-token'

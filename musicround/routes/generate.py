@@ -5,6 +5,7 @@ from flask_login import current_user, login_required
 from musicround.models import Song, Round, Tag, db
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.spotify_helper import get_spotify_token
 
 generate_bp = Blueprint('generate', __name__)
 
@@ -363,7 +364,8 @@ def get_songs_from_spotify_playlist(playlist_id):
             item_id=playlist_id,
             item_type='playlist',
             service_name='spotify',
-            oauth_spotify=oauth.spotify
+            oauth_spotify=oauth.spotify,
+            spotify_token=get_spotify_token()[0],
         )
 
         from musicround.models import Song
@@ -380,12 +382,20 @@ def get_songs_from_spotify_playlist(playlist_id):
         # Get playlist tracks (paginated)
         all_spotify_ids = []
         next_url = f'playlists/{playlist_id}/tracks'
+        access_token, token_source = get_spotify_token()
+        if not access_token:
+            current_app.logger.warning(f"No Spotify token available to inspect playlist {playlist_id}")
+            return []
         authlib_token = {
-            'access_token': current_user.spotify_token,
-            'refresh_token': current_user.spotify_refresh_token,
+            'access_token': access_token,
             'token_type': 'Bearer',
-            'expires_at': int(current_user.spotify_token_expiry.timestamp()) if current_user.spotify_token_expiry else None
         }
+        if token_source == 'user':
+            authlib_token['refresh_token'] = current_user.spotify_refresh_token
+            authlib_token['expires_at'] = (
+                int(current_user.spotify_token_expiry.timestamp())
+                if current_user.spotify_token_expiry else None
+            )
         while next_url:
             resp = sp.get(next_url, token=authlib_token)
             resp.raise_for_status()
