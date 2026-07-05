@@ -17,6 +17,15 @@ from authlib.integrations.base_client.errors import OAuthError
 
 core_bp = Blueprint('core', __name__)
 
+@core_bp.route('/healthz')
+def healthz():
+    """Public-safe health endpoint for uptime and deployment checks."""
+    from musicround.helpers.service_health import application_health_payload
+
+    payload = application_health_payload()
+    return jsonify(payload), 200 if payload["ok"] else 503
+
+
 @core_bp.route('/')
 def index():
     """

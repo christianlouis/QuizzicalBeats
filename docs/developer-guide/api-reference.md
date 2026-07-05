@@ -710,31 +710,32 @@ Import songs from a Spotify playlist.
 ### Health Check Endpoint
 
 ```
-GET /api/health
+GET /healthz
 ```
 
-Get system health information (admin only).
+Get public-safe uptime and dependency health information. This endpoint does
+not require login and must not expose tokens, passwords, or full database URIs.
 
 **Response:**
 ```json
 {
-  "status": "success",
-  "data": {
-    "version": "1.0.0",
-    "uptime": "5d 12h 37m",
+  "ok": true,
+  "status": "ok",
+  "version": "1.10.0",
+  "release": "Import Infrastructure",
+  "services": {
     "database": {
-      "status": "connected",
-      "size": "42MB",
-      "migrations": "up-to-date"
+      "status": "ok",
+      "ok": true,
+      "backend": "postgresql",
+      "database": "quizzicalbeats",
+      "host": "postgres.example",
+      "issues": []
     },
-    "storage": {
-      "available": "1.2GB",
-      "used": "345MB"
-    },
-    "services": {
-      "spotify": "connected",
-      "dropbox": "connected",
-      "email": "connected"
+    "artifact_storage": {
+      "status": "ok",
+      "ok": true,
+      "issues": []
     }
   }
 }

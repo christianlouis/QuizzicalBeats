@@ -24,6 +24,12 @@ from musicround.helpers.storage_health import (
     round_mp3_dir,
     round_pdf_dir,
 )
+from musicround.helpers.service_health import (
+    artifact_storage_service_health,
+    dropbox_service_health,
+    email_service_health,
+    spotify_service_health,
+)
 from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
 from musicround.models import Round, RoundExport, Song, Tag, User
@@ -1298,7 +1304,12 @@ def inspect_round_package(
     preview_checks: list[dict[str, Any]] = []
     remediation: list[dict[str, Any]] = []
     total_preview_ms = 0
-    storage = check_round_artifact_storage()
+    service_health = {
+        "artifact_storage": artifact_storage_service_health(),
+        "spotify": spotify_service_health(user),
+        "dropbox": dropbox_service_health(user),
+    }
+    storage = service_health["artifact_storage"]
     for issue in storage["issues"]:
         issues.append(issue)
         remediation.append(
@@ -1553,6 +1564,7 @@ def inspect_round_package(
         "preview_checks": preview_checks,
         "components": components,
         "storage": storage,
+        "service_health": service_health,
         "expected_duration_seconds": None if expected_ms is None else round(expected_ms / 1000, 3),
         "pdf": pdf_result,
         "mp3": mp3_result,
@@ -1639,6 +1651,21 @@ def schedule_round_email(
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
     scheduled_at = _parse_datetime_utc(scheduled_for)
+    email_health = email_service_health(required=True)
+    if not email_health["ok"]:
+        message = "Email configuration is not ready for scheduled delivery."
+        raise AutomationError(
+            message,
+            details={
+                "scheduled": False,
+                "status": "email_unhealthy",
+                "recipient": target,
+                "scheduled_for": _datetime_payload(scheduled_at),
+                "service_health": {"email": email_health},
+                "hints": [issue["message"] for issue in email_health["issues"]],
+            },
+        )
+
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:

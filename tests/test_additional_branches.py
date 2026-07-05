@@ -73,6 +73,46 @@ class TestSetupRoute:
 class TestSystemHealthRoute:
     """Tests for /users/system-health route."""
 
+    def test_healthz_public_safe_payload(self, client):
+        """The uptime endpoint should not require login or expose secrets."""
+        response = client.get('/healthz')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['ok'] is True
+        assert data['status'] == 'ok'
+        assert data['services']['database']['status'] == 'ok'
+        assert 'password' not in json.dumps(data).lower()
+        assert 'token' not in json.dumps(data).lower()
+
+    def test_healthz_reports_degraded_storage(self, client, monkeypatch):
+        """Storage failures should make /healthz fail for deployment gates."""
+        from musicround.helpers import service_health
+
+        monkeypatch.setattr(
+            service_health,
+            'check_round_artifact_storage',
+            lambda include_mp3=True, include_pdf=True: {
+                'ok': False,
+                'checks': [],
+                'issues': [{
+                    'code': 'artifact_storage_not_writable',
+                    'severity': 'error',
+                    'message': 'Round MP3 directory is not writable.',
+                    'details': {'hint': 'Fix storage permissions.'},
+                }],
+                'hints': ['Fix storage permissions.'],
+            },
+        )
+
+        response = client.get('/healthz')
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert data['ok'] is False
+        assert data['status'] == 'degraded'
+        assert data['services']['artifact_storage']['issues'][0]['code'] == 'artifact_storage_not_writable'
+
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""
         _create_user(app, 'health_nonadmin', 'healthna@example.com')

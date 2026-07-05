@@ -30,6 +30,16 @@ def _create_song(title="Song", artist="Artist", **kwargs):
     return song
 
 
+def _configure_mail(app):
+    app.config.update(
+        MAIL_HOST="smtp.example.test",
+        MAIL_PORT=587,
+        MAIL_USERNAME="mailer",
+        MAIL_PASSWORD="secret",
+        MAIL_SENDER="sender@example.test",
+    )
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -359,6 +369,8 @@ class TestAssetInspection:
             assert result["ok"] is False
             assert result["status"] == "storage_unhealthy"
             assert result["storage"]["ok"] is False
+            assert result["service_health"]["artifact_storage"]["ok"] is False
+            assert result["service_health"]["spotify"]["status"] in {"ok", "warning", "error"}
             assert any(issue["code"] == "artifact_storage_missing" for issue in result["issues"])
 
     def test_inspect_round_package_requires_resolved_songs(self, app):
@@ -572,6 +584,7 @@ class TestAssetInspection:
 
     def test_schedule_round_email_stores_pending_export(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Scheduled", artist="Artist")
             round_id = automation.create_round(
@@ -605,8 +618,33 @@ class TestAssetInspection:
             assert export.subject == "Scheduled subject"
             assert result["export"]["scheduled_for"] == "2026-07-09T17:00:00Z"
 
+    def test_schedule_round_email_blocks_missing_email_config_before_generation(self, app):
+        with app.app_context():
+            app.config["MAIL_HOST"] = None
+            user = _create_user()
+            song = _create_song(title="No Mail", artist="Artist")
+            round_id = automation.create_round(
+                name="No Mail Config",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError, match="Email configuration") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        user_id=user.id,
+                    )
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "email_unhealthy"
+            assert "email" in exc_info.value.details["service_health"]
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
     def test_schedule_round_email_blocks_when_quality_fails(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Scheduled Bad", artist="Artist")
             round_id = automation.create_round(
@@ -642,6 +680,7 @@ class TestAssetInspection:
 
     def test_schedule_round_email_blocks_when_storage_unhealthy_before_generation(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Storage Bad", artist="Artist")
             round_id = automation.create_round(
@@ -665,6 +704,7 @@ class TestAssetInspection:
 
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Listed", artist="Artist")
             round_id = automation.create_round(
@@ -696,6 +736,7 @@ class TestAssetInspection:
 
     def test_process_due_scheduled_round_emails_sends_due_exports(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Due", artist="Artist")
             round_id = automation.create_round(

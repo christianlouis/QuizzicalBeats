@@ -117,6 +117,18 @@ If service connections are failing:
 
 ## CLI Health Checks
 
+For unauthenticated uptime and deployment checks, use:
+
+```bash
+curl -fsS https://your-qb-host.example/healthz
+```
+
+The endpoint returns a credential-safe JSON payload with version, database,
+artifact storage, Spotify configuration, and email configuration status. It
+returns HTTP 503 only for critical failures such as database or artifact
+storage outages; optional integration warnings remain visible in the payload
+without taking the app out of rotation.
+
 For command-line health checks, you can use:
 
 ```bash

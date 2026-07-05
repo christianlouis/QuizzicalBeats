@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 from musicround import create_app
 from musicround.version import get_version_str, VERSION_INFO
+import contextlib
+import json
 import os
 import sys
 import argparse
@@ -28,6 +30,10 @@ def main():
     database_parser = subparsers.add_parser('database', help='Database diagnostics')
     database_subparsers = database_parser.add_subparsers(dest='database_action', help='Database action to perform')
     database_subparsers.add_parser('status', help='Print the configured database backend without credentials')
+
+    health_parser = subparsers.add_parser('health', help='Health diagnostics')
+    health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
+    health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
     
     # Parse the arguments
     args = parser.parse_args()
@@ -67,6 +73,15 @@ def main():
         print(f"Database backend: {summary['backend']}")
         print(f"Database target: {summary['redacted_uri']}")
         return 0
+    elif args.command == 'health':
+        with contextlib.redirect_stdout(sys.stderr):
+            app = create_app()
+        with app.app_context():
+            from musicround.helpers.service_health import application_health_payload
+
+            payload = application_health_payload()
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0 if payload["ok"] else 1
     else:
         # Default: Run the Flask app
         app = create_app()
@@ -88,10 +103,6 @@ def main():
     return 0
 
 if __name__ == '__main__':
-    # Display app version and release info
-    version = get_version_str()
-    print(f"Quizzical Beats {version}")
-    
     # Run the main function
     exit_code = main()
     sys.exit(exit_code)

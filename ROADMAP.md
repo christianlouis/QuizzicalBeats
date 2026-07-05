@@ -482,7 +482,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Nightly backup jobs
 - [ ] Sentry error tracking
 - [ ] Auto-updater script
-- [ ] Health check endpoint (/healthz)
+- [x] Health check endpoint (/healthz)
 - [ ] Uptime monitoring integration
 
 **Success Metrics**:

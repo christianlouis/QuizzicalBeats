@@ -6,6 +6,7 @@ echo "Starting Flask application..."
 export PYTHONUNBUFFERED=1
 : "${FLASK_DEBUG:=0}"
 echo "Flask environment: $FLASK_ENV"
+mkdir -p "${ROUND_MP3_DIR:-/data/rounds}" "${ROUND_PDF_DIR:-/data/pdfs}"
 python - <<'PY'
 import os
 from musicround.helpers.database_config import database_summary

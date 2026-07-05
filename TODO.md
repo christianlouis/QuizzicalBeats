@@ -222,7 +222,7 @@
 * [ ] Nightly backup job with status alert
 * [ ] Add Sentry or similar for exception tracking
 * [ ] Updater script for pulling latest Git commits safely
-* [ ] Add status endpoint (`/healthz`) for uptime monitors
+* [x] Add status endpoint (`/healthz`) for uptime monitors
 
 ---
 
@@ -240,4 +240,3 @@
   * [ ] Document keyboard shortcuts for power users when implemented
 
 *Last updated: May 27, 2025*
-

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
+
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Made Deezer track import failures return structured import errors instead of escaping from `ImportHelper.import_item`.
