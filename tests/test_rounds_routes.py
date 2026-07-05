@@ -342,6 +342,30 @@ class TestRoundEmailRoute:
         assert response.get_json()['error'] == 'Round contains no songs'
         mock_send.assert_not_called()
 
+    def test_mail_route_blocks_unhealthy_storage_before_generation(self, app, client):
+        """Test artifact storage health blocks email before render or send."""
+        _login(app, client)
+        song_id = _create_song(app, title='Storage Gate Song')
+        round_id = _create_round(app, [song_id], name='Storage Gate Round')
+        app.config['ROUND_MP3_DIR'] = f"{app.instance_path}/missing-rounds-route-test"
+
+        with patch('musicround.routes.rounds.generate_pdf') as mock_pdf, \
+                patch('musicround.routes.rounds.round_mp3') as mock_mp3, \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 503
+        payload = response.get_json()
+        assert payload['success'] is False
+        assert 'storage' in payload['error'].lower()
+        assert payload['storage']['ok'] is False
+        mock_pdf.assert_not_called()
+        mock_mp3.assert_not_called()
+        mock_send.assert_not_called()
+
     def test_mail_route_regenerates_stale_mp3_before_sending(self, app, client):
         """Test stale MP3 database state triggers regeneration before email."""
         _login(app, client)

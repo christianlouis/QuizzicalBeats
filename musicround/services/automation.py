@@ -18,6 +18,12 @@ from sqlalchemy import or_
 from musicround import db
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.storage_health import (
+    check_round_artifact_storage,
+    require_round_artifact_storage,
+    round_mp3_dir,
+    round_pdf_dir,
+)
 from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
 from musicround.models import Round, RoundExport, Song, Tag, User
@@ -987,13 +993,17 @@ def generate_round_pdf(round_id: int) -> dict[str, Any]:
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
+    try:
+        require_round_artifact_storage(include_mp3=False, include_pdf=True)
+    except RuntimeError as exc:
+        raise AutomationError(str(exc), details=check_round_artifact_storage(include_mp3=False)) from exc
     pdf_data = generate_pdf(round_id)
     if isinstance(pdf_data, str):
         raise AutomationError(pdf_data)
     round_obj.pdf_generated = True
     round_obj.last_generated_at = datetime.utcnow()
     db.session.commit()
-    path = os.path.join("/data/pdfs", f"round_{round_id}.pdf")
+    path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
     return {"round_id": round_id, "path": path, "bytes": len(pdf_data)}
 
 
@@ -1004,6 +1014,10 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
     user = _find_user(user_id)
+    try:
+        require_round_artifact_storage(include_mp3=True, include_pdf=False)
+    except RuntimeError as exc:
+        raise AutomationError(str(exc), details=check_round_artifact_storage(include_pdf=False)) from exc
     with current_app.test_request_context(headers={"X-Requested-With": "XMLHttpRequest"}):
         login_user(user)
         try:
@@ -1016,7 +1030,7 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
         if payload.get("success") is False or payload.get("error"):
             raise AutomationError(payload.get("error", "MP3 generation failed."))
 
-    path = os.path.join("/data/rounds", f"round_{round_id}.mp3")
+    path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
     if not os.path.exists(path):
         raise AutomationError(f"MP3 generation did not create {path}.")
     return {"round_id": round_id, "path": path, "bytes": os.path.getsize(path)}
@@ -1029,6 +1043,13 @@ def generate_round_assets(
     include_mp3: bool = True,
 ) -> dict[str, Any]:
     """Generate requested round assets."""
+    try:
+        require_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf)
+    except RuntimeError as exc:
+        raise AutomationError(
+            str(exc),
+            details=check_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf),
+        ) from exc
     assets: dict[str, Any] = {"round_id": round_id}
     if include_pdf:
         assets["pdf"] = generate_round_pdf(round_id)
@@ -1277,6 +1298,18 @@ def inspect_round_package(
     preview_checks: list[dict[str, Any]] = []
     remediation: list[dict[str, Any]] = []
     total_preview_ms = 0
+    storage = check_round_artifact_storage()
+    for issue in storage["issues"]:
+        issues.append(issue)
+        remediation.append(
+            {
+                "action": "repair_storage",
+                "issue_code": issue["code"],
+                "message": issue["message"],
+                "hint": issue["details"].get("hint"),
+                "path": issue["details"].get("path"),
+            }
+        )
 
     actual_song_count = len(song_ids)
     if actual_song_count != expected_song_count:
@@ -1498,6 +1531,12 @@ def inspect_round_package(
         "preview_download_failed",
     }:
         status = "needs_substitution"
+    elif issue_codes & {
+        "artifact_storage_missing",
+        "artifact_storage_not_directory",
+        "artifact_storage_not_writable",
+    }:
+        status = "storage_unhealthy"
     elif issue_codes & {"pdf_inspection_failed", "mp3_inspection_failed", "round_mp3_duration_mismatch"}:
         status = "render_failed"
     else:
@@ -1513,6 +1552,7 @@ def inspect_round_package(
         "song_count": len(songs),
         "preview_checks": preview_checks,
         "components": components,
+        "storage": storage,
         "expected_duration_seconds": None if expected_ms is None else round(expected_ms / 1000, 3),
         "pdf": pdf_result,
         "mp3": mp3_result,
@@ -1823,7 +1863,7 @@ def inspect_mp3_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join("/data/rounds", f"round_{round_id}.mp3")
+        path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
     if not os.path.exists(path):
         raise AutomationError(f"MP3 file not found: {path}")
 
@@ -1864,7 +1904,7 @@ def inspect_pdf_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join("/data/pdfs", f"round_{round_id}.pdf")
+        path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
     if not os.path.exists(path):
         raise AutomationError(f"PDF file not found: {path}")
 

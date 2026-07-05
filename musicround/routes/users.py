@@ -1619,6 +1619,7 @@ def system_health():
     import flask
     import sqlite3
     from datetime import datetime
+    from musicround.helpers.storage_health import round_mp3_dir, round_pdf_dir
     from musicround.models import Song, Round, User, db
     from musicround.version import VERSION_INFO
     
@@ -1653,7 +1654,8 @@ def system_health():
     dirs_to_check = [
         {"path": '/data', "name": "Data Directory"},
         {"path": '/data/backups', "name": "Backups Directory"},
-        {"path": os.path.join(os.path.dirname(current_app.root_path), 'mp3'), "name": "MP3 Directory"},
+        {"path": round_mp3_dir(), "name": "Round MP3 Directory"},
+        {"path": round_pdf_dir(), "name": "Round PDF Directory"},
         {"path": os.path.join(current_app.root_path, 'static'), "name": "Static Files"}
     ]
     

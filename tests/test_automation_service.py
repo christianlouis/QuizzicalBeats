@@ -319,6 +319,48 @@ class TestAssetInspection:
                 for issue in result["issues"]
             )
 
+    def test_inspect_round_package_reports_unhealthy_artifact_storage(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Storage", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Storage Bad",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            missing_dir = os.path.join(app.instance_path, "missing-artifacts")
+            app.config["ROUND_MP3_DIR"] = missing_dir
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=("https://example.test/preview.mp3", AudioSegment.silent(duration=30000), None),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 65},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id, user_id=user.id, expected_song_count=1
+                )
+
+            assert result["ok"] is False
+            assert result["status"] == "storage_unhealthy"
+            assert result["storage"]["ok"] is False
+            assert any(issue["code"] == "artifact_storage_missing" for issue in result["issues"])
+
     def test_inspect_round_package_requires_resolved_songs(self, app):
         with app.app_context():
             user = _create_user()
@@ -596,6 +638,29 @@ class TestAssetInspection:
                     )
 
             assert exc_info.value.details["scheduled"] is False
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
+    def test_schedule_round_email_blocks_when_storage_unhealthy_before_generation(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Storage Bad", artist="Artist")
+            round_id = automation.create_round(
+                name="Unwritable Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            app.config["ROUND_MP3_DIR"] = os.path.join(app.instance_path, "missing-rounds")
+
+            with patch("musicround.services.automation.generate_round_pdf") as mock_pdf:
+                with pytest.raises(automation.AutomationError, match="storage") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        user_id=user.id,
+                    )
+
+            mock_pdf.assert_not_called()
+            assert exc_info.value.details["ok"] is False
             assert RoundExport.query.filter_by(round_id=round_id).count() == 0
 
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):

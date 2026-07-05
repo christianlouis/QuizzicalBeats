@@ -45,9 +45,13 @@ def app(monkeypatch):
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         'SECRET_KEY': 'test-secret-key-for-testing-only',
         'AUTOMATION_TOKEN': 'test-automation-token-for-testing',
+        'ROUND_MP3_DIR': os.path.join(tmpdir, 'rounds'),
+        'ROUND_PDF_DIR': os.path.join(tmpdir, 'pdfs'),
         'WTF_CSRF_ENABLED': False,  # Disable CSRF for testing
     }
     app.config.update(test_config)
+    os.makedirs(app.config['ROUND_MP3_DIR'], exist_ok=True)
+    os.makedirs(app.config['ROUND_PDF_DIR'], exist_ok=True)
 
     with app.app_context():
         db.create_all()

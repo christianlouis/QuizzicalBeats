@@ -216,6 +216,26 @@ class TestSaveRoundRoute:
         with app.app_context():
             assert Round.query.filter_by(name='Empty Round').first() is None
 
+    def test_save_round_rejects_partial_playlist_round(self, app, client):
+        """Playlist review posts must still require the full requested song count."""
+        _login(app, client)
+        ids = _add_songs(app, [
+            {'title': 'Partial Playlist Song', 'artist': 'A', 'genre': 'Rock', 'year': 2000},
+        ])
+
+        response = client.post('/save_round', data={
+            'round_criteria': 'Spotify Playlist: partial',
+            'round_name': 'Partial Playlist Round',
+            'playlist_import': '1',
+            'expected_song_count': '2',
+            'song_id': [str(ids[0])],
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'expected exactly 2' in response.data
+        with app.app_context():
+            assert Round.query.filter_by(name='Partial Playlist Round').first() is None
+
     def test_save_round_increments_used_count(self, app, client):
         """Test that save_round increments used_count for songs."""
         _login(app, client)

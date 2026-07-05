@@ -420,3 +420,38 @@ class TestBuildMusicRoundRoute:
         assert body.index('First In Playlist') < body.index('Second In Database')
         assert 'Not In Playlist' not in body
         assert 'Deezer Playlist: playlist123' in body
+
+    def test_import_spotify_playlist_rejects_partial_round(self, app, client, monkeypatch):
+        """Playlist import should not offer a saveable review if too few tracks resolve."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 2
+            resolved = Song(title='Only Resolved', artist='Artist A', spotify_id='one')
+            db.session.add(resolved)
+            db.session.commit()
+            resolved_id = resolved.id
+
+        def fake_get_songs_from_spotify_playlist(_playlist_id):
+            return [Song.query.get(resolved_id)]
+
+        monkeypatch.setattr(
+            'musicround.routes.generate.get_songs_from_spotify_playlist',
+            fake_get_songs_from_spotify_playlist,
+        )
+        _login(app, client)
+
+        response = client.post(
+            '/import-playlist',
+            data={
+                'platform': 'spotify',
+                'playlist_url': 'https://open.spotify.com/playlist/partial',
+                'round_name': 'Partial Spotify',
+            },
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'resolved 1 songs; expected exactly 2' in body
+        assert 'Only Resolved' not in body
+        with app.app_context():
+            assert Round.query.filter_by(name='Partial Spotify').first() is None

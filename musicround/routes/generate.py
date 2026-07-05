@@ -476,6 +476,7 @@ def import_playlist():
         playlist_url = request.form.get('playlist_url', '')
         platform = request.form.get('platform', '').lower()
         round_name = request.form.get('round_name', '')
+        expected_song_count = current_app.config.get('SONGS_PER_ROUND', songs_per_round)
         
         if not playlist_url:
             flash('Please enter a playlist URL or ID', 'error')
@@ -497,6 +498,13 @@ def import_playlist():
             if not songs:
                 flash('No songs found or error fetching playlist from Deezer', 'error')
                 return redirect(url_for('generate.import_playlist'))
+            if len(songs) != expected_song_count:
+                flash(
+                    f'Deezer playlist resolved {len(songs)} songs; expected exactly {expected_song_count}. '
+                    'Replace unavailable tracks before saving the round.',
+                    'error',
+                )
+                return redirect(url_for('generate.import_playlist'))
                 
             round_criteria = f'Deezer Playlist: {playlist_id}'
             
@@ -513,6 +521,13 @@ def import_playlist():
             if not songs:
                 flash('No songs found or error fetching playlist from Spotify', 'error')
                 return redirect(url_for('generate.import_playlist'))
+            if len(songs) != expected_song_count:
+                flash(
+                    f'Spotify playlist resolved {len(songs)} songs; expected exactly {expected_song_count}. '
+                    'Replace unavailable tracks before saving the round.',
+                    'error',
+                )
+                return redirect(url_for('generate.import_playlist'))
                 
             round_criteria = f'Spotify Playlist: {playlist_id}'
             
@@ -524,7 +539,8 @@ def import_playlist():
                                songs=songs, 
                                round_criteria=round_criteria, 
                                round_name=round_name,
-                               playlist_import=True)
+                               playlist_import=True,
+                               expected_song_count=expected_song_count)
     
     return render_template('import_playlist.html')
 
@@ -549,6 +565,25 @@ def save_round():
     if not raw_song_ids:
         flash('Please select at least one song before saving a round.', 'error')
         return redirect(url_for('generate.build_music_round'))
+
+    playlist_import = request.form.get('playlist_import') == '1' or (
+        round_criteria or ''
+    ).lower().startswith(('spotify playlist:', 'deezer playlist:'))
+    if playlist_import:
+        try:
+            expected_song_count = int(
+                request.form.get('expected_song_count')
+                or current_app.config.get('SONGS_PER_ROUND', songs_per_round)
+            )
+        except (TypeError, ValueError):
+            expected_song_count = songs_per_round
+        if len(raw_song_ids) != expected_song_count:
+            flash(
+                f'Playlist round resolved {len(raw_song_ids)} songs; expected exactly {expected_song_count}. '
+                'Replace unavailable tracks before saving the round.',
+                'error',
+            )
+            return redirect(url_for('generate.import_playlist'))
 
     try:
         song_ids = [int(song_id) for song_id in raw_song_ids]
