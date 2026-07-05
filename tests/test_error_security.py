@@ -10,14 +10,16 @@ def _create_user(app, username, email, password='ErrorPass123!', is_admin=False)
         db.session.commit()
 
 
-def _login(client, username, password='ErrorPass123!'):
+def _login(app, client, username, password='ErrorPass123!'):
     response = client.post(
         '/users/login',
         data={'username': username, 'password': password},
-        follow_redirects=True,
     )
-    assert response.status_code == 200
-    assert 'You have been logged in!' in response.get_data(as_text=True)
+    assert response.status_code == 302
+    with app.app_context():
+        expected_user_id = str(User.query.filter_by(username=username).one().id)
+    with client.session_transaction() as session:
+        assert session['_user_id'] == expected_user_id
     return response
 
 
@@ -34,7 +36,7 @@ def test_error_page_hides_debug_payload_for_non_admin_user(app, client):
     app.config['PROPAGATE_EXCEPTIONS'] = False
     _register_crashing_route(app)
     _create_user(app, 'error_non_admin', 'error_non_admin@example.com')
-    _login(client, 'error_non_admin')
+    _login(app, client, 'error_non_admin')
 
     response = client.post(
         '/test/error-security-crash',
@@ -60,7 +62,7 @@ def test_error_page_redacts_sensitive_form_fields_for_admins(app, client):
     app.config['PROPAGATE_EXCEPTIONS'] = False
     _register_crashing_route(app)
     _create_user(app, 'error_admin', 'error_admin@example.com', is_admin=True)
-    _login(client, 'error_admin')
+    _login(app, client, 'error_admin')
 
     response = client.post(
         '/test/error-security-crash',
