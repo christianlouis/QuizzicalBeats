@@ -14,6 +14,7 @@ from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
 from musicround.helpers.spotify_helper import get_spotify_token, get_spotify_user_info
 from datetime import datetime
 from authlib.integrations.base_client.errors import OAuthError
+from sqlalchemy import func, or_
 
 core_bp = Blueprint('core', __name__)
 
@@ -355,14 +356,82 @@ def search_results():
 @login_required
 def view_songs():
     """
-    Show all songs in database
+    Show songs in database with server-side pagination and filters.
     """
     from musicround.models import Song, Tag
-    
-    songs = Song.query.all()
-    tags = Tag.query.all()
-    
-    return render_template('view_songs.html', songs=songs, tags=tags)
+
+    def _int_arg(name, default=None, minimum=None, maximum=None):
+        raw_value = request.args.get(name)
+        if raw_value in (None, ''):
+            return default
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        if minimum is not None:
+            value = max(minimum, value)
+        if maximum is not None:
+            value = min(maximum, value)
+        return value
+
+    page = _int_arg('page', default=1, minimum=1)
+    per_page = _int_arg('per_page', default=25, minimum=1, maximum=200)
+    query_text = (request.args.get('q') or '').strip()
+    genre = (request.args.get('genre') or '').strip()
+    year = _int_arg('year')
+    used_min = _int_arg('used_min', minimum=0)
+
+    query = Song.query
+    if query_text:
+        pattern = f'%{query_text}%'
+        query = query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+    if genre:
+        query = query.filter(Song.genre.ilike(genre))
+    if year is not None:
+        query = query.filter(Song.year == year)
+    if used_min is not None:
+        query = query.filter(Song.used_count >= used_min)
+
+    query = query.order_by(Song.artist.asc(), Song.title.asc(), Song.id.asc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    tags = Tag.query.order_by(Tag.name.asc()).all()
+    total_songs = Song.query.count()
+    unique_artists = db.session.query(func.count(func.distinct(Song.artist))).scalar() or 0
+    unique_genres = (
+        db.session.query(func.count(func.distinct(Song.genre)))
+        .filter(Song.genre.isnot(None), Song.genre != '')
+        .scalar()
+        or 0
+    )
+    most_used = db.session.query(func.max(Song.used_count)).scalar() or 0
+    query_args = {
+        'q': query_text or None,
+        'genre': genre or None,
+        'year': year,
+        'used_min': used_min,
+        'per_page': per_page,
+    }
+    query_args = {key: value for key, value in query_args.items() if value not in (None, '')}
+
+    return render_template(
+        'view_songs.html',
+        songs=pagination.items,
+        tags=tags,
+        pagination=pagination,
+        query_args=query_args,
+        filters={
+            'q': query_text,
+            'genre': genre,
+            'year': year,
+            'used_min': used_min,
+            'per_page': per_page,
+        },
+        total_songs=total_songs,
+        unique_artists=unique_artists,
+        unique_genres=unique_genres,
+        most_used=most_used,
+    )
 
 @core_bp.route('/data/<path:filepath>')
 @login_required

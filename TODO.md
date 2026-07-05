@@ -226,6 +226,7 @@
 * [ ] Index high-traffic database fields (tags, dates, users)
 * [ ] Paginate round/song lists in browser views
 * [x] Paginate song catalog API responses
+* [x] Paginate and filter the browser song library server-side
 * [ ] Lazy load MP3 previews and large content
 * [ ] Add Redis/memory cache layer for read-heavy endpoints
 * [ ] Load test with simulated users and large playlists

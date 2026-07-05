@@ -268,3 +268,44 @@ class TestCoreViewSongs:
         assert b'preview-load-btn' in response.data
         assert b'data-preview-url="https://example.com/preview.mp3"' in response.data
         assert b'<audio controls class="preview-audio w-full max-w-[180px]" src=' not in response.data
+
+    def test_view_songs_paginates_server_side(self, app, client):
+        """The library page should not render the full catalog at once."""
+        _login(app, client)
+        with app.app_context():
+            for index in range(30):
+                db.session.add(
+                    Song(
+                        title=f'Paged Song {index:02d}',
+                        artist=f'Paged Artist {index:02d}',
+                        genre='Paging',
+                    )
+                )
+            db.session.commit()
+
+        first_page = client.get('/view-songs?per_page=25')
+        second_page = client.get('/view-songs?per_page=25&page=2')
+
+        assert first_page.status_code == 200
+        assert b'Paged Song 00' in first_page.data
+        assert b'Paged Song 29' not in first_page.data
+        assert b'25 songs' in first_page.data
+
+        assert second_page.status_code == 200
+        assert b'Paged Song 29' in second_page.data
+        assert b'Page <span id="currentPage">2</span>' in second_page.data
+
+    def test_view_songs_filters_server_side(self, app, client):
+        """Library filters should be applied by the route before rendering."""
+        _login(app, client)
+        with app.app_context():
+            db.session.add(Song(title='Server Match', artist='Filter Artist', genre='Rock', year=1999))
+            db.session.add(Song(title='Server Miss', artist='Other Artist', genre='Pop', year=2005))
+            db.session.commit()
+
+        response = client.get('/view-songs?q=Match&genre=Rock&year=1999')
+
+        assert response.status_code == 200
+        assert b'Server Match' in response.data
+        assert b'Server Miss' not in response.data
+        assert b'Filters are applied server-side' in response.data

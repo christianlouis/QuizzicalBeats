@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added manual import-job retry recovery, text-playlist catalog resolution, text-to-round creation, and catalog analytics MCP helpers.
 - Added server-side song catalog pagination and filter APIs for UI and agent workflows.
 - Added idempotent query-performance indexes for catalog search, import queues, and scheduled round emails.
+- Added server-side pagination and filters to the browser song library.
 
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
