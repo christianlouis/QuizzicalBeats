@@ -329,6 +329,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] User review/edit interface
 - [x] Recent usage and fatigue context for prompt optimization
 - [x] Draft intro/replay/outro script support for generated rounds
+- [x] Persisted script review workflow before TTS assignment
 - [ ] AI provider abstraction (OpenAI, Anthropic, local)
 - [ ] Cost tracking
 
@@ -454,8 +455,9 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Features**:
 - [ ] Shared round editing
-- [ ] Collaboration roles (view/comment/edit)
-- [ ] User invitations via email/username
+- [x] Persisted round ownership and viewer/editor share grants
+- [ ] Collaboration roles beyond viewer/editor (comment/admin)
+- [ ] User invitations via email/username UI
 - [ ] Presence indicators
 - [ ] Revision history
 - [ ] Public sharing links

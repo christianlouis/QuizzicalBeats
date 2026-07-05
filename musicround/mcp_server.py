@@ -257,6 +257,8 @@ def compile_round(
     count: int = 8,
     criteria: str | None = None,
     song_ids: list[int] | None = None,
+    user_id: int | None = None,
+    visibility: str = "private",
 ) -> dict[str, Any]:
     """Compile songs into a named quiz round."""
     return _with_app_context(
@@ -266,6 +268,8 @@ def compile_round(
         count=count,
         criteria=criteria,
         song_ids=song_ids,
+        user_id=user_id,
+        visibility=visibility,
     )
 
 
@@ -273,6 +277,48 @@ def compile_round(
 def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     """Set or clear the display name for a round."""
     return _with_app_context(automation.rename_round, round_id=round_id, name=name)
+
+
+@mcp.tool()
+def set_round_owner(
+    round_id: int,
+    user_id: int | None,
+    visibility: str | None = None,
+) -> dict[str, Any]:
+    """Assign or clear the quizmaster owner for a round."""
+    return _with_app_context(
+        automation.set_round_owner,
+        round_id=round_id,
+        user_id=user_id,
+        visibility=visibility,
+    )
+
+
+@mcp.tool()
+def share_round(round_id: int, user_id: int, role: str = "viewer") -> dict[str, Any]:
+    """Share a round with another quizmaster as viewer or editor."""
+    return _with_app_context(
+        automation.share_round,
+        round_id=round_id,
+        user_id=user_id,
+        role=role,
+    )
+
+
+@mcp.tool()
+def list_round_shares(round_id: int) -> dict[str, Any]:
+    """List explicit share grants for a round."""
+    return _with_app_context(automation.list_round_shares, round_id=round_id)
+
+
+@mcp.tool()
+def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
+    """Remove a user's share grant from a round."""
+    return _with_app_context(
+        automation.revoke_round_share,
+        round_id=round_id,
+        user_id=user_id,
+    )
 
 
 @mcp.tool()
@@ -410,6 +456,7 @@ def draft_round_audio_scripts(
     quiz_date: str | None = None,
     theme: str | None = None,
     tone: str = "warm, concise, lightly humorous",
+    persist: bool = False,
 ) -> dict[str, Any]:
     """Draft intro, replay, and outro script text before generating TTS audio."""
     return _with_app_context(
@@ -419,6 +466,85 @@ def draft_round_audio_scripts(
         quiz_date=quiz_date,
         theme=theme,
         tone=tone,
+        persist=persist,
+    )
+
+
+@mcp.tool()
+def save_round_audio_scripts(
+    round_id: int,
+    scripts: dict[str, str],
+    user_id: int | None = None,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable intro, replay, and outro script text for a round."""
+    return _with_app_context(
+        automation.save_round_audio_scripts,
+        round_id=round_id,
+        scripts=scripts,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        tone=tone,
+        status=status,
+    )
+
+
+@mcp.tool()
+def list_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List stored intro, replay, and outro script drafts."""
+    return _with_app_context(
+        automation.list_round_audio_scripts,
+        round_id=round_id,
+        user_id=user_id,
+        status=status,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def update_round_audio_script(
+    script_id: int,
+    text: str | None = None,
+    status: str | None = None,
+    selected: bool | None = None,
+) -> dict[str, Any]:
+    """Edit, review, approve, reject, or select one stored script."""
+    return _with_app_context(
+        automation.update_round_audio_script,
+        script_id=script_id,
+        text=text,
+        status=status,
+        selected=selected,
+    )
+
+
+@mcp.tool()
+def generate_tts_from_script(
+    script_id: int,
+    service: str = "openai",
+    voice: str | None = None,
+    model: str | None = None,
+    stability: float | None = None,
+    similarity: float | None = None,
+) -> dict[str, Any]:
+    """Generate and assign a custom MP3 from a reviewed or approved stored script."""
+    return _with_app_context(
+        automation.generate_tts_from_script,
+        script_id=script_id,
+        service=service,
+        voice=voice,
+        model=model,
+        stability=stability,
+        similarity=similarity,
     )
 
 

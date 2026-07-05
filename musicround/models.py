@@ -262,6 +262,8 @@ class Round(db.Model):
     genre = db.Column(db.String(100))
     decade = db.Column(db.String(10))
     tag = db.Column(db.String(50))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    visibility = db.Column(db.String(20), default='private', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
     mp3_generated = db.Column(db.Boolean, default=False)  # Track if MP3 has been generated
@@ -271,7 +273,10 @@ class Round(db.Model):
     __table_args__ = (
         db.Index('idx_round_created_at', 'created_at'),
         db.Index('idx_round_generation_status', 'mp3_generated', 'pdf_generated'),
+        db.Index('idx_round_owner_created', 'user_id', 'created_at'),
     )
+
+    owner = db.relationship('User', backref=db.backref('rounds', lazy='dynamic'), foreign_keys=[user_id])
 
     def __repr__(self):
         return (
@@ -315,6 +320,65 @@ class Round(db.Model):
         """
         self.mp3_generated = False
         self.pdf_generated = False
+
+
+class RoundShare(db.Model):
+    """
+    Share grants for quiz rounds between quizmasters.
+    """
+    __tablename__ = 'round_share'
+
+    id = db.Column(db.Integer, primary_key=True)
+    round_id = db.Column(db.Integer, db.ForeignKey('round.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    role = db.Column(db.String(20), default='viewer', nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('round_id', 'user_id', name='uq_round_share_round_user'),
+        db.Index('idx_round_share_user', 'user_id', 'role'),
+    )
+
+    round = db.relationship('Round', backref=db.backref('shares', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('shared_rounds', lazy='dynamic'))
+
+    def __repr__(self):
+        return f"RoundShare(round_id={self.round_id}, user_id={self.user_id}, role='{self.role}')"
+
+
+class RoundAudioScript(db.Model):
+    """
+    Reviewable intro/replay/outro script drafts for a round before TTS generation.
+    """
+    __tablename__ = 'round_audio_script'
+
+    id = db.Column(db.Integer, primary_key=True)
+    round_id = db.Column(db.Integer, db.ForeignKey('round.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    script_type = db.Column(db.String(20), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='draft', nullable=False)
+    tone = db.Column(db.String(200), nullable=True)
+    theme = db.Column(db.String(200), nullable=True)
+    quiz_date = db.Column(db.DateTime, nullable=True)
+    selected = db.Column(db.Boolean, default=False, nullable=False)
+    generated_mp3_path = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_round_audio_script_round_status', 'round_id', 'status', 'script_type'),
+        db.Index('idx_round_audio_script_user', 'user_id', 'created_at'),
+    )
+
+    round = db.relationship('Round', backref=db.backref('audio_scripts', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('round_audio_scripts', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f"RoundAudioScript(round_id={self.round_id}, "
+            f"type='{self.script_type}', status='{self.status}')"
+        )
 
 
 class RoundExport(db.Model):

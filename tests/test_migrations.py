@@ -5,7 +5,7 @@ import sqlite3
 from flask import Flask
 
 from musicround import db
-from musicround.models import ImportJobRecord, Round, RoundExport, Song
+from musicround.models import ImportJobRecord, Round, RoundAudioScript, RoundExport, RoundShare, Song
 
 
 def _legacy_app(database_path):
@@ -28,6 +28,16 @@ def _column_names(database_path, table_name):
 def _index_names(database_path, table_name):
     with sqlite3.connect(database_path) as conn:
         return [row[1] for row in conn.execute(f"PRAGMA index_list({table_name})").fetchall()]
+
+
+def _table_names(database_path):
+    with sqlite3.connect(database_path) as conn:
+        return [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        ]
 
 
 def test_add_song_fields_adds_model_isrc_to_legacy_song_table(tmp_path):
@@ -201,6 +211,43 @@ def test_add_query_performance_indexes_to_existing_tables(tmp_path):
     assert "idx_song_artist_title" in model_index_names
     assert "idx_round_export_schedule" in model_index_names
     assert "idx_import_job_claim" in model_index_names
+
+
+def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
+    """Legacy databases get round owner/share and audio-script review schema."""
+    database_path = tmp_path / "legacy-round-collaboration.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE round (
+                id INTEGER PRIMARY KEY,
+                round_type VARCHAR(50) NOT NULL,
+                round_criteria_used VARCHAR(500) NOT NULL,
+                songs TEXT NOT NULL,
+                created_at DATETIME
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_round_collaboration_and_audio_scripts
+
+        assert add_round_collaboration_and_audio_scripts.run_migration() is True
+        assert add_round_collaboration_and_audio_scripts.run_migration() is None
+
+    round_columns = set(_column_names(database_path, "round"))
+    assert {"user_id", "visibility"}.issubset(round_columns)
+    assert "idx_round_owner_created" in _index_names(database_path, "round")
+    assert "round_share" in _table_names(database_path)
+    assert "round_audio_script" in _table_names(database_path)
+    assert "idx_round_share_user" in _index_names(database_path, "round_share")
+    assert "idx_round_audio_script_round_status" in _index_names(
+        database_path, "round_audio_script"
+    )
+    assert "user_id" in Round.__table__.columns.keys()
+    assert RoundShare.__tablename__ == "round_share"
+    assert RoundAudioScript.__tablename__ == "round_audio_script"
 
 
 def test_round_songs_comment_matches_storage_behavior():

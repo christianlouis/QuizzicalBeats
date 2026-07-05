@@ -16,7 +16,9 @@ from musicround.helpers.import_queue import ImportQueue
 from musicround.models import (
     ImportJobRecord,
     Round,
+    RoundAudioScript,
     RoundExport,
+    RoundShare,
     Song,
     SongTag,
     Tag,
@@ -146,6 +148,25 @@ class TestSongAutomation:
 
 class TestRoundAutomation:
     """Tests for round creation and naming."""
+
+    def test_create_round_assigns_owner_and_visibility(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Owned", artist="A")
+
+            created = automation.create_round(
+                name="Owned Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+                visibility="private",
+            )
+
+            round_obj = db.session.get(Round, created["round"]["id"])
+            assert created["round"]["owner_user_id"] == user.id
+            assert created["round"]["owner"]["username"] == user.username
+            assert round_obj.owner.id == user.id
+            assert round_obj.visibility == "private"
 
     def test_create_and_rename_manual_round(self, app):
         with app.app_context():
@@ -319,6 +340,30 @@ class TestRoundAutomation:
             suggestion_ids = [song["id"] for song in result["suggestions"]]
             assert addition.id in suggestion_ids
             assert in_round.id not in suggestion_ids
+
+    def test_share_round_lifecycle(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            shared = automation.share_round(round_id, viewer.id, role="editor")
+            listed = automation.list_round_shares(round_id)
+            revoked = automation.revoke_round_share(round_id, viewer.id)
+
+            assert shared["created"] is True
+            assert shared["share"]["role"] == "editor"
+            assert listed["count"] == 1
+            assert listed["owner"]["id"] == owner.id
+            assert revoked["revoked"] is True
+            assert RoundShare.query.count() == 0
+            assert db.session.get(Round, round_id).visibility == "private"
 
 
 class TestAssetInspection:
@@ -1139,3 +1184,62 @@ class TestAgentPlanningAutomation:
             assert "Harry Styles" in result["scripts"]["intro"]
             assert "second listen" in result["scripts"]["replay"]
             assert result["next_step"].startswith("Review the text")
+
+    def test_draft_round_audio_scripts_can_persist_review_records(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Wildflowers", artist="Tom Petty")
+            round_id = automation.create_round(
+                name="Warm Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            result = automation.draft_round_audio_scripts(
+                round_id=round_id,
+                user_id=user.id,
+                theme="comfort songs",
+                persist=True,
+            )
+
+            assert len(result["script_records"]) == 3
+            assert RoundAudioScript.query.filter_by(round_id=round_id).count() == 3
+            assert result["script_records"][0]["status"] == "draft"
+            assert "generate_tts_from_script" in result["next_step"]
+
+    def test_round_audio_script_review_and_tts_generation(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Intro", artist="Artist")
+            round_id = automation.create_round(
+                name="Scripted",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            saved = automation.save_round_audio_scripts(
+                round_id,
+                user_id=user.id,
+                scripts={"intro": "Welcome to the scripted round"},
+                status="draft",
+            )
+            script_id = saved["scripts"][0]["id"]
+
+            updated = automation.update_round_audio_script(
+                script_id,
+                text="Welcome to the approved scripted round",
+                status="approved",
+                selected=True,
+            )
+            listed = automation.list_round_audio_scripts(round_id=round_id, status="approved")
+
+            with patch("musicround.services.automation.generate_tts_mp3") as mock_tts:
+                mock_tts.return_value = "custommp3/agentuser/intro.mp3"
+                generated = automation.generate_tts_from_script(script_id, service="openai")
+
+            assert updated["script"]["status"] == "approved"
+            assert listed["count"] == 1
+            assert generated["script"]["status"] == "used"
+            assert generated["generated"]["path"] == "custommp3/agentuser/intro.mp3"
+            assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/intro.mp3"

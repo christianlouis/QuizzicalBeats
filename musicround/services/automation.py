@@ -32,7 +32,16 @@ from musicround.helpers.service_health import (
 )
 from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
-from musicround.models import ImportJobRecord, Round, RoundExport, Song, Tag, User
+from musicround.models import (
+    ImportJobRecord,
+    Round,
+    RoundAudioScript,
+    RoundExport,
+    RoundShare,
+    Song,
+    Tag,
+    User,
+)
 
 
 class AutomationError(ValueError):
@@ -81,16 +90,42 @@ def _song_summary(song: Song) -> dict[str, Any]:
     }
 
 
+def _user_summary(user: User | None) -> dict[str, Any] | None:
+    if not user:
+        return None
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
+    }
+
+
+def _round_share_summary(share: RoundShare) -> dict[str, Any]:
+    return {
+        "id": share.id,
+        "round_id": share.round_id,
+        "user_id": share.user_id,
+        "role": share.role,
+        "created_at": _datetime_payload(share.created_at),
+        "user": _user_summary(share.user),
+    }
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
     return {
         "id": round_obj.id,
         "name": round_obj.name,
+        "owner_user_id": round_obj.user_id,
+        "owner": _user_summary(round_obj.owner),
+        "visibility": round_obj.visibility,
         "round_type": round_obj.round_type,
         "criteria": round_obj.round_criteria_used,
         "song_ids": ids,
         "songs": [_song_summary(song) for song in ordered],
+        "shares": [_round_share_summary(share) for share in round_obj.shares.order_by(RoundShare.id.asc()).all()],
         "mp3_generated": round_obj.mp3_generated,
         "pdf_generated": round_obj.pdf_generated,
         "last_generated_at": (
@@ -679,10 +714,14 @@ def create_round(
     count: int = 8,
     criteria: str | None = None,
     song_ids: list[int] | None = None,
+    user_id: int | None = None,
+    visibility: str = "private",
 ) -> dict[str, Any]:
     """Create and persist a quiz round."""
     if count < 1:
         raise AutomationError("count must be at least 1.")
+    if visibility not in {"private", "shared", "public"}:
+        raise AutomationError("visibility must be private, shared, or public.")
 
     resolved_type, resolved_criteria, songs = _songs_for_round(
         round_type, count, criteria, song_ids
@@ -690,8 +729,11 @@ def create_round(
     if not songs:
         raise AutomationError("No songs matched the requested round criteria.")
 
+    owner = _find_user(user_id) if user_id is not None else None
     round_obj = Round(
         name=name,
+        user_id=owner.id if owner else None,
+        visibility=visibility,
         round_type=resolved_type,
         round_criteria_used=resolved_criteria,
         songs=",".join(str(song.id) for song in songs),
@@ -713,6 +755,94 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     round_obj.name = name.strip() if name and name.strip() else None
     db.session.commit()
     return {"round": _round_summary(round_obj)}
+
+
+def set_round_owner(
+    round_id: int,
+    user_id: int | None,
+    visibility: str | None = None,
+) -> dict[str, Any]:
+    """Assign or clear a round owner and optionally update visibility."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    owner = _find_user(user_id) if user_id is not None else None
+    if visibility is not None and visibility not in {"private", "shared", "public"}:
+        raise AutomationError("visibility must be private, shared, or public.")
+
+    round_obj.user_id = owner.id if owner else None
+    if visibility is not None:
+        round_obj.visibility = visibility
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"round": _round_summary(round_obj)}
+
+
+def share_round(
+    round_id: int,
+    user_id: int,
+    role: str = "viewer",
+) -> dict[str, Any]:
+    """Grant a user access to a round for future collaboration workflows."""
+    if role not in {"viewer", "editor"}:
+        raise AutomationError("role must be viewer or editor.")
+
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id)
+    if round_obj.user_id == user.id:
+        raise AutomationError("The owner already has access to this round.")
+
+    share = RoundShare.query.filter_by(round_id=round_id, user_id=user.id).first()
+    created = share is None
+    if not share:
+        share = RoundShare(round_id=round_id, user_id=user.id)
+        db.session.add(share)
+    share.role = role
+    round_obj.visibility = "shared"
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "created": created,
+        "share": _round_share_summary(share),
+        "round": _round_summary(round_obj),
+    }
+
+
+def list_round_shares(round_id: int) -> dict[str, Any]:
+    """List owner and explicit share grants for a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    shares = round_obj.shares.order_by(RoundShare.id.asc()).all()
+    return {
+        "round_id": round_id,
+        "visibility": round_obj.visibility,
+        "owner": _user_summary(round_obj.owner),
+        "count": len(shares),
+        "shares": [_round_share_summary(share) for share in shares],
+    }
+
+
+def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
+    """Remove a user's explicit share grant from a round."""
+    share = RoundShare.query.filter_by(round_id=round_id, user_id=user_id).first()
+    if not share:
+        raise AutomationError(f"Round {round_id} is not shared with user {user_id}.")
+    removed = _round_share_summary(share)
+    round_obj = db.session.get(Round, round_id)
+    db.session.delete(share)
+    db.session.flush()
+    if round_obj and round_obj.visibility == "shared" and round_obj.shares.count() == 0:
+        round_obj.visibility = "private"
+        round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "revoked": True,
+        "share": removed,
+        "round": _round_summary(round_obj) if round_obj else None,
+    }
 
 
 def _song_position(round_obj: Round, position: int) -> tuple[list[int], int]:
@@ -2141,6 +2271,7 @@ def draft_round_audio_scripts(
     quiz_date: str | datetime | None = None,
     theme: str | None = None,
     tone: str = "warm, concise, lightly humorous",
+    persist: bool = False,
 ) -> dict[str, Any]:
     """Draft intro, replay, and outro text for later TTS generation."""
     round_obj = db.session.get(Round, round_id) if round_id is not None else None
@@ -2170,7 +2301,7 @@ def draft_round_audio_scripts(
             "and prepare to defend every spelling choice."
         ),
     }
-    return {
+    result = {
         "round_id": round_id,
         "round_name": round_obj.name if round_obj else None,
         "user_id": user.id if user else None,
@@ -2180,6 +2311,188 @@ def draft_round_audio_scripts(
         "scripts": scripts,
         "next_step": "Review the text, then call generate_tts_snippet for intro, replay, and outro.",
     }
+    if persist:
+        if round_id is None:
+            raise AutomationError("round_id is required when persist is true.")
+        saved = save_round_audio_scripts(
+            round_id=round_id,
+            user_id=user.id if user else None,
+            scripts=scripts,
+            quiz_date=parsed_date,
+            theme=theme_label,
+            tone=tone,
+        )
+        result["script_records"] = saved["scripts"]
+        result["next_step"] = (
+            "Review the saved script records, approve the preferred text, then "
+            "call generate_tts_from_script for intro, replay, and outro."
+        )
+    return result
+
+
+def _audio_script_summary(script: RoundAudioScript) -> dict[str, Any]:
+    return {
+        "id": script.id,
+        "round_id": script.round_id,
+        "user_id": script.user_id,
+        "script_type": script.script_type,
+        "text": script.text,
+        "status": script.status,
+        "tone": script.tone,
+        "theme": script.theme,
+        "quiz_date": _datetime_payload(script.quiz_date),
+        "selected": bool(script.selected),
+        "generated_mp3_path": script.generated_mp3_path,
+        "created_at": _datetime_payload(script.created_at),
+        "updated_at": _datetime_payload(script.updated_at),
+    }
+
+
+def _validate_script_type(script_type: str) -> str:
+    normalized = (script_type or "").strip().lower()
+    if normalized not in {"intro", "replay", "outro"}:
+        raise AutomationError("script_type must be intro, replay, or outro.")
+    return normalized
+
+
+def _validate_script_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized not in {"draft", "reviewed", "approved", "rejected", "used"}:
+        raise AutomationError("status must be draft, reviewed, approved, rejected, or used.")
+    return normalized
+
+
+def save_round_audio_scripts(
+    round_id: int,
+    scripts: dict[str, str],
+    user_id: int | None = None,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable intro/replay/outro text before assigning TTS audio."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    if not scripts:
+        raise AutomationError("scripts must include at least one script text.")
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    normalized_status = _validate_script_status(status)
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+
+    created_scripts = []
+    for raw_type, text in scripts.items():
+        script_type = _validate_script_type(raw_type)
+        if not text or not text.strip():
+            raise AutomationError(f"{script_type} script text must not be empty.")
+        script = RoundAudioScript(
+            round_id=round_obj.id,
+            user_id=user.id if user else None,
+            script_type=script_type,
+            text=text.strip(),
+            status=normalized_status,
+            tone=tone,
+            theme=theme,
+            quiz_date=parsed_date,
+        )
+        db.session.add(script)
+        created_scripts.append(script)
+    db.session.commit()
+    return {
+        "created": len(created_scripts),
+        "round": _round_summary(round_obj),
+        "scripts": [_audio_script_summary(script) for script in created_scripts],
+    }
+
+
+def list_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List stored round-audio scripts for review workflows."""
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+    query = RoundAudioScript.query
+    if round_id is not None:
+        query = query.filter_by(round_id=round_id)
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    if status is not None:
+        query = query.filter_by(status=_validate_script_status(status))
+    scripts = (
+        query.order_by(
+            RoundAudioScript.created_at.desc(),
+            RoundAudioScript.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(scripts),
+        "scripts": [_audio_script_summary(script) for script in scripts],
+    }
+
+
+def update_round_audio_script(
+    script_id: int,
+    text: str | None = None,
+    status: str | None = None,
+    selected: bool | None = None,
+) -> dict[str, Any]:
+    """Edit or review one stored round-audio script."""
+    script = db.session.get(RoundAudioScript, script_id)
+    if not script:
+        raise AutomationError(f"RoundAudioScript {script_id} was not found.")
+    if text is not None:
+        if not text.strip():
+            raise AutomationError("text must not be empty.")
+        script.text = text.strip()
+    if status is not None:
+        script.status = _validate_script_status(status)
+    if selected is not None:
+        script.selected = bool(selected)
+    script.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"script": _audio_script_summary(script)}
+
+
+def generate_tts_from_script(
+    script_id: int,
+    service: str = "openai",
+    voice: str | None = None,
+    model: str | None = None,
+    stability: float | None = None,
+    similarity: float | None = None,
+) -> dict[str, Any]:
+    """Generate a user custom MP3 from an approved stored script."""
+    script = db.session.get(RoundAudioScript, script_id)
+    if not script:
+        raise AutomationError(f"RoundAudioScript {script_id} was not found.")
+    if script.status not in {"approved", "reviewed"}:
+        raise AutomationError("Script must be reviewed or approved before TTS generation.")
+    user_id = script.user_id or (script.round.user_id if script.round else None)
+    if user_id is None:
+        raise AutomationError("Script has no user or round owner for audio assignment.")
+
+    generated = generate_tts_snippet(
+        user_id=user_id,
+        mp3_type=script.script_type,
+        text=script.text,
+        service=service,
+        voice=voice,
+        model=model,
+        stability=stability,
+        similarity=similarity,
+    )
+    script.generated_mp3_path = generated["path"]
+    script.selected = True
+    script.status = "used"
+    script.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"script": _audio_script_summary(script), "generated": generated}
 
 
 def _parse_datetime_utc(value: str | datetime) -> datetime:

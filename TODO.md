@@ -181,6 +181,7 @@
   * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
   * [x] Provide recent usage/fatigue context for agentic song selection
   * [x] Draft intro/replay/outro scripts for later TTS generation
+  * [x] Store and review generated intro/replay/outro scripts before assigning TTS audio
   * [ ] Include fallback logic when metadata is sparse
 * [ ] Let users review/edit AI-generated questions before saving
 * [ ] Log prompt/response pairs for model improvement
@@ -204,8 +205,9 @@
 ### 🎯 Milestone 21: **"Collaboration Core" Release** – Multi-User Round Sharing
 
 * [ ] Allow shared editing of rounds
-* [ ] Add collaboration roles (view, comment, edit)
-* [ ] Invite others to rounds via username/email
+* [x] Add persisted round ownership and explicit viewer/editor share grants
+* [ ] Add collaboration roles beyond viewer/editor (comment, admin)
+* [ ] Invite others to rounds via username/email UI
 * [ ] Show who is currently editing (presence indicator)
 * [ ] Track revision history and changes
 * [ ] Allow public view-only sharing links with optional expiration

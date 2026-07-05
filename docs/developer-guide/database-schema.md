@@ -200,6 +200,8 @@ The `Round` table stores music quiz rounds.
 | genre                 | String(100)  | Genre of the round (if applicable)               |
 | decade                | String(10)   | Decade of the round (if applicable)              |
 | tag                   | String(50)   | Tag of the round (if applicable)                 |
+| user_id               | Integer      | Owning quizmaster, if assigned                   |
+| visibility            | String(20)   | Round visibility (private, shared, public)       |
 | created_at            | DateTime     | Creation timestamp                               |
 | updated_at            | DateTime     | Last update timestamp                            |
 | mp3_generated         | Boolean      | Flag indicating if MP3 has been generated        |
@@ -209,6 +211,40 @@ The `Round` table stores music quiz rounds.
 **Query indexes:**
 - `idx_round_created_at` supports recent-round lists.
 - `idx_round_generation_status` supports readiness and repair views.
+- `idx_round_owner_created` supports per-quizmaster round history.
+
+### RoundShare
+
+The `RoundShare` table stores explicit round access grants.
+
+| Column     | Type        | Description                          |
+|------------|-------------|--------------------------------------|
+| id         | Integer     | Primary key                          |
+| round_id   | Integer     | Foreign key to Round                 |
+| user_id    | Integer     | Foreign key to shared user           |
+| role       | String(20)  | Share role (viewer, editor)          |
+| created_at | DateTime    | When the share was created           |
+
+### RoundAudioScript
+
+The `RoundAudioScript` table stores reviewable intro, replay, and outro text
+before it is turned into quizmaster audio.
+
+| Column             | Type         | Description                                      |
+|--------------------|--------------|--------------------------------------------------|
+| id                 | Integer      | Primary key                                      |
+| round_id           | Integer      | Foreign key to Round                             |
+| user_id            | Integer      | Quizmaster whose audio this targets              |
+| script_type        | String(20)   | intro, replay, or outro                          |
+| text               | Text         | Script text for review                           |
+| status             | String(20)   | draft, reviewed, approved, rejected, or used     |
+| tone               | String(200)  | Intended tone                                    |
+| theme              | String(200)  | Round theme or context                           |
+| quiz_date          | DateTime     | Planned quiz date                                |
+| selected           | Boolean      | Whether this draft is the selected version       |
+| generated_mp3_path | String(500)  | Generated audio path after TTS assignment        |
+| created_at         | DateTime     | Creation timestamp                               |
+| updated_at         | DateTime     | Last update timestamp                            |
 
 ### RoundExport
 
