@@ -456,6 +456,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Shared round editing
 - [x] Persisted round ownership and viewer/editor share grants
+- [x] Browser owner/visibility filtering and edit-route access checks
 - [ ] Collaboration roles beyond viewer/editor (comment/admin)
 - [ ] User invitations via email/username UI
 - [ ] Presence indicators

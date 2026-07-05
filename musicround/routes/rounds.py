@@ -11,9 +11,10 @@ import zipfile
 import io
 import json
 
-from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash
+from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
-from musicround.models import Round, RoundExport, Song, db
+from sqlalchemy import or_
+from musicround.models import Round, RoundExport, RoundShare, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -103,6 +104,58 @@ def _rounds_list_statuses(rounds):
     return statuses
 
 
+def _visible_rounds_query():
+    """Return rounds visible to the current authenticated user."""
+    query = Round.query
+    if current_user.is_admin:
+        return query
+    return query.filter(
+        or_(
+            Round.user_id == current_user.id,
+            Round.user_id.is_(None),
+            Round.visibility == 'public',
+            Round.shares.any(RoundShare.user_id == current_user.id),
+        )
+    )
+
+
+def _can_view_round(round_obj):
+    if current_user.is_admin:
+        return True
+    if round_obj.user_id is None:
+        return True
+    if round_obj.user_id == current_user.id:
+        return True
+    if round_obj.visibility == 'public':
+        return True
+    return round_obj.shares.filter_by(user_id=current_user.id).first() is not None
+
+
+def _can_edit_round(round_obj):
+    if current_user.is_admin:
+        return True
+    if round_obj.user_id is None:
+        return True
+    if round_obj.user_id == current_user.id:
+        return True
+    share = round_obj.shares.filter_by(user_id=current_user.id).first()
+    return bool(share and share.role == 'editor')
+
+
+def _get_visible_round_or_404(round_id):
+    round_obj = Round.query.get_or_404(round_id)
+    if not _can_view_round(round_obj):
+        abort(404)
+    return round_obj
+
+
+def _get_editable_round_or_404(round_id):
+    round_obj = _get_visible_round_or_404(round_id)
+    if not _can_edit_round(round_obj):
+        abort(403)
+    return round_obj
+
+
 def _storage_failure_response(round_id, storage_health, status_code=503):
     """Return a consistent storage-health failure for route actions."""
     hint = '; '.join(storage_health.get('hints') or [])
@@ -125,7 +178,7 @@ def rounds_list():
     """Display a paginated list of rounds."""
     page = _int_arg('page', default=1, minimum=1)
     per_page = _int_arg('per_page', default=25, minimum=1, maximum=100)
-    query = Round.query.order_by(Round.created_at.desc(), Round.id.desc())
+    query = _visible_rounds_query().order_by(Round.created_at.desc(), Round.id.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     rounds = pagination.items
     query_args = {'per_page': per_page}
@@ -142,7 +195,7 @@ def rounds_list():
 @login_required
 def round_detail(round_id):
     """Display details of a specific round"""
-    rnd = Round.query.get(round_id)
+    rnd = _get_visible_round_or_404(round_id)
     
     if rnd:
         ordered_songs = rnd.song_list
@@ -169,7 +222,7 @@ def round_detail(round_id):
 @login_required
 def update_round_name(round_id):
     """Update the name of a round"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     round_name = request.form.get('round_name', '').strip()
     
     # Update the round name
@@ -183,7 +236,7 @@ def update_round_name(round_id):
 @login_required
 def update_round_songs(round_id):
     """Update the songs in a round (order, additions, removals)"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     song_order = request.form.get('song_order', '')
     
     if song_order:
@@ -212,7 +265,7 @@ def round_mp3(round_id):
         if not current_user.is_authenticated:
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-    round = Round.query.get_or_404(round_id)
+    round = _get_editable_round_or_404(round_id)
     song_ids = round.song_id_list
     if not song_ids:
         error_msg = 'Round contains no songs. Please add songs before generating an MP3.'
@@ -396,6 +449,7 @@ def round_mp3(round_id):
 @login_required
 def download_mp3(round_id):
     """Download an MP3 file for a round"""
+    _get_visible_round_or_404(round_id)
     mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
     
     if not os.path.exists(mp3_file_path):
@@ -408,6 +462,7 @@ def download_mp3(round_id):
 @login_required
 def download_pdf(round_id):
     """Download a PDF file for a round"""
+    _get_visible_round_or_404(round_id)
     pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
     
     if not os.path.exists(pdf_file_path):
@@ -682,7 +737,7 @@ def send_email(round_id):
             return jsonify({'error': 'Authentication required'}), 401
     
     # Check if the round exists
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
 
     storage = check_round_artifact_storage(include_mp3=True, include_pdf=True)
     if not storage['ok']:
@@ -799,7 +854,7 @@ def send_email(round_id):
 @login_required
 def delete_round(round_id):
     """Delete a round and its associated files"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     
     try:
         # Delete associated MP3 file if it exists
@@ -831,7 +886,7 @@ def export_to_dropbox(round_id):
     Export a round to the user's Dropbox account, including metadata and optionally MP3 files
     """
     current_app.logger.info(f"Starting Dropbox export for round ID {round_id} by user {current_user.username}")
-    round_obj = Round.query.get_or_404(round_id)
+    round_obj = _get_visible_round_or_404(round_id)
     
     # Properly parse boolean parameters from form data
     include_mp3s = request.form.get('include_mp3s', 'true').lower() == 'true'

@@ -649,6 +649,8 @@ def save_round():
     # create new Round object and add to database
     new_round = Round(
         name=round_name,
+        user_id=current_user.id,
+        visibility='private',
         round_type=round_type,
         round_criteria_used=round_criteria_used,
         songs=song_ids_str,

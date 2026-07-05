@@ -26,7 +26,8 @@ The main navigation menu is located at the top of the screen and includes:
 The Rounds page displays all your created quiz rounds with:
 
 - **Search & Filter**: Find rounds by name, date, or type
-- **Round Cards**: Preview of each round with options to edit, play, or export
+- **Ownership**: See who owns a round and whether it is private, shared, or public
+- **Round Cards**: Preview of each round with options to edit, play, or export when you have the required access
 
 ## Song Library
 

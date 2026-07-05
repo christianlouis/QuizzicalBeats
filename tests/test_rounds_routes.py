@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
-from musicround.models import db, User, Song, Round, RoundExport
+from musicround.models import db, User, Song, Round, RoundExport, RoundShare
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -39,6 +39,11 @@ def _create_round(app, songs_ids, name='Test Round'):
         db.session.add(round_)
         db.session.commit()
         return round_.id
+
+
+def _user_id(app, username):
+    with app.app_context():
+        return User.query.filter_by(username=username).one().id
 
 
 class TestRoundsListRoute:
@@ -119,6 +124,70 @@ class TestRoundsListRoute:
         assert b'Paged Round 29' not in second_page.data
         assert b'Page 2 of 2' in second_page.data
 
+    def test_rounds_list_only_shows_visible_owned_or_shared_rounds(self, app, client):
+        """Round ownership should keep private rounds out of other quizmasters' lists."""
+        _login(app, client, username='visible_owner', email='visible_owner@example.com')
+        _login(app, client, username='visible_other', email='visible_other@example.com')
+        _login(app, client, username='visible_owner', email='visible_owner@example.com')
+        song_id = _create_song(app, title='Visible Song')
+
+        with app.app_context():
+            owner_id = User.query.filter_by(username='visible_owner').one().id
+            other_id = User.query.filter_by(username='visible_other').one().id
+            own_round = Round(
+                name='Own Visible Round',
+                round_type='manual',
+                round_criteria_used='own',
+                songs=str(song_id),
+                user_id=owner_id,
+                visibility='private',
+            )
+            other_private = Round(
+                name='Other Private Round',
+                round_type='manual',
+                round_criteria_used='other',
+                songs=str(song_id),
+                user_id=other_id,
+                visibility='private',
+            )
+            other_public = Round(
+                name='Other Public Round',
+                round_type='manual',
+                round_criteria_used='public',
+                songs=str(song_id),
+                user_id=other_id,
+                visibility='public',
+            )
+            shared_round = Round(
+                name='Shared Visible Round',
+                round_type='manual',
+                round_criteria_used='shared',
+                songs=str(song_id),
+                user_id=other_id,
+                visibility='shared',
+            )
+            legacy_round = Round(
+                name='Legacy Visible Round',
+                round_type='manual',
+                round_criteria_used='legacy',
+                songs=str(song_id),
+            )
+            db.session.add_all([own_round, other_private, other_public, shared_round, legacy_round])
+            db.session.flush()
+            db.session.add(RoundShare(round_id=shared_round.id, user_id=owner_id, role='viewer'))
+            db.session.commit()
+
+        response = client.get('/rounds/')
+
+        assert response.status_code == 200
+        assert b'Own Visible Round' in response.data
+        assert b'Other Public Round' in response.data
+        assert b'Shared Visible Round' in response.data
+        assert b'Legacy Visible Round' in response.data
+        assert b'Other Private Round' not in response.data
+        assert b'visible_owner' in response.data
+        assert b'visible_other' in response.data
+
 
 class TestRoundDetailRoute:
     """Tests for GET /rounds/<id> (round_detail)."""
@@ -137,6 +206,72 @@ class TestRoundDetailRoute:
 
         response = client.get(f'/rounds/{round_id}')
         assert response.status_code == 200
+
+    def test_round_detail_hides_private_round_owned_by_other_user(self, app, client):
+        """Private owned rounds should not be visible to other quizmasters."""
+        _login(app, client, username='viewer_one', email='viewer_one@example.com')
+        _login(app, client, username='viewer_two', email='viewer_two@example.com')
+        song_id = _create_song(app, title='Hidden Song')
+        other_id = _user_id(app, 'viewer_two')
+        _login(app, client, username='viewer_one', email='viewer_one@example.com')
+        round_id = _create_round(app, [song_id], name='Hidden Private Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = other_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        response = client.get(f'/rounds/{round_id}')
+
+        assert response.status_code == 404
+
+    def test_shared_viewer_can_view_but_not_edit_round(self, app, client):
+        """Viewer shares are read-only in browser routes."""
+        _login(app, client, username='share_viewer', email='share_viewer@example.com')
+        _login(app, client, username='share_owner', email='share_owner@example.com')
+        song_id = _create_song(app, title='Shared Viewer Song')
+        owner_id = _user_id(app, 'share_owner')
+        viewer_id = _user_id(app, 'share_viewer')
+        _login(app, client, username='share_viewer', email='share_viewer@example.com')
+        round_id = _create_round(app, [song_id], name='Viewer Shared Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=viewer_id, role='viewer'))
+            db.session.commit()
+
+        detail = client.get(f'/rounds/{round_id}')
+        edit = client.post(f'/rounds/{round_id}/update-name', data={'round_name': 'Blocked'})
+
+        assert detail.status_code == 200
+        assert edit.status_code == 403
+
+    def test_shared_editor_can_update_round(self, app, client):
+        """Editor shares can modify round metadata."""
+        _login(app, client, username='share_editor', email='share_editor@example.com')
+        _login(app, client, username='editor_owner', email='editor_owner@example.com')
+        song_id = _create_song(app, title='Shared Editor Song')
+        owner_id = _user_id(app, 'editor_owner')
+        editor_id = _user_id(app, 'share_editor')
+        _login(app, client, username='share_editor', email='share_editor@example.com')
+        round_id = _create_round(app, [song_id], name='Editor Shared Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=editor_id, role='editor'))
+            db.session.commit()
+
+        response = client.post(
+            f'/rounds/{round_id}/update-name',
+            data={'round_name': 'Editor Updated Round'},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        with app.app_context():
+            assert db.session.get(Round, round_id).name == 'Editor Updated Round'
 
 
 class TestRoundUpdateName:

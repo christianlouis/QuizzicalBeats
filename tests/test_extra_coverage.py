@@ -262,8 +262,11 @@ class TestSaveRoundRoute:
         assert response.status_code == 200
         with app.app_context():
             round_ = Round.query.filter_by(round_type='Genre').order_by(Round.id.desc()).first()
+            user = User.query.filter_by(username='extra_user').one()
             assert round_ is not None
             assert round_.round_criteria_used == 'Jazz'
+            assert round_.user_id == user.id
+            assert round_.visibility == 'private'
 
 
 class TestImportQueueStatusRoute:

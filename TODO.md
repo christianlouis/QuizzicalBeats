@@ -206,6 +206,7 @@
 
 * [ ] Allow shared editing of rounds
 * [x] Add persisted round ownership and explicit viewer/editor share grants
+* [x] Add owner/visibility indicators and route-level edit checks for browser rounds
 * [ ] Add collaboration roles beyond viewer/editor (comment, admin)
 * [ ] Invite others to rounds via username/email UI
 * [ ] Show who is currently editing (presence indicator)

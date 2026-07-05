@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added server-side pagination to the browser rounds list.
 - Added round owner/share models and MCP helpers for quizmaster collaboration handoff.
 - Added persisted round-audio script drafts, review status, and MCP helpers to approve script text before TTS audio generation.
+- Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
 
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
