@@ -5,7 +5,6 @@ from flask import Flask
 
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
 os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
-os.environ.setdefault('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
 
 from musicround import _configure_database_uri
 
