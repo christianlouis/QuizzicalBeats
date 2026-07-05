@@ -425,6 +425,33 @@ class TestRoundModel:
         result_ids = {s.id for s in result}
         assert result_ids == {s.id for s in songs}
 
+    def test_round_song_list_preserves_saved_order(self, app):
+        """Test Round.song_list returns songs in the saved round order."""
+        songs = self._make_songs(3)
+        ordered_ids = [songs[2].id, songs[0].id, songs[1].id]
+        round_ = Round(
+            round_type='genre',
+            round_criteria_used='Pop',
+            songs=','.join(str(song_id) for song_id in ordered_ids),
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        assert [song.id for song in round_.song_list] == ordered_ids
+
+    def test_round_song_list_handles_empty_legacy_value(self, app):
+        """Test Round.song_list does not crash for legacy empty rounds."""
+        round_ = Round(
+            round_type='genre',
+            round_criteria_used='Pop',
+            songs='',
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        assert round_.song_id_list == []
+        assert round_.song_list == []
+
     def test_round_defaults(self, app):
         """Test Round model default values."""
         songs = self._make_songs(1)

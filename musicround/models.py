@@ -269,12 +269,34 @@ class Round(db.Model):
         )
 
     @property
+    def song_id_list(self):
+        """
+        Returns the round's stored song IDs in their saved order.
+        """
+        song_ids = []
+        for token in (self.songs or '').split(','):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                song_ids.append(int(token))
+            except ValueError:
+                continue
+        return song_ids
+
+    @property
     def song_list(self):
         """
         Returns a list of Song objects associated with this round
         """
-        song_ids = self.songs.split(',')
-        return Song.query.filter(Song.id.in_(song_ids)).all()
+        song_ids = self.song_id_list
+        if not song_ids:
+            return []
+        songs_by_id = {
+            song.id: song
+            for song in Song.query.filter(Song.id.in_(song_ids)).all()
+        }
+        return [songs_by_id[song_id] for song_id in song_ids if song_id in songs_by_id]
         
     def reset_generated_status(self):
         """

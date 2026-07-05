@@ -1,6 +1,7 @@
 """Tests for rounds blueprint routes."""
 import pytest
 import json
+from unittest.mock import patch
 from musicround.models import db, User, Song, Round
 
 
@@ -198,3 +199,59 @@ class TestRoundDownloadRoutes:
         _login(app, client)
         response = client.get('/rounds/download/pdf/round_99999')
         assert response.status_code in (302, 404, 500)
+
+
+class TestLegacyEmptyRoundRoutes:
+    """Tests for legacy rounds with empty song lists."""
+
+    def test_empty_round_mp3_returns_clear_error(self, app, client):
+        """Test MP3 generation does not crash for empty legacy rounds."""
+        _login(app, client)
+        round_id = _create_round(app, [])
+
+        response = client.post(
+            f'/rounds/round/{round_id}/mp3',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['success'] is False
+        assert 'no songs' in response.get_json()['error']
+
+    def test_empty_round_pdf_returns_clear_error(self, app, client):
+        """Test PDF generation does not crash for empty legacy rounds."""
+        _login(app, client)
+        round_id = _create_round(app, [])
+
+        response = client.post(
+            f'/rounds/{round_id}/pdf',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['success'] is False
+        assert 'no songs' in response.get_json()['error']
+
+    def test_empty_round_dropbox_export_returns_clear_error(self, app, client):
+        """Test Dropbox export does not crash for empty legacy rounds."""
+        _login(app, client)
+        round_id = _create_round(app, [])
+        with app.app_context():
+            user = User.query.filter_by(username='roundsuser').one()
+            user.dropbox_token = 'dropbox-access-token'
+            user.dropbox_refresh_token = 'dropbox-refresh-token'
+            db.session.commit()
+
+        with patch(
+            'musicround.helpers.dropbox_helper.refresh_dropbox_token_if_needed',
+            return_value={'success': True, 'message': 'ok'},
+        ), patch('musicround.helpers.dropbox_helper.upload_to_dropbox') as mock_upload:
+            response = client.post(
+                f'/rounds/{round_id}/export-to-dropbox',
+                data={'include_mp3s': 'false', 'include_pdf': 'false'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['success'] is False
+        assert 'no songs' in response.get_json()['message']
+        mock_upload.assert_not_called()
