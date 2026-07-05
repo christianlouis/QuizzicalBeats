@@ -232,6 +232,37 @@ class TestAuthenticatedRoutes:
         response = client.get('/users/profile')
         assert response.status_code == 200
 
+    def test_profile_does_not_render_manual_spotify_token(self, app, client):
+        """Stored manual bearer tokens must stay hidden in profile HTML."""
+        self._login(app, client)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'manual-spotify-secret-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+            sess['token_source'] = 'manual'
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'manual-spotify-secret-token' not in response.data
+        assert b'Manual token saved' in response.data
+
+    def test_profile_shows_dropbox_reconnect_when_credentials_cleared(self, app, client):
+        """A preserved Dropbox id without tokens should become actionable."""
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.dropbox_id = 'dropbox-account-id'
+            user.dropbox_token = None
+            user.dropbox_refresh_token = None
+            user.dropbox_token_expiry = None
+            db.session.commit()
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'Reconnect required' in response.data
+        assert b'Reconnect Dropbox' in response.data
+
     def test_legacy_use_refresh_token_redirects_when_logged_in(self, app, client):
         """Legacy refresh-token endpoint must not return None/500."""
         self._login(app, client)

@@ -1,7 +1,7 @@
 """
 Helpers for Dropbox API integration
 """
-from flask import current_app, url_for, redirect, session
+from flask import current_app, flash, url_for, redirect, session
 from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 from musicround.helpers.logging_utils import redact_authorization_header
 import requests
@@ -9,6 +9,10 @@ import json
 import os
 from datetime import datetime, timedelta
 from flask_login import current_user
+
+
+class DropboxTokenRevokedError(Exception):
+    """Raised when Dropbox reports a permanently invalid refresh token."""
 
 def get_dropbox_auth_url():
     """Get the authorization URL for Dropbox OAuth flow"""
@@ -44,7 +48,7 @@ def exchange_code_for_token(code):
         return None
 
 def refresh_dropbox_token(refresh_token):
-    """Refresh an expired Dropbox access token"""
+    """Refresh an expired Dropbox access token."""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
     app_secret = current_app.config.get('DROPBOX_APP_SECRET')
     
@@ -55,13 +59,41 @@ def refresh_dropbox_token(refresh_token):
         'client_secret': app_secret
     }
     
-    response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data)
+    try:
+        response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data, timeout=10)
+    except requests.RequestException as e:
+        current_app.logger.error(f"Network error refreshing Dropbox token: {e}")
+        return None
     
     if response.status_code == 200:
         return response.json()
-    else:
-        current_app.logger.error(f"Error refreshing token: {response.text}")
-        return None
+
+    if response.status_code == 400:
+        try:
+            error_body = response.json()
+        except ValueError:
+            error_body = {}
+        error_code = error_body.get('error')
+        if error_code in {'invalid_grant', 'invalid_request'}:
+            raise DropboxTokenRevokedError(
+                error_body.get('error_description', 'Dropbox refresh token is invalid or has been revoked')
+            )
+
+    current_app.logger.error(f"Error refreshing token: {response.text}")
+    return None
+
+
+def _clear_user_dropbox_tokens(user):
+    """Discard Dropbox credentials after Dropbox reports a permanent token failure."""
+    from musicround.models import db
+
+    user.dropbox_token = None
+    user.dropbox_refresh_token = None
+    user.dropbox_token_expiry = None
+    db.session.commit()
+    current_app.logger.warning(
+        f"Discarded revoked Dropbox refresh token for user {user.id}; user must reconnect Dropbox."
+    )
 
 def get_dropbox_user_info(access_token):
     """Get user info from Dropbox API"""
@@ -96,7 +128,12 @@ def get_current_user_dropbox_token():
         from musicround.models import db
         
         # Try to refresh the token
-        token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
+        try:
+            token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
+        except DropboxTokenRevokedError:
+            _clear_user_dropbox_tokens(current_user)
+            flash("Your Dropbox connection has expired. Please reconnect Dropbox.", "warning")
+            return None
         
         if token_info and 'access_token' in token_info:
             # Update token in database
@@ -246,7 +283,15 @@ def refresh_dropbox_token_if_needed(user):
     from musicround.models import db
     
     try:
-        token_info = refresh_dropbox_token(user.dropbox_refresh_token)
+        try:
+            token_info = refresh_dropbox_token(user.dropbox_refresh_token)
+        except DropboxTokenRevokedError:
+            _clear_user_dropbox_tokens(user)
+            return {
+                'success': False,
+                'message': 'Dropbox connection expired. Please reconnect Dropbox.',
+                'reconnect_required': True,
+            }
         
         if token_info and 'access_token' in token_info:
             # Update token in database

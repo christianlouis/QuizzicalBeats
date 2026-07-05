@@ -179,11 +179,13 @@
                     <div>
                         <h4 class="font-medium">Dropbox</h4>
                         <p class="text-sm text-gray-600">
-                            {% if current_user.dropbox_id %}
+                            {% if current_user.dropbox_id and current_user.dropbox_token and current_user.dropbox_refresh_token %}
                                 Connected
                                 {% if current_user.dropbox_id %}
                                     as {{ current_user.dropbox_id[:10] }}...
                                 {% endif %}
+                            {% elif current_user.dropbox_id %}
+                                Reconnect required
                             {% else %}
                                 Not connected
                             {% endif %}
@@ -191,7 +193,7 @@
                     </div>
                 </div>
                 
-                {% if current_user.dropbox_id %}
+                {% if current_user.dropbox_id and current_user.dropbox_token and current_user.dropbox_refresh_token %}
                     <div class="grid grid-cols-1 gap-2">
                         <p class="text-xs text-gray-600">
                             {% if current_user.dropbox_token_expiry %}
@@ -204,6 +206,15 @@
                                 Disconnect Dropbox
                             </button>
                         </form>
+                    </div>
+                {% elif current_user.dropbox_id %}
+                    <div class="grid grid-cols-1 gap-2">
+                        <p class="text-xs text-amber-700">
+                            Your Dropbox connection expired or was revoked. Reconnect before exporting rounds.
+                        </p>
+                        <a href="{{ url_for('users.dropbox_auth') }}" class="inline-block w-full bg-[#0061FF] hover:bg-[#0055DF] text-white text-center py-1 px-3 rounded-md text-sm transition-colors">
+                            Reconnect Dropbox
+                        </a>
                     </div>
                 {% else %}
                     <a href="{{ url_for('users.dropbox_auth') }}" class="inline-block w-full bg-[#0061FF] hover:bg-[#0055DF] text-white text-center py-1 px-3 rounded-md text-sm transition-colors">
@@ -223,9 +234,12 @@
                 <form action="{{ url_for('users.update_bearer_token') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <div class="mb-2">
-                        <textarea name="bearer_token" rows="2" 
-                            placeholder="BQBcQ1foQG0x14axu2kQVz..." 
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">{{ session.get('access_token', '') }}</textarea>
+                        <textarea name="bearer_token" rows="2"
+                            placeholder="{% if session.get('access_token') %}Manual token saved - paste a new token to replace it{% else %}Paste Spotify bearer token{% endif %}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500"></textarea>
+                        {% if session.get('access_token') %}
+                            <p class="mt-1 text-xs text-amber-700">A manual Spotify token is saved for this session and hidden for security.</p>
+                        {% endif %}
                         <p class="mt-1 text-xs text-gray-500">Get a token from <a href="https://developer.spotify.com/console/" target="_blank" class="text-teal-600 hover:underline">Spotify Developer Console</a></p>
                     </div>
                     
