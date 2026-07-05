@@ -573,21 +573,21 @@ def send_email(round_id):
     
     # Generate PDF
     pdf_data = generate_pdf(round_id)
-    if isinstance(pdf_data, str) and pdf_data.startswith('Round not found'):
-        error_msg = 'Round not found'
+    if isinstance(pdf_data, str):
+        error_msg = pdf_data
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': error_msg})
-        else:
+        if pdf_data.startswith('Round not found'):
             flash(error_msg, 'error')
             return redirect(url_for('rounds.rounds_list'))
+        flash(error_msg, 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
     
     # Define the path for the MP3 file
     mp3_file_path = os.path.join('/data/rounds', f'round_{round_id}.mp3')
     
-    # Check if MP3 exists, if not generate it
-    if not os.path.exists(mp3_file_path):
-        # Call the round_mp3 function but don't return its result yet
-        # This will generate the MP3 file at mp3_file_path
+    # Regenerate if the database marks the asset stale or the file is missing.
+    if not rnd.mp3_generated or not os.path.exists(mp3_file_path):
         response = round_mp3(round_id)
 
         response_obj = response
@@ -611,6 +611,13 @@ def send_email(round_id):
             else:
                 flash(error_msg, 'error')
                 return redirect(url_for('rounds.round_detail', round_id=round_id))
+        db.session.refresh(rnd)
+        if not rnd.mp3_generated:
+            error_msg = "MP3 generation failed. Please resolve the round audio issues before sending email."
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({'error': error_msg})
+            flash(error_msg, 'error')
+            return redirect(url_for('rounds.round_detail', round_id=round_id))
     
     # Use the current user's email address as the recipient
     mail_recipient = current_user.email
@@ -662,8 +669,8 @@ def send_email(round_id):
             return redirect(url_for('rounds.round_detail', round_id=round_id))
             
     except Exception as e:
-        error_msg = str(e)
-        current_app.logger.error(f"Email send error: {error_msg}")
+        current_app.logger.error(f"Email send error: {e}")
+        error_msg = "Unable to send the email. Please try again later or contact an administrator."
         
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': error_msg})

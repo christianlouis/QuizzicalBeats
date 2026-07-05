@@ -286,6 +286,10 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Mailable Song')
         round_id = _create_round(app, [song_id], name='Mailable Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
 
         with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
                 patch('musicround.routes.rounds.os.path.exists', return_value=True), \
@@ -318,3 +322,82 @@ class TestRoundEmailRoute:
                 'mimetype': 'audio/mpeg',
             },
         ]
+
+    def test_mail_route_returns_pdf_error_without_sending(self, app, client):
+        """Test PDF generation errors block email before attachment creation."""
+        _login(app, client)
+        song_id = _create_song(app, title='PDF Error Song')
+        round_id = _create_round(app, [song_id], name='PDF Error Round')
+
+        with patch(
+            'musicround.routes.rounds.generate_pdf',
+            return_value='Round contains no songs',
+        ), patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['error'] == 'Round contains no songs'
+        mock_send.assert_not_called()
+
+    def test_mail_route_regenerates_stale_mp3_before_sending(self, app, client):
+        """Test stale MP3 database state triggers regeneration before email."""
+        _login(app, client)
+        song_id = _create_song(app, title='Stale MP3 Song')
+        round_id = _create_round(app, [song_id], name='Stale MP3 Round')
+
+        def regenerate_mp3(_round_id):
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+            return jsonify({'success': True, 'message': 'MP3 file successfully generated'})
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch('builtins.open', mock_open(read_data=b'ID3 refreshed mp3')), \
+                patch(
+                    'musicround.routes.rounds.round_mp3',
+                    side_effect=regenerate_mp3,
+                ) as mock_round_mp3, \
+                patch(
+                    'musicround.routes.rounds.send_quiz_email',
+                    return_value=(True, 'sent'),
+                ) as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json() == {'success': True, 'message': 'sent'}
+        mock_round_mp3.assert_called_once_with(round_id)
+        mock_send.assert_called_once()
+
+    def test_mail_route_hides_email_helper_failure_details(self, app, client):
+        """Test SMTP/config details are logged but not exposed to the user."""
+        _login(app, client)
+        song_id = _create_song(app, title='SMTP Error Song')
+        round_id = _create_round(app, [song_id], name='SMTP Error Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch('builtins.open', mock_open(read_data=b'ID3 test mp3')), \
+                patch(
+                    'musicround.routes.rounds.send_quiz_email',
+                    return_value=(False, 'Missing parameters: MAIL_PASSWORD'),
+                ):
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['error'] == (
+            'Unable to send the email. Please try again later or contact an administrator.'
+        )
