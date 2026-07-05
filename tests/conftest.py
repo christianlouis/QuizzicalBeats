@@ -3,20 +3,19 @@ import os
 import sys
 import tempfile
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
-def _make_app():
+def _make_app(database_uri, monkeypatch):
     """
     Create a Flask application instance suitable for testing.
 
-    The standard create_app() tries to access /data which may not be writable
-    in CI environments.  We redirect that path to a temporary directory during
-    app creation and then reconfigure SQLAlchemy to use an in-memory database
-    for the actual test session.
+    The standard create_app() falls back to /data when no database URI is
+    configured. Tests should use an explicit temporary database so that app
+    startup never touches production-like paths or developer environment DBs.
     """
     # Set required environment variables before importing the app so that config
     # defaults are populated correctly.  Use setdefault so that values provided
@@ -24,46 +23,25 @@ def _make_app():
     os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
     os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 
+    monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', database_uri)
+
     from musicround import create_app, db
 
-    tmpdir = tempfile.mkdtemp()
-
-    _orig_join = os.path.join
-    _orig_exists = os.path.exists
-    _orig_makedirs = os.makedirs
-
-    def _join(*args):
-        result = _orig_join(*args)
-        if result == '/data/song_data.db':
-            return os.path.join(tmpdir, 'test.db')
-        return result
-
-    def _exists(path):
-        if path == '/data':
-            return True
-        return _orig_exists(path)
-
-    def _makedirs(path, **kwargs):
-        if path == '/data':
-            return
-        return _orig_makedirs(path, **kwargs)
-
-    with patch('os.path.join', side_effect=_join), \
-         patch('os.path.exists', side_effect=_exists), \
-         patch('os.makedirs', side_effect=_makedirs):
-        app = create_app()
+    app = create_app()
 
     return app, db
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """Create a test Flask application instance."""
-    app, db = _make_app()
+    tmpdir = tempfile.mkdtemp()
+    database_uri = f"sqlite:///{os.path.join(tmpdir, 'test.db')}"
+    app, db = _make_app(database_uri, monkeypatch)
 
     test_config = {
         'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+        'SQLALCHEMY_DATABASE_URI': database_uri,
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         'SECRET_KEY': 'test-secret-key-for-testing-only',
         'AUTOMATION_TOKEN': 'test-automation-token-for-testing',
