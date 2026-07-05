@@ -54,6 +54,18 @@ def _login_spotify_user(client):
     })
 
 
+def _login_user_without_spotify_token(client):
+    user = User(username='manualimporter', email='manualimporter@example.com')
+    user.password = 'ImportPass123!'
+    db.session.add(user)
+    db.session.commit()
+
+    client.post('/users/login', data={
+        'username': 'manualimporter',
+        'password': 'ImportPass123!',
+    })
+
+
 class TestSpotifySongImportRoute:
     """Regression tests for the single-track Spotify import flow."""
 
@@ -83,3 +95,28 @@ class TestSpotifySongImportRoute:
         assert song is not None
         assert song.title == 'Committed Track'
         assert song.artist == 'Reliable Artist'
+
+    def test_spotify_track_import_passes_resolved_manual_token(self, app, client, monkeypatch):
+        """The route must pass the token accepted by its Spotify token gate into ImportHelper."""
+        from musicround.routes import import_songs
+
+        captured = {}
+
+        def fake_import_item(**kwargs):
+            captured.update(kwargs)
+            return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        monkeypatch.setattr(import_songs, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setattr(import_songs.oauth, 'spotify', object(), raising=False)
+        monkeypatch.setattr(import_songs.ImportHelper, 'import_item', fake_import_item)
+
+        response = client.post('/import/song', data={'song_id': 'spotify-track-1'})
+
+        assert response.status_code == 302
+        assert captured['service_name'] == 'spotify'
+        assert captured['item_type'] == 'track'
+        assert captured['item_id'] == 'spotify-track-1'
+        assert captured['spotify_token'] == 'manual-token'

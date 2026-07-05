@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from musicround.models import ImportJobRecord, User, db
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.spotify_helper import get_spotify_token
 
 
 @dataclass(order=True)
@@ -236,7 +237,17 @@ class ImportWorker(threading.Thread):
                     job.user_id,
                     job.priority,
                 )
-                result = ImportHelper.import_item(job.service_name, job.item_type, job.item_id)
+                import_kwargs = {}
+                if job.service_name.lower() == 'spotify':
+                    access_token, _token_source = get_spotify_token()
+                    import_kwargs['spotify_token'] = access_token
+
+                result = ImportHelper.import_item(
+                    job.service_name,
+                    job.item_type,
+                    job.item_id,
+                    **import_kwargs,
+                )
                 imported_count, skipped_count, error_message = self._summarize_result(result)
                 self._mark_completed(record, imported_count, skipped_count, error_message)
                 db.session.commit()

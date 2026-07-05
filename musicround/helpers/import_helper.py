@@ -1,24 +1,13 @@
 """
 Unified import helper for importing music content across different services.
 This module provides consistent import functionality for tracks, albums, and playlists
-from various music streaming services like Spoti                try:
-                    imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id)
-                    if not imported_songs or imported_songs.get('imported_count', 0) == 0:
-                        current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
-                        return {
-                            'imported_count': 0,
-                            'skipped_count': 0,
-                            'error_count': 1,
-                            'errors': [f"No songs found in Spotify playlist {item_id} or playlist import failed."]
-                        }
-                    return imported_songser.
+from various music streaming services like Spotify and Deezer.
 """
 import json
-import logging
 import secrets
 import string
 import traceback
-from flask import current_app, flash, session
+from flask import current_app
 from flask_login import current_user
 from authlib.integrations.base_client.errors import MissingTokenError # Corrected import path
 from httpx import HTTPStatusError
@@ -44,6 +33,87 @@ def generate_token(length=32):
 
 class ImportHelper:
     """Unified helper for importing music content from different services."""
+
+    @staticmethod
+    def _authenticated_current_user():
+        """Return the active user when a request context has one."""
+        try:
+            if current_user and current_user.is_authenticated:
+                return current_user
+        except RuntimeError:
+            return None
+        return None
+
+    @staticmethod
+    def _token_expiry_timestamp(expiry):
+        """Convert stored Spotify expiry values into Authlib's timestamp format."""
+        if not expiry:
+            return None
+        if isinstance(expiry, datetime):
+            return int(expiry.timestamp())
+        try:
+            return int(datetime.fromisoformat(str(expiry)).timestamp())
+        except (TypeError, ValueError):
+            current_app.logger.warning("Could not parse Spotify token expiry value.")
+            return None
+
+    @staticmethod
+    def _coerce_spotify_auth_token(token):
+        """Normalize explicit Spotify tokens into an Authlib token dict."""
+        if not token:
+            return None
+        if isinstance(token, dict):
+            normalized = dict(token)
+            if normalized.get('access_token'):
+                normalized.setdefault('token_type', 'Bearer')
+                return normalized
+            return None
+        return {
+            'access_token': token,
+            'token_type': 'Bearer',
+        }
+
+    @staticmethod
+    def _resolve_spotify_auth_token(token=None):
+        """Resolve Spotify auth via explicit token, manual session, user token, or system fallback."""
+        explicit_token = ImportHelper._coerce_spotify_auth_token(token)
+        if explicit_token:
+            return explicit_token
+
+        from musicround.helpers.spotify_helper import get_spotify_token
+
+        access_token, token_source = get_spotify_token()
+        if not access_token:
+            return None
+
+        auth_token = {
+            'access_token': access_token,
+            'token_type': 'Bearer',
+        }
+        user = ImportHelper._authenticated_current_user()
+        if token_source == 'user' and user:
+            auth_token['refresh_token'] = user.spotify_refresh_token
+            auth_token['expires_at'] = ImportHelper._token_expiry_timestamp(user.spotify_token_expiry)
+        return auth_token
+
+    @staticmethod
+    def _save_refreshed_spotify_token(sp, token_to_use, context):
+        """Persist refreshed user tokens without treating manual/system fallback tokens as user tokens."""
+        if not sp.token or not token_to_use:
+            return token_to_use
+        if sp.token.get('access_token') == token_to_use.get('access_token'):
+            return token_to_use
+
+        user = ImportHelper._authenticated_current_user()
+        if not user or not token_to_use.get('refresh_token'):
+            return sp.token
+
+        current_app.logger.info("Spotify token refreshed during %s for user %s.", context, user.id)
+        if update_oauth_tokens(user, sp.token, 'spotify'):
+            current_app.logger.info("Refreshed Spotify token saved for user %s during %s.", user.id, context)
+        else:
+            current_app.logger.error("Failed to save refreshed Spotify token for user %s during %s.", user.id, context)
+        return sp.token
 
     @staticmethod
     def _create_song_from_spotify(track_info):
@@ -82,31 +152,10 @@ class ImportHelper:
             current_app.logger.warning(f"Cannot fetch audio features: Spotify track ID missing for song {song_obj.title if song_obj else 'Unknown'}.")
             return
 
-        if not token and (not current_user or not current_user.is_authenticated or not current_user.spotify_token):
-            current_app.logger.error(f"Cannot fetch audio features for {spotify_track_id}: User not authenticated or no Spotify token, and no explicit token passed.")
-            return
-        
-        # Construct token if not passed explicitly but current_user is available
-        # This provides a fallback if the calling context didn't pass it but expects this method to handle it.
-        # However, for consistency, it's better if the caller (import_spotify_track) always passes it.
-        token_to_use = token
+        token_to_use = ImportHelper._resolve_spotify_auth_token(token)
         if not token_to_use:
-            expires_at_timestamp = None
-            if current_user.spotify_token_expiry:
-                if isinstance(current_user.spotify_token_expiry, datetime):
-                    expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
-                else:
-                    try:
-                        expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
-                    except ValueError:
-                        pass # Logged by caller
-            token_to_use = {
-                'access_token': current_user.spotify_token,
-                'refresh_token': current_user.spotify_refresh_token,
-                'token_type': 'Bearer',
-                'expires_at': expires_at_timestamp
-            }
-            current_app.logger.info(f"Constructed token within _fetch_audio_features_for_song for {spotify_track_id}")
+            current_app.logger.error(f"Cannot fetch audio features for {spotify_track_id}: no Spotify token available.")
+            return
 
         original_access_token = token_to_use.get('access_token') if token_to_use else None
 
@@ -117,12 +166,11 @@ class ImportHelper:
             features = audio_features_resp.json()
 
             if sp.token and original_access_token and sp.token.get('access_token') != original_access_token:
-                current_app.logger.info(f"Spotify token refreshed during _fetch_audio_features for {spotify_track_id}, user {current_user.id}.")
-                if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                    # token_to_use = sp.token # Update local token if it were to be used again in this function
-                    current_app.logger.info(f"Refreshed Spotify token saved (audio features) for user {current_user.id}.")
-                else:
-                    current_app.logger.error(f"Failed to save refreshed Spotify token (audio features) for user {current_user.id}.")
+                ImportHelper._save_refreshed_spotify_token(
+                    sp,
+                    token_to_use,
+                    f"audio feature fetch for {spotify_track_id}",
+                )
 
             if features:
                 song_obj.danceability = features.get('danceability')
@@ -198,7 +246,7 @@ class ImportHelper:
                 current_app.logger.info(f"Added tag '{tag.name}' to song '{song.title}'")
 
     @staticmethod
-    def import_item(service_name, item_type, item_id, oauth_spotify=None): # Added oauth_spotify parameter
+    def import_item(service_name, item_type, item_id, oauth_spotify=None, spotify_token=None): # Added oauth_spotify parameter
         """
         Generic import function to import items from various services.
         
@@ -207,6 +255,7 @@ class ImportHelper:
             item_type (str): The type of item to import (e.g., 'track', 'album', 'playlist').
             item_id (str): The ID of the item to import.
             oauth_spotify: Optional Authlib Spotify client instance.
+            spotify_token: Optional already-resolved Spotify access token or Authlib token dict.
             
         Returns:
             dict: A dictionary containing import statistics (imported_count, skipped_count, error_count, errors).
@@ -224,11 +273,20 @@ class ImportHelper:
                     'error_count': 1,
                     'errors': ["Spotify client not configured or passed correctly."]
                 }
+            auth_token = ImportHelper._resolve_spotify_auth_token(spotify_token)
+            if not auth_token:
+                current_app.logger.error("No usable Spotify token available for import.")
+                return {
+                    'imported_count': 0,
+                    'skipped_count': 0,
+                    'error_count': 1,
+                    'errors': ["No usable Spotify token available."]
+                }
             if item_type.lower() == 'track':
-                return ImportHelper.import_spotify_track(spotify_client, item_id)
+                return ImportHelper.import_spotify_track(spotify_client, item_id, token=auth_token)
             elif item_type.lower() == 'album':
                 try:
-                    imported_songs = ImportHelper.import_spotify_album(spotify_client, item_id)
+                    imported_songs = ImportHelper.import_spotify_album(spotify_client, item_id, token=auth_token)
                     if not imported_songs or len(imported_songs) == 0:
                         current_app.logger.warning(f"Spotify album import returned empty result for album ID: {item_id}")
                         return {
@@ -249,7 +307,7 @@ class ImportHelper:
                     }
             elif item_type.lower() == 'playlist':
                 try:
-                    imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id)
+                    imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id, token=auth_token)
                     if not imported_songs or imported_songs.get('imported_count', 0) == 0:
                         current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
                         return {
@@ -381,7 +439,7 @@ class ImportHelper:
             }
 
     @staticmethod
-    def import_spotify_track(sp, track_id, commit=True):
+    def import_spotify_track(sp, track_id, commit=True, token=None):
         """Import a single track from Spotify"""
         result = {
             'imported_count': 0,
@@ -390,31 +448,15 @@ class ImportHelper:
             'errors': []
         }
 
-        if not current_user or not current_user.is_authenticated or not current_user.spotify_token:
-            current_app.logger.error(f"Import Spotify track: User not authenticated or no Spotify token for track {track_id}.")
-            result['errors'].append("User not authenticated or no Spotify token.")
+        authlib_token_for_request = ImportHelper._resolve_spotify_auth_token(token)
+        if not authlib_token_for_request:
+            current_app.logger.error(f"Import Spotify track: no Spotify token for track {track_id}.")
+            result['errors'].append("No usable Spotify token available.")
             result['error_count'] += 1
             return result
-
-        expires_at_timestamp = None
-        if current_user.spotify_token_expiry:
-            if isinstance(current_user.spotify_token_expiry, datetime):
-                expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
-            else:
-                try:
-                    expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
-                except ValueError:
-                    current_app.logger.warning(f"Could not parse spotify_token_expiry for user {current_user.id} in import_spotify_track.")
-        
-        authlib_token_for_request = {
-            'access_token': current_user.spotify_token,
-            'refresh_token': current_user.spotify_refresh_token,
-            'token_type': 'Bearer',
-            'expires_at': expires_at_timestamp
-        }
         
         try:
-            current_app.logger.info(f"Attempting to import Spotify track ID: {track_id} for user {current_user.id}")
+            current_app.logger.info(f"Attempting to import Spotify track ID: {track_id}")
             existing_song = Song.query.filter_by(spotify_id=track_id).first()
             if existing_song:
                 current_app.logger.info(f'Spotify track ID {track_id} already exists as song: {existing_song.title} by {existing_song.artist}')
@@ -425,13 +467,11 @@ class ImportHelper:
             resp.raise_for_status()
             track_info = resp.json()
 
-            if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                current_app.logger.info(f"Spotify token refreshed during import_spotify_track (track ID: {track_id}) for user {current_user.id}.")
-                if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                    authlib_token_for_request = sp.token # Update local token for any further use in this scope
-                    current_app.logger.info(f"Refreshed Spotify token saved for user {current_user.id} after track import.")
-                else:
-                    current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id} after track import.")
+            authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                sp,
+                authlib_token_for_request,
+                f"track import {track_id}",
+            )
 
             if not track_info:
                 result['errors'].append(f"Track with ID {track_id} not found on Spotify or empty response.")
@@ -525,13 +565,11 @@ class ImportHelper:
                             album_details = album_details_resp.json()
 
                             # Check for token refresh again after this call
-                            if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                                current_app.logger.info(f"Spotify token refreshed during album genre fetch for track {track_id}, user {current_user.id}.")
-                                if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                                    authlib_token_for_request = sp.token 
-                                    current_app.logger.info(f"Refreshed Spotify token saved (album genre fetch) for user {current_user.id}.")
-                                else:
-                                    current_app.logger.error(f"Failed to save refreshed Spotify token (album genre fetch) for user {current_user.id}.")
+                            authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                                sp,
+                                authlib_token_for_request,
+                                f"album genre fetch for {track_id}",
+                            )
 
                             if album_details.get('genres'):
                                 current_app.logger.info(f"Found genres from album {album_id_for_genre} for track {track_id}: {album_details['genres']}")
@@ -595,7 +633,7 @@ class ImportHelper:
             return result
 
     @staticmethod
-    def import_spotify_album(sp, album_id):
+    def import_spotify_album(sp, album_id, token=None):
         """Import all tracks from a Spotify album"""
         result = {
             'imported_count': 0,
@@ -604,44 +642,26 @@ class ImportHelper:
             'errors': []
         }
 
-        if not current_user or not current_user.is_authenticated or not current_user.spotify_token:
-            current_app.logger.error(f"Import Spotify album: User not authenticated or no Spotify token for album {album_id}.")
-            result['errors'].append("User not authenticated or no Spotify token.")
+        authlib_token_for_request = ImportHelper._resolve_spotify_auth_token(token)
+        if not authlib_token_for_request:
+            current_app.logger.error(f"Import Spotify album: no Spotify token for album {album_id}.")
+            result['errors'].append("No usable Spotify token available.")
             result['error_count'] += 1
             return result
-
-        expires_at_timestamp = None
-        if current_user.spotify_token_expiry:
-            if isinstance(current_user.spotify_token_expiry, datetime):
-                expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
-            else:
-                try:
-                    expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
-                except ValueError:
-                    current_app.logger.warning(f"Could not parse spotify_token_expiry for user {current_user.id} in import_spotify_album.")
-
-        authlib_token_for_request = {
-            'access_token': current_user.spotify_token,
-            'refresh_token': current_user.spotify_refresh_token,
-            'token_type': 'Bearer',
-            'expires_at': expires_at_timestamp
-        }
         
         try:
-            current_app.logger.info(f"Starting import for Spotify album ID: {album_id} for user {current_user.id}")
+            current_app.logger.info(f"Starting import for Spotify album ID: {album_id}")
             album_resp = sp.get(f'albums/{album_id}', token=authlib_token_for_request) 
             album_resp.raise_for_status()
             album_data = album_resp.json()
             album_name = album_data.get('name', 'Unknown Album')
             current_app.logger.info(f"Importing tracks from album: '{album_name}' (ID: {album_id})")
 
-            if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                current_app.logger.info(f"Spotify token refreshed during album metadata fetch (album ID: {album_id}) for user {current_user.id}.")
-                if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                    authlib_token_for_request = sp.token # Update local token
-                    current_app.logger.info(f"Refreshed Spotify token saved for user {current_user.id} after album metadata.")
-                else:
-                    current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id} after album metadata.")
+            authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                sp,
+                authlib_token_for_request,
+                f"album metadata fetch {album_id}",
+            )
 
             tracks_url = f'albums/{album_id}/tracks' # Initial URL
             # Spotify API for album tracks might be relative, ensure sp.get handles it or construct full URL if needed.
@@ -657,13 +677,11 @@ class ImportHelper:
                 tracks_resp.raise_for_status()
                 tracks_data = tracks_resp.json()
 
-                if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                    current_app.logger.info(f"Spotify token refreshed during album tracks fetch (album ID: {album_id}, page: {page_count}) for user {current_user.id}.")
-                    if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                        authlib_token_for_request = sp.token # Update local token for next iteration / track import
-                        current_app.logger.info(f"Refreshed Spotify token saved for user {current_user.id} (album tracks page {page_count}).")
-                    else:
-                        current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id} (album tracks page {page_count}).")
+                authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                    sp,
+                    authlib_token_for_request,
+                    f"album tracks fetch {album_id} page {page_count}",
+                )
                 
                 track_items = tracks_data.get('items', [])
                 if not track_items and page_count == 1:
@@ -677,8 +695,12 @@ class ImportHelper:
                         result['error_count'] +=1
                         continue
                     
-                    # Call import_spotify_track. It will handle its own token now.
-                    track_import_result = ImportHelper.import_spotify_track(sp, track_id, commit=False)
+                    track_import_result = ImportHelper.import_spotify_track(
+                        sp,
+                        track_id,
+                        commit=False,
+                        token=authlib_token_for_request,
+                    )
                     
                     result['imported_count'] += track_import_result.get('imported_count', 0)
                     result['skipped_count'] += track_import_result.get('skipped_count', 0)
@@ -718,7 +740,7 @@ class ImportHelper:
         return result
 
     @staticmethod
-    def import_spotify_playlist(sp, playlist_id):
+    def import_spotify_playlist(sp, playlist_id, token=None):
         """Import all tracks from a Spotify playlist"""
         result = {
             'imported_count': 0,
@@ -728,31 +750,15 @@ class ImportHelper:
             'imported_song_ids': []  # Track IDs of successfully imported songs
         }
 
-        if not current_user or not current_user.is_authenticated or not current_user.spotify_token:
-            current_app.logger.error(f"Import Spotify playlist: User not authenticated or no Spotify token for playlist {playlist_id}.")
-            result['errors'].append("User not authenticated or no Spotify token.")
+        authlib_token_for_request = ImportHelper._resolve_spotify_auth_token(token)
+        if not authlib_token_for_request:
+            current_app.logger.error(f"Import Spotify playlist: no Spotify token for playlist {playlist_id}.")
+            result['errors'].append("No usable Spotify token available.")
             result['error_count'] += 1
             return result
 
-        expires_at_timestamp = None
-        if current_user.spotify_token_expiry:
-            if isinstance(current_user.spotify_token_expiry, datetime):
-                expires_at_timestamp = int(current_user.spotify_token_expiry.timestamp())
-            else:
-                try:
-                    expires_at_timestamp = int(datetime.fromisoformat(str(current_user.spotify_token_expiry)).timestamp())
-                except ValueError:
-                    current_app.logger.warning(f"Could not parse spotify_token_expiry for user {current_user.id} in import_spotify_playlist.")
-        
-        authlib_token_for_request = {
-            'access_token': current_user.spotify_token,
-            'refresh_token': current_user.spotify_refresh_token,
-            'token_type': 'Bearer',
-            'expires_at': expires_at_timestamp
-        }
-
         try:
-            current_app.logger.info(f"Starting import for Spotify playlist ID: {playlist_id} for user {current_user.id}")
+            current_app.logger.info(f"Starting import for Spotify playlist ID: {playlist_id}")
             # First, get playlist details to get the name (optional, but good for logging)
             playlist_details_resp = sp.get(f'playlists/{playlist_id}?fields=name,tracks.next', token=authlib_token_for_request)
             playlist_details_resp.raise_for_status()
@@ -760,13 +766,11 @@ class ImportHelper:
             playlist_name = playlist_data.get('name', 'Unknown Playlist')
             current_app.logger.info(f"Importing tracks from playlist: '{playlist_name}' (ID: {playlist_id})")
 
-            if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                current_app.logger.info(f"Spotify token refreshed during playlist metadata fetch (playlist ID: {playlist_id}) for user {current_user.id}.")
-                if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                    authlib_token_for_request = sp.token # Update local token
-                    current_app.logger.info(f"Refreshed Spotify token saved for user {current_user.id} after playlist metadata.")
-                else:
-                    current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id} after playlist metadata.")
+            authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                sp,
+                authlib_token_for_request,
+                f"playlist metadata fetch {playlist_id}",
+            )
             
             tracks_url = f'playlists/{playlist_id}/tracks' # Initial URL
             page_count = 0
@@ -779,13 +783,11 @@ class ImportHelper:
                 tracks_resp.raise_for_status()
                 tracks_data = tracks_resp.json()
 
-                if sp.token and sp.token.get('access_token') != authlib_token_for_request.get('access_token'):
-                    current_app.logger.info(f"Spotify token refreshed during playlist tracks fetch (playlist ID: {playlist_id}, page: {page_count}) for user {current_user.id}.")
-                    if update_oauth_tokens(current_user, sp.token, 'spotify'):
-                        authlib_token_for_request = sp.token # Update local token
-                        current_app.logger.info(f"Refreshed Spotify token saved for user {current_user.id} (playlist tracks page {page_count}).")
-                    else:
-                        current_app.logger.error(f"Failed to save refreshed Spotify token for user {current_user.id} (playlist tracks page {page_count}).")
+                authlib_token_for_request = ImportHelper._save_refreshed_spotify_token(
+                    sp,
+                    authlib_token_for_request,
+                    f"playlist tracks fetch {playlist_id} page {page_count}",
+                )
 
                 track_items = tracks_data.get('items', [])
                 if not track_items and page_count == 1 and not tracks_data.get('next'): # Check if playlist is actually empty
@@ -805,8 +807,12 @@ class ImportHelper:
                         result['errors'].append(f"Found a track with no ID in playlist {playlist_id}.")
                         result['error_count'] +=1
                         continue
-                      # Call import_spotify_track. It will handle its own token.
-                    track_import_result = ImportHelper.import_spotify_track(sp, track_id, commit=False)
+                    track_import_result = ImportHelper.import_spotify_track(
+                        sp,
+                        track_id,
+                        commit=False,
+                        token=authlib_token_for_request,
+                    )
                     
                     result['imported_count'] += track_import_result.get('imported_count', 0)
                     result['skipped_count'] += track_import_result.get('skipped_count', 0)
