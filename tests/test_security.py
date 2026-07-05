@@ -3,6 +3,7 @@ import pytest
 import os
 import re
 import importlib
+from unittest.mock import patch
 import musicround.config
 
 
@@ -208,6 +209,38 @@ class TestSecureDefaults:
         
         # Should have DEBUG=False
         assert 'DEBUG=False' in content, ".env.example should have DEBUG=False"
+        assert 'DEBUG2=False' in content, ".env.example should have DEBUG2=False"
+
+    def test_config_debug_defaults_false(self, monkeypatch):
+        """Test that debug config defaults are disabled without env overrides."""
+        monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-security-test')
+        monkeypatch.setenv('AUTOMATION_TOKEN', 'test-automation-token-for-security-test')
+        monkeypatch.delenv('DEBUG', raising=False)
+        monkeypatch.delenv('DEBUG2', raising=False)
+
+        config_module = importlib.reload(musicround.config)
+
+        assert config_module.Config.DEBUG is False
+        assert config_module.Config.DEBUG2 is False
+
+    def test_cookie_security_defaults(self, monkeypatch):
+        """Test secure session and remember-cookie defaults."""
+        monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-security-test')
+        monkeypatch.setenv('AUTOMATION_TOKEN', 'test-automation-token-for-security-test')
+        monkeypatch.setenv('USE_HTTPS', 'True')
+
+        config_module = importlib.reload(musicround.config)
+
+        assert config_module.Config.SESSION_COOKIE_SECURE is True
+        assert config_module.Config.SESSION_COOKIE_HTTPONLY is True
+        assert config_module.Config.SESSION_COOKIE_SAMESITE == 'Lax'
+        assert config_module.Config.REMEMBER_COOKIE_SECURE is True
+        assert config_module.Config.REMEMBER_COOKIE_HTTPONLY is True
+        assert config_module.Config.REMEMBER_COOKIE_SAMESITE == 'Lax'
+        assert config_module.Config.PERMANENT_SESSION_LIFETIME.total_seconds() == 12 * 3600
+
+        monkeypatch.setenv('USE_HTTPS', 'False')
+        importlib.reload(musicround.config)
     
     def test_https_recommended(self):
         """Test that HTTPS is documented as recommended."""
@@ -219,6 +252,76 @@ class TestSecureDefaults:
             "SECURITY.md should mention HTTPS"
         assert 'USE_HTTPS' in content, \
             "SECURITY.md should document USE_HTTPS setting"
+
+
+class TestAuthRateLimiting:
+    """Test authentication throttling."""
+
+    def test_login_rate_limit_blocks_repeated_failures(self, app, client):
+        """Test repeated bad logins are throttled."""
+        from musicround.routes import users as users_routes
+
+        users_routes._LOGIN_FAILURES.clear()
+        app.config['LOGIN_RATE_LIMIT_ATTEMPTS'] = 2
+        app.config['LOGIN_RATE_LIMIT_WINDOW_SECONDS'] = 900
+
+        payload = {'username': 'rate-limit-user', 'password': 'wrong-password'}
+        first = client.post('/users/login', data=payload)
+        second = client.post('/users/login', data=payload)
+        third = client.post('/users/login', data=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert third.status_code == 429
+
+    def test_create_backup_accepts_header_automation_token(self, app, client):
+        """Test backup automation uses header-only token auth without login."""
+        app.config['AUTOMATION_TOKEN'] = 'automation-secret'
+
+        with patch('musicround.helpers.backup_helper.create_backup') as mock_create:
+            mock_create.return_value = {'status': 'success', 'message': 'created'}
+            response = client.post(
+                '/users/create-backup',
+                headers={'X-Automation-Token': 'automation-secret'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['status'] == 'success'
+        mock_create.assert_called_once()
+
+    def test_create_backup_rejects_query_string_token(self, app, client):
+        """Test automation tokens are not accepted in URLs."""
+        app.config['AUTOMATION_TOKEN'] = 'automation-secret'
+
+        with patch('musicround.helpers.backup_helper.create_backup') as mock_create:
+            response = client.post(
+                '/users/create-backup?token=automation-secret',
+                headers={'Accept': 'application/json'},
+            )
+
+        assert response.status_code == 401
+        mock_create.assert_not_called()
+
+    def test_create_backup_rate_limits_bad_automation_tokens(self, app, client):
+        """Test repeated invalid automation headers are throttled."""
+        from musicround.routes import users as users_routes
+
+        users_routes._AUTOMATION_FAILURES.clear()
+        app.config['AUTOMATION_TOKEN'] = 'automation-secret'
+        app.config['AUTOMATION_RATE_LIMIT_ATTEMPTS'] = 1
+        app.config['AUTOMATION_RATE_LIMIT_WINDOW_SECONDS'] = 300
+
+        first = client.post(
+            '/users/create-backup',
+            headers={'X-Automation-Token': 'wrong-token'},
+        )
+        second = client.post(
+            '/users/create-backup',
+            headers={'X-Automation-Token': 'wrong-token'},
+        )
+
+        assert first.status_code == 401
+        assert second.status_code == 429
 
 
 class TestSecretManagement:

@@ -3,8 +3,10 @@ User authentication and profile management routes
 """
 import uuid  # Add missing import
 import time  # Add missing import
+from functools import wraps
+from secrets import compare_digest
 from datetime import datetime, timedelta
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, session, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, session, jsonify, g
 from flask_login import login_user, current_user, logout_user, login_required  # Ensure flask_login is imported
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +17,95 @@ from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_o
 from musicround.helpers.spotify_helper import get_spotify_token, get_current_user_spotify_token, get_spotify_user_info as spotify_helper_get_user_info
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
+_LOGIN_FAILURES = {}
+_AUTOMATION_FAILURES = {}
+
+
+def _client_rate_limit_id():
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
+
+def _prune_attempts(store, now, window_seconds):
+    for key, attempts in list(store.items()):
+        recent_attempts = [timestamp for timestamp in attempts if now - timestamp < window_seconds]
+        if recent_attempts:
+            store[key] = recent_attempts
+        else:
+            store.pop(key, None)
+
+
+def _rate_limited(store, key, max_attempts, window_seconds):
+    if max_attempts <= 0:
+        return False
+    now = time.time()
+    _prune_attempts(store, now, window_seconds)
+    return len(store.get(key, [])) >= max_attempts
+
+
+def _record_rate_limit_failure(store, key, window_seconds):
+    now = time.time()
+    _prune_attempts(store, now, window_seconds)
+    store.setdefault(key, []).append(now)
+
+
+def _clear_rate_limit_failures(store, key):
+    store.pop(key, None)
+
+
+def _login_rate_limit_key(username_or_email):
+    normalized_username = (username_or_email or '').strip().lower()
+    return f"{_client_rate_limit_id()}:{normalized_username}"
+
+
+def _automation_rate_limit_key():
+    return f"automation:{_client_rate_limit_id()}"
+
+
+def _automation_token_from_header():
+    return request.headers.get('X-Automation-Token', '').strip()
+
+
+def _valid_automation_token():
+    provided_token = _automation_token_from_header()
+    expected_token = current_app.config.get('AUTOMATION_TOKEN') or ''
+    return bool(provided_token and expected_token and compare_digest(provided_token, expected_token))
+
+
+def automation_or_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        automation_key = _automation_rate_limit_key()
+        max_attempts = current_app.config.get('AUTOMATION_RATE_LIMIT_ATTEMPTS', 10)
+        window_seconds = current_app.config.get('AUTOMATION_RATE_LIMIT_WINDOW_SECONDS', 300)
+
+        provided_token = _automation_token_from_header()
+        if provided_token:
+            if _rate_limited(_AUTOMATION_FAILURES, automation_key, max_attempts, window_seconds):
+                return jsonify({"status": "error", "message": "Too many automation attempts"}), 429
+            if _valid_automation_token():
+                _clear_rate_limit_failures(_AUTOMATION_FAILURES, automation_key)
+                g.automation_request = True
+                return f(*args, **kwargs)
+            _record_rate_limit_failure(_AUTOMATION_FAILURES, automation_key, window_seconds)
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        if not current_user.is_authenticated:
+            if request.headers.get('Accept') == 'application/json':
+                return jsonify({"status": "error", "message": "Unauthorized"}), 401
+            return redirect(url_for('users.login'))
+
+        if not current_user.is_admin:
+            if request.headers.get('Accept') == 'application/json':
+                return jsonify({"status": "error", "message": "Admin access required"}), 403
+            flash('Admin access required.', 'danger')
+            return redirect(url_for('users.profile'))
+
+        g.automation_request = False
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Helper function for processing Spotify account linking
 def _process_spotify_link(user, token_payload, spotify_user_data):
@@ -58,7 +149,6 @@ def _process_spotify_disconnect(user):
     current_app.logger.info(f"User {user.id} successfully disconnected their Spotify account.")
 
 def admin_required(f):
-    from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or not current_user.is_admin:
@@ -379,6 +469,16 @@ def login():
         username_or_email = request.form.get('username')
         password = request.form.get('password')
         remember = True if request.form.get('remember') else False
+        rate_limit_key = _login_rate_limit_key(username_or_email)
+        max_attempts = current_app.config.get('LOGIN_RATE_LIMIT_ATTEMPTS', 5)
+        window_seconds = current_app.config.get('LOGIN_RATE_LIMIT_WINDOW_SECONDS', 900)
+
+        if _rate_limited(_LOGIN_FAILURES, rate_limit_key, max_attempts, window_seconds):
+            flash('Too many failed login attempts. Please try again later.', 'danger')
+            return render_template(
+                'users/login.html',
+                oauth_providers=oauth_providers
+            ), 429
         
         # Find user by username or email
         user = User.query.filter_by(username=username_or_email).first()
@@ -387,10 +487,12 @@ def login():
         
         # Check if user exists and password is correct
         if not user or not check_password_hash(user.password_hash, password):
+            _record_rate_limit_failure(_LOGIN_FAILURES, rate_limit_key, window_seconds)
             flash('Invalid username/email or password', 'danger')
             return render_template('users/login.html', oauth_providers=oauth_providers)
         
         # Log in the user
+        _clear_rate_limit_failures(_LOGIN_FAILURES, rate_limit_key)
         login_user(user, remember=remember)
         user.last_login = datetime.now()
         db.session.commit()
@@ -1256,19 +1358,11 @@ def backup_manager():
     )
 
 @users_bp.route('/create-backup', methods=['POST'])
-@login_required
-@admin_required
+@automation_or_admin_required
 def create_backup():
     """Create a new backup"""
     from musicround.helpers.backup_helper import create_backup as create_backup_helper
-    
-    # Check for automation token for scheduled backups
-    automation_token = request.headers.get('X-Automation-Token') or request.args.get('token')
-    if automation_token == current_app.config.get('AUTOMATION_TOKEN'):
-        # Allow the request without authentication for automation
-        pass
-    elif not current_user.is_authenticated or not current_user.is_admin:
-        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    automation_request = bool(getattr(g, 'automation_request', False))
     
     # Get custom backup name if provided
     backup_name = request.form.get('backup_name', '').strip()
@@ -1285,7 +1379,7 @@ def create_backup():
     )
     
     # If this is an API request, return JSON
-    if request.headers.get('Accept') == 'application/json' or automation_token:
+    if request.headers.get('Accept') == 'application/json' or automation_request:
         return jsonify(result)
     
     # Otherwise, store the result for display in the UI and redirect

@@ -8,7 +8,12 @@ from starlette.testclient import TestClient
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 
-from musicround.mcp_http import BearerAuthMiddleware, build_app, mcp  # noqa: E402
+from musicround.mcp_http import (  # noqa: E402
+    _AUTH_FAILURES,
+    BearerAuthMiddleware,
+    build_app,
+    mcp,
+)
 
 
 async def _dummy_app(scope, receive, send):
@@ -27,6 +32,8 @@ def test_healthz_does_not_require_auth(monkeypatch):
 
 def test_mcp_requires_bearer_token(monkeypatch):
     monkeypatch.setenv("MCP_BEARER_TOKEN", "test-mcp-token")
+    monkeypatch.delenv("MCP_AUTH_RATE_LIMIT_ATTEMPTS", raising=False)
+    _AUTH_FAILURES.clear()
     client = TestClient(BearerAuthMiddleware(_dummy_app))
 
     missing = client.get("/mcp")
@@ -39,9 +46,28 @@ def test_mcp_requires_bearer_token(monkeypatch):
     assert accepted.status_code != 401
 
 
+def test_mcp_rate_limits_failed_bearer_attempts(monkeypatch):
+    monkeypatch.setenv("MCP_BEARER_TOKEN", "test-mcp-token")
+    monkeypatch.setenv("MCP_AUTH_RATE_LIMIT_ATTEMPTS", "1")
+    monkeypatch.setenv("MCP_AUTH_RATE_LIMIT_WINDOW_SECONDS", "300")
+    _AUTH_FAILURES.clear()
+    client = TestClient(BearerAuthMiddleware(_dummy_app))
+
+    first = client.get("/mcp", headers={"Authorization": "Bearer wrong"})
+    blocked = client.get("/mcp", headers={"Authorization": "Bearer test-mcp-token"})
+
+    _AUTH_FAILURES.clear()
+    accepted = client.get("/mcp", headers={"Authorization": "Bearer test-mcp-token"})
+
+    assert first.status_code == 401
+    assert blocked.status_code == 429
+    assert accepted.status_code == 204
+
+
 def test_mcp_falls_back_to_automation_token(monkeypatch):
     monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
     monkeypatch.setenv("AUTOMATION_TOKEN", "automation-token")
+    _AUTH_FAILURES.clear()
     client = TestClient(BearerAuthMiddleware(_dummy_app))
 
     accepted = client.get("/mcp", headers={"Authorization": "Bearer automation-token"})
