@@ -11,11 +11,14 @@ def _create_user(app, username, email, password='ErrorPass123!', is_admin=False)
 
 
 def _login(client, username, password='ErrorPass123!'):
-    return client.post(
+    response = client.post(
         '/users/login',
         data={'username': username, 'password': password},
         follow_redirects=True,
     )
+    assert response.status_code == 200
+    assert 'You have been logged in!' in response.get_data(as_text=True)
+    return response
 
 
 def _register_crashing_route(app):
