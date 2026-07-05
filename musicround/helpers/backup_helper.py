@@ -6,6 +6,7 @@ import shutil
 import json
 import logging
 import sqlite3
+import stat
 import zipfile
 from datetime import datetime
 import tempfile
@@ -27,6 +28,10 @@ def _find_database_member(file_list):
 def _unsafe_zip_member_name(zip_info, target_dir):
     member_name = zip_info.filename.replace('\\', '/')
     if member_name.startswith('/') or member_name.startswith('../'):
+        return zip_info.filename
+
+    file_mode = zip_info.external_attr >> 16
+    if stat.S_ISLNK(file_mode):
         return zip_info.filename
 
     target_root = os.path.abspath(target_dir)
