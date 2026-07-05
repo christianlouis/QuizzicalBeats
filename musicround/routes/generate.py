@@ -148,20 +148,51 @@ def get_non_overused_songs(genre=None, decade=None):
 
     return non_overused_songs
 
+def _song_key(song):
+    """Return a stable key for de-duplicating Song objects."""
+    return song.id if getattr(song, 'id', None) is not None else id(song)
+
+def _unique_songs(songs):
+    """Return songs once, preserving the first occurrence."""
+    unique = []
+    seen = set()
+    for song in songs:
+        key = _song_key(song)
+        if key in seen:
+            continue
+        unique.append(song)
+        seen.add(key)
+    return unique
+
+def _song_decade(song):
+    """Return the song's decade as a string, or None when year is unavailable."""
+    if not song.year:
+        return None
+    return str(song.year)[:3] + '0'
+
+def _sample_unique_from_preferred(preferred, fallback, x):
+    """Sample unique songs, prioritizing the filtered pool before fallback songs."""
+    preferred = _unique_songs(preferred)
+    if len(preferred) >= x:
+        return random.sample(preferred, x)
+
+    preferred_ids = {_song_key(song) for song in preferred}
+    fallback = [song for song in _unique_songs(fallback) if _song_key(song) not in preferred_ids]
+    random.shuffle(preferred)
+    random.shuffle(fallback)
+    return (preferred + fallback)[:x]
+
 def get_random_songs_from_genre(genre, x=5):
     """
     Returns x random songs from the given genre,
     filling from non-overused songs in that genre.
     If not enough, fallback to any non-overused songs.
     """
-    non_overused = get_non_overused_songs(genre=genre)
-    while len(non_overused) < x:
-        more = get_non_overused_songs()
-        if not more:  # in case the DB is empty or something else
-            break
-        non_overused.extend(more)
-
-    return random.sample(non_overused, x) if len(non_overused) >= x else non_overused
+    return _sample_unique_from_preferred(
+        get_non_overused_songs(genre=genre),
+        get_non_overused_songs(),
+        x,
+    )
 
 def get_random_songs_from_decade(decade, x=5):
     """
@@ -169,131 +200,66 @@ def get_random_songs_from_decade(decade, x=5):
     filling from non-overused songs in that decade.
     If not enough, fallback to any non-overused songs.
     """
-    non_overused = get_non_overused_songs(decade=decade)
-    while len(non_overused) < x:
-        more = get_non_overused_songs()
-        if not more:
-            break
-        non_overused.extend(more)
-
-    return random.sample(non_overused, x) if len(non_overused) >= x else non_overused
+    return _sample_unique_from_preferred(
+        get_non_overused_songs(decade=decade),
+        get_non_overused_songs(),
+        x,
+    )
 
 def get_random_songs(x):
     """
     Returns x random songs from the pool of non-overused songs,
-    ensuring some naive diversity constraints:
-     - no artist used more than once
-     - no decade used more than x/3 times
-     - number of unique artists must match number of chosen songs
+    applying best-effort diversity constraints:
+     - prefer no artist used more than once
+     - prefer no decade used more than x/3 times
+     - relax artist and decade constraints when needed to return enough unique songs
     """
-    non_overused_songs = get_non_overused_songs()
-    if len(non_overused_songs) < x:
-        return non_overused_songs
-        
-    random_songs = random.sample(non_overused_songs, x)
+    candidates = _unique_songs(get_non_overused_songs())
+    random.shuffle(candidates)
+    if len(candidates) <= x:
+        return candidates
 
-    artist_count = {}
+    max_per_decade = max(1, x // 3)
+
+    selected = []
+    selected_ids = set()
+    selected_artists = set()
     decade_count = {}
 
-    for song in random_songs:
-        artist_count[song.artist] = artist_count.get(song.artist, 0) + 1
-        if song.year:
-            dec = str(song.year)[:3] + '0'
-            decade_count[dec] = decade_count.get(dec, 0) + 1
+    for song in candidates:
+        decade = _song_decade(song)
+        if song.artist in selected_artists:
+            continue
+        if decade and decade_count.get(decade, 0) >= max_per_decade:
+            continue
+        selected.append(song)
+        selected_ids.add(_song_key(song))
+        selected_artists.add(song.artist)
+        if decade:
+            decade_count[decade] = decade_count.get(decade, 0) + 1
+        if len(selected) == x:
+            return selected
 
-    while (
-        max(artist_count.values()) > 1
-        or (decade_count and max(decade_count.values()) > len(random_songs) / 3)
-        or len(artist_count) != len(random_songs)
-    ):
-        # 1. If any artist is used more than once, replace that song
-        if max(artist_count.values()) > 1:
-            repeated_artist = None
-            for artist, count in artist_count.items():
-                if count > 1:
-                    repeated_artist = artist
-                    break
-            if repeated_artist:
-                # remove one of that artist from random_songs
-                to_remove = next(s for s in random_songs if s.artist == repeated_artist)
-                random_songs.remove(to_remove)
-                artist_count[repeated_artist] -= 1
+    for song in candidates:
+        key = _song_key(song)
+        if key in selected_ids or song.artist in selected_artists:
+            continue
+        selected.append(song)
+        selected_ids.add(key)
+        selected_artists.add(song.artist)
+        if len(selected) == x:
+            return selected
 
-                # pick a new random non-overused
-                refill = [s for s in non_overused_songs if s not in random_songs]
-                if refill:
-                    new_song = random.choice(refill)
-                    random_songs.append(new_song)
-                    artist_count[new_song.artist] = artist_count.get(new_song.artist, 0) + 1
+    for song in candidates:
+        key = _song_key(song)
+        if key in selected_ids:
+            continue
+        selected.append(song)
+        selected_ids.add(key)
+        if len(selected) == x:
+            return selected
 
-                    # update decade_count
-                    if to_remove.year:
-                        dec_to_remove = str(to_remove.year)[:3] + '0'
-                        decade_count[dec_to_remove] = decade_count.get(dec_to_remove, 0) - 1
-                    if new_song.year:
-                        dec_new = str(new_song.year)[:3] + '0'
-                        decade_count[dec_new] = decade_count.get(dec_new, 0) + 1
-                else:
-                    # If no new songs available, just return what we have
-                    return random_songs
-
-        elif decade_count and max(decade_count.values()) > len(random_songs) / 3:
-            # 2. If any decade is used more than x/3, remove a song from that decade
-            repeated_decade = None
-            for dec, count in decade_count.items():
-                if count > len(random_songs) / 3:
-                    repeated_decade = dec
-                    break
-            if repeated_decade:
-                to_remove = next((s for s in random_songs if s.year and str(s.year)[:3] + '0' == repeated_decade), None)
-                if to_remove:
-                    random_songs.remove(to_remove)
-                    decade_count[repeated_decade] -= 1
-
-                    # pick a new random
-                    refill = [s for s in non_overused_songs if s not in random_songs]
-                    if refill:
-                        new_song = random.choice(refill)
-                        random_songs.append(new_song)
-                        if new_song.year:
-                            dec_new = str(new_song.year)[:3] + '0'
-                            decade_count[dec_new] = decade_count.get(dec_new, 0) + 1
-
-                        # update artist_count
-                        artist_count[to_remove.artist] -= 1
-                        artist_count[new_song.artist] = artist_count.get(new_song.artist, 0) + 1
-                    else:
-                        # If no new songs available, just return what we have
-                        return random_songs
-
-        elif len(artist_count) != len(random_songs):
-            # 3. if there's mismatch in how many unique artists vs. songs, fix that
-            #    i.e. if we have a repeated artist but haven't caught it above
-            refill = [s for s in non_overused_songs if s not in random_songs]
-            repeated_song = None
-            # find a repeated artist
-            for s in random_songs:
-                if artist_count[s.artist] > 1:
-                    repeated_song = s
-                    break
-            if repeated_song is None or not refill:
-                break  # fallback
-
-            random_songs.remove(repeated_song)
-            artist_count[repeated_song.artist] -= 1
-
-            new_song = random.choice(refill)
-            random_songs.append(new_song)
-            artist_count[new_song.artist] = artist_count.get(new_song.artist, 0) + 1
-
-            if repeated_song.year:
-                dec_removed = str(repeated_song.year)[:3] + '0'
-                decade_count[dec_removed] = decade_count.get(dec_removed, 0) - 1
-            if new_song.year:
-                dec_new = str(new_song.year)[:3] + '0'
-                decade_count[dec_new] = decade_count.get(dec_new, 0) + 1
-
-    return random_songs
+    return selected
 
 def get_random_songs_from_least_used_decade(x):
     """
