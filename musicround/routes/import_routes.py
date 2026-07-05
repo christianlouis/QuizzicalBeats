@@ -611,15 +611,30 @@ def get_raw_playlists():
         }
     }
     
-    # Test spotipy raw response
+    # Test Authlib Spotify raw response
     try:
-        sp = current_app.config['sp']
-        current_app.logger.info(f"Getting raw playlists with spotipy for {account}, limit={limit}, offset={offset}")
-        raw_result = sp.user_playlists(account, limit=limit, offset=offset)
-        results['spotipy']['raw_response'] = raw_result
+        access_token, token_source = get_spotify_token()
+        if not access_token:
+            results['spotipy']['error'] = "No Spotify token available."
+        else:
+            token = {'access_token': access_token, 'token_type': 'Bearer'}
+            current_app.logger.info(
+                "Getting raw playlists with Authlib Spotify client for %s, limit=%s, offset=%s, source=%s",
+                account,
+                limit,
+                offset,
+                token_source,
+            )
+            response = oauth.spotify.get(
+                f'users/{account}/playlists',
+                params={'limit': limit, 'offset': offset},
+                token=token,
+            )
+            response.raise_for_status()
+            results['spotipy']['raw_response'] = response.json()
     except Exception as e:
         import traceback
-        current_app.logger.error(f"Error getting raw spotipy playlists: {e}")
+        current_app.logger.error(f"Error getting raw Spotify playlists: {e}")
         current_app.logger.error(traceback.format_exc())
         results['spotipy']['error'] = str(e)
     

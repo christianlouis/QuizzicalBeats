@@ -137,64 +137,6 @@ def get_authentik_user_info(token):
         current_app.logger.error(f"Error getting Authentik user info: {str(e)}")
         return None
 
-def get_dropbox_user_info(token):
-    """
-    Get Dropbox user info from the token
-    """
-    try:
-        current_app.logger.debug(
-            "Retrieving Dropbox user info with token metadata: %s",
-            oauth_token_log_summary(token),
-        )
-        
-        # Make sure we have an access token
-        access_token = token.get("access_token")
-        if not access_token:
-            # Try direct token string if token is not a dict
-            if isinstance(token, str):
-                access_token = token
-            else:
-                current_app.logger.error("No access token found in token object")
-                return None
-                
-        # Set proper headers for Dropbox API - no Content-Type for null body
-        headers = {
-            'Authorization': f'Bearer {access_token}'
-        }
-        
-        # The Dropbox API for get_current_account actually expects a null body with no Content-Type header
-        response = requests.post(
-            'https://api.dropboxapi.com/2/users/get_current_account',
-            headers=headers,
-            data=None  # Send null body
-        )
-        
-        # Check for successful response
-        if response.status_code != 200:
-            current_app.logger.error(f"Dropbox API error: {response.status_code} - {response.text}")
-            return None
-            
-        # Parse response
-        profile = response.json()
-        current_app.logger.debug(f"Dropbox user info response: {profile}")
-        
-        # Create a standardized user info dictionary
-        user_info = {
-            'id': _none_if_blank(profile.get('account_id')),
-            'email': _none_if_blank(profile.get('email')),
-            'name': profile.get('name', {}).get('display_name', ''),
-            'given_name': profile.get('name', {}).get('given_name', ''),
-            'family_name': profile.get('name', {}).get('surname', ''),
-            'picture': profile.get('profile_photo_url', ''),
-            'email_verified': profile.get('email_verified', False),
-        }
-        
-        return user_info
-    except Exception as e:
-        current_app.logger.error(f"Error getting Dropbox user info: {str(e)}")
-        return None
-
-
 def _none_if_blank(value):
     """Normalize missing provider identifiers so they never match nullable DB rows."""
     if value is None:

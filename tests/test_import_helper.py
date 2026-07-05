@@ -19,6 +19,13 @@ class DeezerPlaylistStub:
         return self.result
 
 
+class FailingDeezerTrackStub:
+    """Deezer client stub that fails during track import."""
+
+    def import_track(self, track_id, lastfm_api_key=None):
+        raise RuntimeError(f'Deezer unavailable for {track_id}')
+
+
 class FakeSpotifyResponse:
     """Minimal response object for Authlib-style Spotify client calls."""
 
@@ -112,6 +119,21 @@ class TestImportHelperDeezer:
         assert response['skipped_count'] == 0
         assert response['error_count'] == 1
         assert 'No songs found in Deezer playlist playlist-empty' in response['errors'][0]
+
+    def test_deezer_track_exception_returns_structured_error(self, app):
+        """Track imports should report Deezer client failures without raising."""
+        with app.app_context():
+            app.config['deezer'] = FailingDeezerTrackStub()
+            app.config['LASTFM_API_KEY'] = 'lastfm-test-key'
+
+            response = ImportHelper.import_item('deezer', 'track', 'track-err')
+
+        assert response == {
+            'imported_count': 0,
+            'skipped_count': 0,
+            'error_count': 1,
+            'errors': ['Failed to import Deezer track track-err: Deezer unavailable for track-err'],
+        }
 
 
 class TestImportHelperSpotifyTokens:

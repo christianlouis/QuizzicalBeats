@@ -95,21 +95,6 @@ def _clear_user_dropbox_tokens(user):
         f"Discarded revoked Dropbox refresh token for user {user.id}; user must reconnect Dropbox."
     )
 
-def get_dropbox_user_info(access_token):
-    """Get user info from Dropbox API"""
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    response = requests.post('https://api.dropboxapi.com/2/users/get_current_account', headers=headers)
-    
-    if response.status_code == 200:
-        return response.json()
-    else:
-        current_app.logger.error(f"Error getting user info: {response.text}")
-        return None
-
 def get_current_user_dropbox_token():
     """Get a valid Dropbox access token for the current user, refreshing if needed"""
     if not current_user or not current_user.is_authenticated:

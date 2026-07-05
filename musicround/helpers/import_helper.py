@@ -4,8 +4,6 @@ This module provides consistent import functionality for tracks, albums, and pla
 from various music streaming services like Spotify and Deezer.
 """
 import json
-import secrets
-import string
 import traceback
 from flask import current_app
 from flask_login import current_user
@@ -15,21 +13,6 @@ from musicround.models import Song, Tag, db
 from musicround.helpers.metadata import get_song_metadata_by_isrc
 from musicround.helpers.auth_helpers import oauth, update_oauth_tokens # Ensure update_oauth_tokens is imported
 from datetime import datetime # Ensure datetime is imported
-
-def generate_token(length=32):
-    """
-    Generate a secure random token for authentication or validation purposes.
-    
-    Args:
-        length (int): The length of the token to generate (default: 32)
-        
-    Returns:
-        str: A secure random token string
-    """
-    # Use secrets module for cryptographically strong random numbers
-    alphabet = string.ascii_letters + string.digits
-    token = ''.join(secrets.choice(alphabet) for _ in range(length))
-    return token
 
 class ImportHelper:
     """Unified helper for importing music content from different services."""
@@ -363,14 +346,29 @@ class ImportHelper:
             lastfm_api_key = current_app.config.get('LASTFM_API_KEY')
             
             if item_type.lower() == 'track':
-                song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
-                if song:
-                    if was_new:
-                        return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                try:
+                    song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
+                    if song:
+                        if was_new:
+                            return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                        else:
+                            return {'imported_count': 0, 'skipped_count': 1, 'error_count': 0, 'errors': []}
                     else:
-                        return {'imported_count': 0, 'skipped_count': 1, 'error_count': 0, 'errors': []}
-                else:
-                    return {'imported_count': 0, 'skipped_count': 0, 'error_count': 1, 'errors': [f"Failed to import Deezer track {item_id}."]}
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [f"Failed to import Deezer track {item_id}."]
+                        }
+                except Exception as e:
+                    current_app.logger.error(f"Exception occurred while importing Deezer track {item_id}: {str(e)}")
+                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [f"Failed to import Deezer track {item_id}: {str(e)}"]
+                    }
             elif item_type.lower() == 'album':
                 try:
                     result = deezer_client.import_album(item_id, lastfm_api_key=lastfm_api_key)
