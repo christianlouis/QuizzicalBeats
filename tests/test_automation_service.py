@@ -3,6 +3,7 @@
 import os
 import shutil
 import tempfile
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,18 @@ from pydub import AudioSegment
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 
-from musicround.models import Round, RoundExport, Song, SongTag, Tag, User, db
+from musicround.helpers.import_queue import ImportQueue
+from musicround.models import (
+    ImportJobRecord,
+    Round,
+    RoundExport,
+    Song,
+    SongTag,
+    Tag,
+    User,
+    UserPreferences,
+    db,
+)
 from musicround.services import automation
 
 
@@ -864,3 +876,131 @@ class TestDatastoreCrudAutomation:
 
             assert result["object"]["spotify_token"] == "[redacted]"
             assert result["object"]["password_hash"] == "[redacted]"
+
+
+class TestAgentPlanningAutomation:
+    """Tests for agent-facing planning and review helpers."""
+
+    def test_import_progress_events_returns_queue_and_job_payload(self, app):
+        with app.app_context():
+            user = _create_user()
+            queue = ImportQueue()
+            app.config["IMPORT_QUEUE"] = queue
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist123",
+                priority=5,
+                user_id=user.id,
+                status="pending",
+            )
+            db.session.add(record)
+            db.session.commit()
+            queue.enqueue_record(record)
+
+            result = automation.import_progress_events(user_id=user.id)
+
+            assert result["queue_initialized"] is True
+            assert result["queue_size"] == 1
+            assert result["stats"]["pending"] == 1
+            assert result["active_jobs"][0]["id"] == record.id
+            assert result["queue_snapshot"][0]["record_id"] == record.id
+
+    def test_parse_text_playlist_marks_rows_that_need_review(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "1. Shania Twain - Man! I Feel Like A Woman!\n"
+                "Harry Styles - As It Was\n"
+                "Mystery Song Without Artist\n"
+            )
+
+            assert result["count"] == 3
+            assert result["candidates"][0]["artist"] == "Shania Twain"
+            assert result["candidates"][0]["title"] == "Man! I Feel Like A Woman!"
+            assert result["low_confidence_count"] == 1
+            assert result["low_confidence"][0]["issues"] == ["missing_artist"]
+            assert result["ready_for_import"] is False
+
+    def test_recent_usage_summary_warns_for_recently_used_selected_songs(self, app):
+        with app.app_context():
+            user = _create_user()
+            recent_song = _create_song(
+                title="Repeated",
+                artist="Artist",
+                used_count=4,
+            )
+            old_song = _create_song(title="Old", artist="Artist", used_count=1)
+            recent_song.last_used = datetime.utcnow() - timedelta(days=10)
+            old_song.last_used = datetime.utcnow() - timedelta(days=200)
+            db.session.commit()
+
+            result = automation.recent_usage_summary(
+                user_id=user.id,
+                months=3,
+                song_ids=[recent_song.id, old_song.id],
+            )
+
+            assert result["selected_song_warnings"][0]["song"]["id"] == recent_song.id
+            assert "Repeated" in result["selected_song_warnings"][0]["warning"]
+            assert all(
+                warning["song"]["id"] != old_song.id
+                for warning in result["selected_song_warnings"]
+            )
+
+    def test_quizmaster_context_includes_preferences_and_recent_usage(self, app):
+        with app.app_context():
+            user = _create_user(username="christian", email="christian@example.test")
+            user.first_name = "Christian"
+            preferences = UserPreferences(
+                user=user,
+                default_tts_service="elevenlabs",
+                enable_intro=True,
+                theme="dark",
+            )
+            db.session.add(preferences)
+            db.session.commit()
+
+            result = automation.quizmaster_context(user.id)
+
+            assert result["quizmaster"]["username"] == "christian"
+            assert result["quizmaster"]["name"] == "Christian"
+            assert result["preferences"]["default_tts_service"] == "elevenlabs"
+            assert result["preferences"]["theme"] == "dark"
+            assert result["recent_usage"]["window_months"] == 3
+
+    def test_round_planning_brief_returns_constraints_and_seasonal_notes(self, app):
+        with app.app_context():
+            user = _create_user()
+
+            result = automation.round_planning_brief(
+                user_id=user.id,
+                quiz_date="2026-07-09T19:00:00+02:00",
+                theme="festival headliners",
+            )
+
+            assert result["theme"] == "festival headliners"
+            assert result["desired_song_count"] == 8
+            assert any("exactly 8 songs" in item for item in result["constraints"])
+            assert any("summer" in item for item in result["date_notes"])
+            assert "agent_prompt" in result
+
+    def test_draft_round_audio_scripts_uses_round_context(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="As It Was", artist="Harry Styles")
+            round_id = automation.create_round(
+                name="Pop Night",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            result = automation.draft_round_audio_scripts(
+                round_id=round_id,
+                user_id=user.id,
+                quiz_date="2026-07-09T19:00:00+02:00",
+            )
+
+            assert result["round_name"] == "Pop Night"
+            assert "Harry Styles" in result["scripts"]["intro"]
+            assert "second listen" in result["scripts"]["replay"]
+            assert result["next_step"].startswith("Review the text")

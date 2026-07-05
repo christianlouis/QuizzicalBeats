@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import requests
@@ -32,7 +32,7 @@ from musicround.helpers.service_health import (
 )
 from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
-from musicround.models import Round, RoundExport, Song, Tag, User
+from musicround.models import ImportJobRecord, Round, RoundExport, Song, Tag, User
 
 
 class AutomationError(ValueError):
@@ -1595,6 +1595,324 @@ def round_repair_report(
         duration_tolerance_seconds=duration_tolerance_seconds,
     )
     return {"quality": quality, "report": quality["report"]}
+
+
+def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "service_name": record.service_name,
+        "item_type": record.item_type,
+        "item_id": record.item_id,
+        "item_url": record.item_url,
+        "priority": record.priority,
+        "user_id": record.user_id,
+        "status": record.status,
+        "created_at": _datetime_payload(record.created_at),
+        "started_at": _datetime_payload(record.started_at),
+        "completed_at": _datetime_payload(record.completed_at),
+        "duration_seconds": record.duration,
+        "imported_count": record.imported_count or 0,
+        "skipped_count": record.skipped_count or 0,
+        "attempt_count": record.attempt_count or 0,
+        "max_attempts": record.max_attempts or 1,
+        "error_message": record.error_message,
+    }
+
+
+def import_progress_events(
+    user_id: int | None = None,
+    include_recent: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return import queue and job status for polling MCP clients."""
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+
+    queue = current_app.config.get("IMPORT_QUEUE")
+    query = ImportJobRecord.query
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+
+    statuses = ("pending", "processing", "completed", "failed", "dead_letter")
+    stats = {
+        status: query.filter_by(status=status).count()
+        for status in statuses
+    }
+    active_jobs = (
+        query.filter(ImportJobRecord.status.in_(("pending", "processing")))
+        .order_by(
+            ImportJobRecord.priority.asc(),
+            ImportJobRecord.created_at.asc(),
+            ImportJobRecord.id.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    recent_jobs = []
+    if include_recent:
+        recent_jobs = (
+            query.order_by(
+                ImportJobRecord.completed_at.desc().nullslast(),
+                ImportJobRecord.created_at.desc(),
+                ImportJobRecord.id.desc(),
+            )
+            .limit(limit)
+            .all()
+        )
+
+    return {
+        "ok": True,
+        "queue_initialized": queue is not None,
+        "queue_size": queue.qsize() if queue else None,
+        "queue_snapshot": queue.snapshot() if queue else [],
+        "stats": stats,
+        "active_jobs": [_import_job_summary(record) for record in active_jobs],
+        "recent_jobs": [_import_job_summary(record) for record in recent_jobs],
+        "hints": [
+            "Poll this tool while imports are active. Dead-letter jobs require manual review."
+        ],
+    }
+
+
+def _split_playlist_line(line: str) -> tuple[str | None, str | None, float, list[str]]:
+    text = re.sub(r"^\s*(?:\d+[\).\-\s]+|[-*]\s+)", "", line).strip()
+    text = text.strip("\"'")
+    issues: list[str] = []
+    confidence = 0.95
+
+    if not text:
+        return None, None, 0.0, ["empty_line"]
+
+    spotify_match = re.search(r"open\.spotify\.com/track/([A-Za-z0-9]+)", text)
+    deezer_match = re.search(r"deezer\.com/(?:[a-z]{2}/)?track/(\d+)", text)
+    if spotify_match or deezer_match:
+        issues.append("platform_track_url")
+        return text, None, 0.55, issues
+
+    for delimiter in (" - ", " – ", " — ", "\t", ";", ","):
+        if delimiter in text:
+            left, right = [part.strip() for part in text.split(delimiter, 1)]
+            if left and right:
+                return right, left, confidence, issues
+
+    by_match = re.match(r"(.+?)\s+by\s+(.+)", text, flags=re.IGNORECASE)
+    if by_match:
+        return by_match.group(1).strip(), by_match.group(2).strip(), 0.85, issues
+
+    issues.append("missing_artist")
+    return text, None, 0.35, issues
+
+
+def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
+    """Parse pasted text or CSV-like playlist rows into reviewable candidates."""
+    if not text or not text.strip():
+        raise AutomationError("text must not be empty.")
+    if limit < 1 or limit > 500:
+        raise AutomationError("limit must be between 1 and 500.")
+
+    candidates = []
+    low_confidence = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if len(candidates) >= limit:
+            break
+        title, artist, confidence, issues = _split_playlist_line(raw_line)
+        if title is None:
+            continue
+        candidate = {
+            "line": line_number,
+            "raw": raw_line.strip(),
+            "title": title,
+            "artist": artist,
+            "confidence": confidence,
+            "needs_review": confidence < 0.8 or bool(issues),
+            "issues": issues,
+        }
+        candidates.append(candidate)
+        if candidate["needs_review"]:
+            low_confidence.append(candidate)
+
+    return {
+        "count": len(candidates),
+        "candidates": candidates,
+        "low_confidence_count": len(low_confidence),
+        "low_confidence": low_confidence,
+        "ready_for_import": bool(candidates) and not low_confidence,
+        "hints": [
+            "Review low-confidence rows before importing or creating a round.",
+            "Preferred format is 'Artist - Title' with one song per line.",
+        ],
+    }
+
+
+def _song_usage_warning(song: Song, window_start: datetime) -> dict[str, Any] | None:
+    if not song.last_used:
+        return None
+    if song.last_used < window_start:
+        return None
+    return {
+        "song": _song_summary(song),
+        "warning": (
+            f"Heads up: {song.artist} - {song.title} was used on "
+            f"{song.last_used.date().isoformat()}."
+        ),
+        "last_used": _datetime_payload(song.last_used),
+    }
+
+
+def recent_usage_summary(
+    user_id: int | None = None,
+    months: int = 3,
+    song_ids: list[int] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Summarize recent song and round usage for autonomous round planning."""
+    if months < 1 or months > 24:
+        raise AutomationError("months must be between 1 and 24.")
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+
+    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    rounds_query = Round.query.filter(Round.created_at >= window_start)
+    rounds = rounds_query.order_by(Round.created_at.desc(), Round.id.desc()).limit(limit).all()
+
+    songs_query = Song.query.filter(Song.last_used.isnot(None)).filter(Song.last_used >= window_start)
+    songs = songs_query.order_by(Song.used_count.desc(), Song.last_used.desc()).limit(limit).all()
+
+    selected_warnings = []
+    if song_ids:
+        selected = Song.query.filter(Song.id.in_(song_ids)).all()
+        selected_warnings = [
+            warning for song in selected
+            if (warning := _song_usage_warning(song, window_start)) is not None
+        ]
+
+    user = _find_user(user_id) if user_id is not None else None
+    return {
+        "window_months": months,
+        "window_start": _datetime_payload(window_start),
+        "user": None if user is None else {"id": user.id, "username": user.username, "email": user.email},
+        "round_count": len(rounds),
+        "recent_rounds": [_round_summary(round_obj) for round_obj in rounds],
+        "frequent_songs": [_song_summary(song) for song in songs],
+        "selected_song_warnings": selected_warnings,
+        "guidance": [
+            "Avoid selected_song_warnings unless there is a strong thematic reason.",
+            "Prefer lower used_count songs when quality and recognizability are comparable.",
+        ],
+    }
+
+
+def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
+    """Return personalization context for an agent planning a quiz round."""
+    user = _find_user(user_id)
+    preferences = user.preferences
+    return {
+        "quizmaster": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
+        },
+        "preferences": {
+            "default_tts_service": preferences.default_tts_service if preferences else "polly",
+            "enable_intro": preferences.enable_intro if preferences else True,
+            "theme": preferences.theme if preferences else "light",
+            "has_intro_mp3": bool(user.intro_mp3),
+            "has_replay_mp3": bool(user.replay_mp3),
+            "has_outro_mp3": bool(user.outro_mp3),
+        },
+        "recent_usage": recent_usage_summary(user_id=user.id, months=months, limit=25),
+    }
+
+
+def round_planning_brief(
+    user_id: int,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    desired_song_count: int = 8,
+    months: int = 3,
+) -> dict[str, Any]:
+    """Build an agent-readable brief for planning a robust themed round."""
+    if desired_song_count < 1 or desired_song_count > 25:
+        raise AutomationError("desired_song_count must be between 1 and 25.")
+
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+    context = quizmaster_context(user_id=user_id, months=months)
+    date_notes = []
+    if parsed_date:
+        weekday = parsed_date.strftime("%A")
+        date_notes.append(f"Quiz date is {parsed_date.date().isoformat()} ({weekday}).")
+        if parsed_date.month == 12:
+            date_notes.append("Seasonal angle available: year-end, winter, holidays.")
+        elif parsed_date.month in {6, 7, 8}:
+            date_notes.append("Seasonal angle available: summer, festivals, travel.")
+
+    constraints = [
+        f"Build exactly {desired_song_count} songs.",
+        "Every selected song needs a playable preview before email delivery.",
+        "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
+        "Prefer mainstream recognizability unless the theme explicitly asks for deeper cuts.",
+    ]
+    return {
+        "theme": theme,
+        "quiz_date": _datetime_payload(parsed_date),
+        "date_notes": date_notes,
+        "desired_song_count": desired_song_count,
+        "constraints": constraints,
+        "quizmaster_context": context,
+        "agent_prompt": (
+            "Use this brief to propose a complete music round. Explain any repeated "
+            "song risk and return replacement ideas for weak preview candidates."
+        ),
+    }
+
+
+def draft_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    tone: str = "warm, concise, lightly humorous",
+) -> dict[str, Any]:
+    """Draft intro, replay, and outro text for later TTS generation."""
+    round_obj = db.session.get(Round, round_id) if round_id is not None else None
+    if round_id is not None and not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    user = _find_user(user_id) if user_id is not None else None
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+    songs = _ordered_round_songs(round_obj) if round_obj else []
+    theme_label = theme or (round_obj.name if round_obj and round_obj.name else "music round")
+    artist_names = ", ".join(song.artist for song in songs[:3])
+    date_phrase = f" on {parsed_date.date().isoformat()}" if parsed_date else ""
+    quizmaster_phrase = f" for {user.username}" if user else ""
+    song_hint = f" Expect artists like {artist_names}." if artist_names else ""
+
+    scripts = {
+        "intro": (
+            f"Welcome to the {theme_label}{date_phrase}{quizmaster_phrase}. "
+            f"Eight songs, twice through, and no mercy for confident wrong answers.{song_hint}"
+        ),
+        "replay": (
+            "Here comes the second listen. Trust your first instinct, unless your "
+            "first instinct was loudly explaining the wrong decade."
+        ),
+        "outro": (
+            "That is the music round. Lock in artist and title, compare notes quietly, "
+            "and prepare to defend every spelling choice."
+        ),
+    }
+    return {
+        "round_id": round_id,
+        "round_name": round_obj.name if round_obj else None,
+        "user_id": user.id if user else None,
+        "quiz_date": _datetime_payload(parsed_date),
+        "theme": theme_label,
+        "tone": tone,
+        "scripts": scripts,
+        "next_step": "Review the text, then call generate_tts_snippet for intro, replay, and outro.",
+    }
 
 
 def _parse_datetime_utc(value: str | datetime) -> datetime:

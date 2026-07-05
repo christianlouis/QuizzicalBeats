@@ -44,12 +44,18 @@ The MCP server exposes these tools:
 | `update_datastore_object` | Update scalar column fields on one persisted object. |
 | `delete_datastore_object` | Delete one persisted object by primary key. |
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
+| `import_progress_events` | Return queue and job progress for polling clients. |
+| `parse_text_playlist` | Parse pasted text or CSV-like playlists into reviewable song candidates. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |
 | `add_round_song` | Add one song to a round and invalidate generated assets. |
+| `recent_usage_summary` | Summarize recent rounds, frequently used songs, and selected-song warnings. |
+| `quizmaster_context` | Return quizmaster preferences and recent usage for personalized planning. |
+| `round_planning_brief` | Build an agent-readable brief for a robust themed round. |
+| `draft_round_audio_scripts` | Draft intro, replay, and outro text before TTS generation. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
@@ -73,15 +79,20 @@ fields whose names contain `password`, `token`, or `secret` unless
 
 ## Intended Workflow
 
-1. Search with `find_songs` to avoid duplicates.
-2. Add missing tracks with `add_song` or import platform content with
+1. Start with `quizmaster_context`, `recent_usage_summary`, or
+   `round_planning_brief` so repeated songs and personalization constraints are
+   visible before selecting tracks.
+2. Search with `find_songs` to avoid duplicates.
+3. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
-3. Create the round with `compile_round` or `create_round_from_playlist`.
+   For pasted lists, run `parse_text_playlist` first and review any
+   low-confidence rows before importing.
+4. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
    round when fewer than the requested eight tracks resolve.
-4. Generate PDF and MP3 files with `generate_round_assets`.
-5. Inspect the generated files and previews with `inspect_round_package`.
-6. Send the completed bundle with `send_round_email`; it reruns the package
+5. Generate PDF and MP3 files with `generate_round_assets`.
+6. Inspect the generated files and previews with `inspect_round_package`.
+7. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
    `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package

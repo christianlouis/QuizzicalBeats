@@ -103,6 +103,7 @@
 ### 🎯 Milestone 11: **"Progress Pulse" Release** – Import Status Tracking
 
 * [x] JSON polling endpoint for import queue and job status
+* [x] MCP polling payload for active and recent import jobs
 * [ ] Real-time progress indicators for active imports
 * [x] Detailed error reporting with retry/dead-letter state
 * [ ] Manual recovery actions for failed imports
@@ -118,11 +119,11 @@
 
 ### 🎯 Milestone 13: **"Textual Transport" Release** – Text-Based Playlist Import
 
-* [ ] Support for pasting plain text playlists
-* [ ] Line-by-line parsing with artist/song detection
-* [ ] Confidence scoring for matches
+* [x] Support for pasting plain text playlists
+* [x] Line-by-line parsing with artist/song detection
+* [x] Confidence scoring for matches
 * [ ] Manual review interface for low-confidence matches
-* [ ] Support for various text formats (CSV, plain text, etc.)
+* [x] Support for various text formats (CSV, plain text, etc.)
 
 ### 🎯 Milestone 14: **"Curated Collector" Release** – Playlist Scraper
 
@@ -173,7 +174,9 @@
   * [ ] Use existing song metadata (genre, year, tempo, artist)
   * [ ] Support different quiz formats: multiple-choice, guess-the-clip, open-ended
   * [ ] Create quiz rounds from a playlist
-  * [ ] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
+  * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
+  * [x] Provide recent usage/fatigue context for agentic song selection
+  * [x] Draft intro/replay/outro scripts for later TTS generation
   * [ ] Include fallback logic when metadata is sparse
 * [ ] Let users review/edit AI-generated questions before saving
 * [ ] Log prompt/response pairs for model improvement
@@ -208,6 +211,7 @@
 
 * [x] User-specific intro/outro/replay MP3 fallback system
 * [x] Persistent custom user settings
+* [x] Expose quizmaster preference context to MCP agents
 * [ ] Let users define default round format
 * [ ] Implement personal tags for rounds (e.g., "pub night", "2020s", "pop")
 * [ ] Add filtering and sorting by tag

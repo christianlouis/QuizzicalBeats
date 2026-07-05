@@ -189,6 +189,27 @@ def import_catalog_item(
 
 
 @mcp.tool()
+def import_progress_events(
+    user_id: int | None = None,
+    include_recent: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return import queue and job status for polling clients."""
+    return _with_app_context(
+        automation.import_progress_events,
+        user_id=user_id,
+        include_recent=include_recent,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
+    """Parse pasted text or CSV-like playlists into reviewable song candidates."""
+    return _with_app_context(automation.parse_text_playlist, text=text, limit=limit)
+
+
+@mcp.tool()
 def compile_round(
     name: str | None = None,
     round_type: str = "random",
@@ -292,6 +313,71 @@ def add_round_song(
         position=position,
         inspect_after=inspect_after,
         user_id=user_id,
+    )
+
+
+@mcp.tool()
+def recent_usage_summary(
+    user_id: int | None = None,
+    months: int = 3,
+    song_ids: list[int] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Summarize recent song usage and warn when selected songs were used recently."""
+    return _with_app_context(
+        automation.recent_usage_summary,
+        user_id=user_id,
+        months=months,
+        song_ids=song_ids,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
+    """Return quizmaster personalization context and recent usage for round planning."""
+    return _with_app_context(
+        automation.quizmaster_context,
+        user_id=user_id,
+        months=months,
+    )
+
+
+@mcp.tool()
+def round_planning_brief(
+    user_id: int,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    desired_song_count: int = 8,
+    months: int = 3,
+) -> dict[str, Any]:
+    """Build an agent-readable brief for planning a robust themed music round."""
+    return _with_app_context(
+        automation.round_planning_brief,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        desired_song_count=desired_song_count,
+        months=months,
+    )
+
+
+@mcp.tool()
+def draft_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    tone: str = "warm, concise, lightly humorous",
+) -> dict[str, Any]:
+    """Draft intro, replay, and outro script text before generating TTS audio."""
+    return _with_app_context(
+        automation.draft_round_audio_scripts,
+        round_id=round_id,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        tone=tone,
     )
 
 

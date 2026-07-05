@@ -278,17 +278,17 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.6 - "Textual Transport" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 2 weeks
 
 **Goals**: Text-based playlist import
 
 **Features**:
-- [ ] Plain text playlist parsing
-- [ ] CSV format support
-- [ ] Artist/song detection algorithms
-- [ ] Confidence scoring for matches
+- [x] Plain text playlist parsing
+- [x] CSV format support
+- [x] Artist/song detection algorithms
+- [x] Confidence scoring for matches
 - [ ] Manual review interface
 - [ ] Bulk import workflow
 - [ ] Format templates
@@ -310,10 +310,11 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] AI quiz round generation
 - [ ] Multiple quiz formats (MCQ, clips, open-ended)
-- [ ] Theme-based generation
+- [x] Theme-based planning brief for agentic generation
 - [ ] Metadata-driven questions
 - [ ] User review/edit interface
-- [ ] Prompt optimization
+- [x] Recent usage and fatigue context for prompt optimization
+- [x] Draft intro/replay/outro script support for generated rounds
 - [ ] AI provider abstraction (OpenAI, Anthropic, local)
 - [ ] Cost tracking
 
