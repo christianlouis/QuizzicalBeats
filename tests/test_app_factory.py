@@ -1,5 +1,11 @@
 """Tests for Flask app factory configuration helpers."""
+import os
+
 from flask import Flask
+
+os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
+os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
+os.environ.setdefault('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
 
 from musicround import _configure_database_uri
 
@@ -45,10 +51,12 @@ def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
 
 def test_create_app_honors_env_database_uri(monkeypatch):
     """Test create_app keeps SQLALCHEMY_DATABASE_URI from the environment."""
-    from musicround import create_app, db
-
+    monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-testing-only')
+    monkeypatch.setenv('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
     monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
     monkeypatch.setenv('IMPORT_WORKERS_ENABLED', 'false')
+
+    from musicround import create_app, db
 
     app = create_app()
 
