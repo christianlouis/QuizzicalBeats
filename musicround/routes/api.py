@@ -324,7 +324,11 @@ def refresh_song_metadata(song_id):
     
     try:
         # Get fresh metadata using the existing ISRC
-        current_app.logger.info(f"=== DEBUG: Starting metadata refresh for song {song_id} with ISRC {song.isrc} ===")
+        current_app.logger.debug(
+            "Starting metadata refresh for song %s with ISRC %s",
+            song_id,
+            song.isrc,
+        )
         metadata = get_song_metadata_by_isrc(song.isrc, current_app)
         
         if not metadata:
@@ -332,23 +336,23 @@ def refresh_song_metadata(song_id):
             return jsonify({'error': 'No metadata found for this ISRC'}), 404
         
         # Debug the metadata received
-        current_app.logger.info(f"DEBUG: Received metadata structure: {type(metadata).__name__}")
+        current_app.logger.debug(f"Received metadata structure: {type(metadata).__name__}")
         for key, value in metadata.items():
             value_type = type(value).__name__
             value_str = str(value)
             if len(value_str) > 100:
                 value_str = value_str[:100] + "..."
-            current_app.logger.info(f"DEBUG: Metadata key '{key}' = {value_str} (type: {value_type})")
+            current_app.logger.debug(f"Metadata key '{key}' = {value_str} (type: {value_type})")
         
         # Update song with new metadata
         if metadata.get('title'):
-            current_app.logger.info(f"DEBUG: Updating title to '{metadata['title']}'")
+            current_app.logger.debug(f"Updating title to '{metadata['title']}'")
             song.title = metadata['title']
         if metadata.get('artist_name'):
-            current_app.logger.info(f"DEBUG: Updating artist to '{metadata['artist_name']}'")
+            current_app.logger.debug(f"Updating artist to '{metadata['artist_name']}'")
             song.artist = metadata['artist_name']
         if metadata.get('genre'):
-            current_app.logger.info(f"DEBUG: Updating genre to '{metadata['genre']}' (type: {type(metadata['genre']).__name__})")
+            current_app.logger.debug(f"Updating genre to '{metadata['genre']}' (type: {type(metadata['genre']).__name__})")
             song.genre = metadata['genre']
             
             # Import helper for creating tags from genre
@@ -356,21 +360,21 @@ def refresh_song_metadata(song_id):
             ImportHelper.create_tags_from_genre(song, metadata['genre'])
             
         if metadata.get('year'):
-            current_app.logger.info(f"DEBUG: Updating year to '{metadata['year']}'")
+            current_app.logger.debug(f"Updating year to '{metadata['year']}'")
             song.year = metadata['year']
         
         # Check additional metadata for genres and add tags from there too
         if 'genres' in metadata:
-            current_app.logger.info(f"DEBUG: Creating tags from additional genres")
+            current_app.logger.debug("Creating tags from additional genres")
             from musicround.helpers.import_helper import ImportHelper
             ImportHelper.create_tags_from_genre(song, metadata['genres'])
         
         # Update URLs if available
         if metadata.get('preview_url'):
-            current_app.logger.info(f"DEBUG: Updating preview_url")
+            current_app.logger.debug("Updating preview_url")
             song.preview_url = metadata['preview_url']
         if metadata.get('cover_url'):
-            current_app.logger.info(f"DEBUG: Updating cover_url")
+            current_app.logger.debug("Updating cover_url")
             song.cover_url = metadata['cover_url']
         
         # Update platform-specific IDs if available
@@ -405,21 +409,25 @@ def refresh_song_metadata(song_id):
         if metadata.get('sources'):
             try:
                 sources_str = ','.join(metadata['sources'])
-                current_app.logger.info(f"DEBUG: Setting metadata_sources to '{sources_str}'")
+                current_app.logger.debug(f"Setting metadata_sources to '{sources_str}'")
                 song.metadata_sources = sources_str
             except Exception as source_error:
-                current_app.logger.error(f"DEBUG: Error joining sources: {source_error}")
-                current_app.logger.error(f"DEBUG: Sources value: {metadata['sources']} (type: {type(metadata['sources']).__name__})")
+                current_app.logger.error(f"Error joining metadata sources: {source_error}")
+                current_app.logger.error(
+                    "Metadata sources value: %s (type: %s)",
+                    metadata['sources'],
+                    type(metadata['sources']).__name__,
+                )
         
         # Save changes to the database
         try:
-            current_app.logger.info("DEBUG: Committing changes to database")
+            current_app.logger.debug("Committing changes to database")
             db.session.commit()
             current_app.logger.info(f"Metadata for song {song_id} updated successfully with sources: {metadata.get('sources')}")
         except Exception as db_error:
             db.session.rollback()
-            current_app.logger.error(f"DEBUG: Database commit error: {db_error}")
-            current_app.logger.error(f"DEBUG: Traceback: {traceback.format_exc()}")
+            current_app.logger.error(f"Database commit error: {db_error}")
+            current_app.logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({'error': f"Database error: {str(db_error)}"}), 500
         
         # Return updated song details including tags

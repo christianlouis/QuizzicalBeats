@@ -4,10 +4,8 @@ General utility functions used throughout the application.
 import secrets
 import string
 import os
-import shutil
 from flask import current_app
 from werkzeug.utils import secure_filename
-import uuid
 import requests
 import json
 
@@ -21,6 +19,9 @@ def generate_token(length=32):
     Returns:
         str: A secure random token string
     """
+    if not isinstance(length, int) or length < 1:
+        raise ValueError("length must be a positive integer")
+
     # Use secrets module for cryptographically strong random numbers
     alphabet = string.ascii_letters + string.digits
     token = ''.join(secrets.choice(alphabet) for _ in range(length))

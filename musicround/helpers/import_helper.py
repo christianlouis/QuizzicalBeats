@@ -7,12 +7,12 @@ import json
 import traceback
 from flask import current_app
 from flask_login import current_user
-from authlib.integrations.base_client.errors import MissingTokenError # Corrected import path
+from authlib.integrations.base_client.errors import MissingTokenError
 from httpx import HTTPStatusError
 from musicround.models import Song, Tag, db
 from musicround.helpers.metadata import get_song_metadata_by_isrc
-from musicround.helpers.auth_helpers import oauth, update_oauth_tokens # Ensure update_oauth_tokens is imported
-from datetime import datetime # Ensure datetime is imported
+from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
+from datetime import datetime
 
 class ImportHelper:
     """Unified helper for importing music content from different services."""
@@ -143,7 +143,7 @@ class ImportHelper:
         return song
 
     @staticmethod
-    def _fetch_audio_features_for_song(sp, song_obj, spotify_track_id, token=None): # Added token parameter
+    def _fetch_audio_features_for_song(sp, song_obj, spotify_track_id, token=None):
         """Fetches audio features for a given song and updates the song object."""
         if not spotify_track_id:
             current_app.logger.warning(f"Cannot fetch audio features: Spotify track ID missing for song {song_obj.title if song_obj else 'Unknown'}.")
@@ -548,7 +548,7 @@ class ImportHelper:
             
             if song is None: # If no ISRC, or ISRC lookup failed to produce a song object
                 current_app.logger.info(f"Creating song for track {track_id} using basic Spotify data (no ISRC or failed ISRC enrichment).")
-                song = ImportHelper._create_song_from_spotify(track_info) # Ensure this helper is robust
+                song = ImportHelper._create_song_from_spotify(track_info)
             
             if song:
                 # Ensure spotify_id is set if created via ISRC path primarily

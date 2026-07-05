@@ -64,17 +64,17 @@ def get_song_metadata_by_isrc(isrc, app=None):
     # Initialize logger if app context provided
     logger = app.logger if app else None
     if logger:
-        logger.info(f"=== DEBUG: Starting metadata refresh for ISRC: {isrc} ===")
+        logger.debug("Starting metadata refresh for ISRC: %s", isrc)
 
     try:
         # 0. Query ACRCloud first (provides info from multiple platforms)
         if logger:
-            logger.info(f"DEBUG: Querying ACRCloud for ISRC: {isrc}")
+            logger.debug(f"Querying ACRCloud for ISRC: {isrc}")
         acrcloud_data = get_acrcloud_data(isrc, app)
         if acrcloud_data:
             metadata["sources"].append("acrcloud")
             if logger:
-                logger.info(f"DEBUG: ACRCloud data received: {json.dumps(acrcloud_data, default=str)}")
+                logger.debug(f"ACRCloud data received: {json.dumps(acrcloud_data, default=str)}")
                 
             if acrcloud_data.get("artist_name"):
                 artist_names.append(acrcloud_data["artist_name"])
@@ -85,42 +85,42 @@ def get_song_metadata_by_isrc(isrc, app=None):
             if acrcloud_data.get("genre"):
                 # Debug the genre value
                 if logger:
-                    logger.info(f"DEBUG: ACRCloud genre type: {type(acrcloud_data['genre']).__name__}")
-                    logger.info(f"DEBUG: ACRCloud genre value: {acrcloud_data['genre']}")
+                    logger.debug(f"ACRCloud genre type: {type(acrcloud_data['genre']).__name__}")
+                    logger.debug(f"ACRCloud genre value: {acrcloud_data['genre']}")
                 
                 # Handle genre properly whether it's a string, list, or dict
                 if isinstance(acrcloud_data["genre"], list):
                     if logger:
-                        logger.info(f"DEBUG: Processing genre as list: {acrcloud_data['genre']}")
+                        logger.debug(f"Processing genre as list: {acrcloud_data['genre']}")
                     genres.extend(acrcloud_data["genre"])  # ACRCloud might return multiple genres
                 elif isinstance(acrcloud_data["genre"], str):
                     if logger:
-                        logger.info(f"DEBUG: Processing genre as string: {acrcloud_data['genre']}")
+                        logger.debug(f"Processing genre as string: {acrcloud_data['genre']}")
                     genres.append(acrcloud_data["genre"])
                 elif isinstance(acrcloud_data["genre"], dict):
                     # Debug the dict structure
                     if logger:
-                        logger.info(f"DEBUG: Processing genre as dict: {acrcloud_data['genre']}")
+                        logger.debug(f"Processing genre as dict: {acrcloud_data['genre']}")
                     
                     # Extract genre name from dict if available
                     for genre_key, genre_value in acrcloud_data["genre"].items():
                         if logger:
-                            logger.info(f"DEBUG: Genre key: {genre_key}, value type: {type(genre_value).__name__}")
+                            logger.debug(f"Genre key: {genre_key}, value type: {type(genre_value).__name__}")
                         
                         if isinstance(genre_value, str):
                             if logger:
-                                logger.info(f"DEBUG: Adding genre string: {genre_value}")
+                                logger.debug(f"Adding genre string: {genre_value}")
                             genres.append(genre_value)
                         elif isinstance(genre_value, list) and genre_value:
                             if logger:
-                                logger.info(f"DEBUG: Adding genres from list: {genre_value}")
+                                logger.debug(f"Adding genres from list: {genre_value}")
                             genres.extend([g for g in genre_value if isinstance(g, str)])
                         else:
                             if logger:
-                                logger.info(f"DEBUG: Skipping genre value of type: {type(genre_value).__name__}")
+                                logger.debug(f"Skipping genre value of type: {type(genre_value).__name__}")
                 else:
                     if logger:
-                        logger.info(f"DEBUG: Unknown genre type: {type(acrcloud_data['genre']).__name__}")
+                        logger.debug(f"Unknown genre type: {type(acrcloud_data['genre']).__name__}")
                 
             # Store platform IDs
             if acrcloud_data.get("spotify_id"):
@@ -221,21 +221,21 @@ def get_song_metadata_by_isrc(isrc, app=None):
     
     # Debug the collected data before processing
     if logger:
-        logger.info(f"DEBUG: All collected artist names: {artist_names}")
-        logger.info(f"DEBUG: All collected titles: {titles}")
-        logger.info(f"DEBUG: All collected years: {years}")
-        logger.info(f"DEBUG: All collected genres: {genres}")
+        logger.debug(f"All collected artist names: {artist_names}")
+        logger.debug(f"All collected titles: {titles}")
+        logger.debug(f"All collected years: {years}")
+        logger.debug(f"All collected genres: {genres}")
 
     # Determine most common values so far
     if artist_names and titles:
         try:
             # Use the most frequent values from collected data
             if logger:
-                logger.info(f"DEBUG: Computing most common artist from: {artist_names}")
+                logger.debug(f"Computing most common artist from: {artist_names}")
             metadata["artist_name"] = Counter(artist_names).most_common(1)[0][0]
             
             if logger:
-                logger.info(f"DEBUG: Computing most common title from: {titles}")
+                logger.debug(f"Computing most common title from: {titles}")
             metadata["title"] = Counter(titles).most_common(1)[0][0]
             
             # With artist and title, we can query services that don't support ISRC
@@ -276,13 +276,13 @@ def get_song_metadata_by_isrc(isrc, app=None):
         try:
             # For year, take the earliest one as "first released"
             if logger:
-                logger.info(f"DEBUG: Processing years: {years}")
+                logger.debug(f"Processing years: {years}")
             
             numeric_years = [int(y) for y in years if y and y.isdigit()]
             if numeric_years:
                 metadata["year"] = str(min(numeric_years))
                 if logger:
-                    logger.info(f"DEBUG: Selected earliest year: {metadata['year']}")
+                    logger.debug(f"Selected earliest year: {metadata['year']}")
         except Exception as e:
             # Fallback to most common if conversion fails
             if logger:
@@ -292,7 +292,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
             try:
                 metadata["year"] = Counter(years).most_common(1)[0][0]
                 if logger:
-                    logger.info(f"DEBUG: Fallback to most common year: {metadata['year']}")
+                    logger.debug(f"Fallback to most common year: {metadata['year']}")
             except Exception as e2:
                 if logger:
                     logger.error(f"Year fallback error: {e2}")
@@ -308,7 +308,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
                     if g.strip().lower() == "vaihtoehtoinen":
                         clean_genres.append("Alternative")
                         if logger:
-                            logger.info(f"DEBUG: Translated genre 'Vaihtoehtoinen' to 'Alternative'")
+                            logger.debug(f"Translated genre 'Vaihtoehtoinen' to 'Alternative'")
                     else:
                         clean_genres.append(g.strip())
                 elif isinstance(g, list):
@@ -318,7 +318,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
                             if item.strip().lower() == "vaihtoehtoinen":
                                 clean_genres.append("Alternative")
                                 if logger:
-                                    logger.info(f"DEBUG: Translated genre 'Vaihtoehtoinen' to 'Alternative'")
+                                    logger.debug(f"Translated genre 'Vaihtoehtoinen' to 'Alternative'")
                             else:
                                 clean_genres.append(item.strip())
             
@@ -331,7 +331,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
             metadata["genres"] = unique_genres
             
             if logger:
-                logger.info(f"DEBUG: All cleaned genres: {unique_genres}")
+                logger.debug(f"All cleaned genres: {unique_genres}")
                 
             # For the main genre field, take the most common one
             if clean_genres:
@@ -347,7 +347,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
                         break
                 
                 if logger:
-                    logger.info(f"DEBUG: Selected most common genre as main: {metadata['genre']}")
+                    logger.debug(f"Selected most common genre as main: {metadata['genre']}")
         except Exception as e:
             if logger:
                 logger.error(f"Genre processing error: {e}")
@@ -366,7 +366,7 @@ def get_song_metadata_by_isrc(isrc, app=None):
         if url:
             metadata["preview_url"] = url
             if logger:
-                logger.info(f"DEBUG: Selected preview URL: {url}")
+                logger.debug(f"Selected preview URL: {url}")
             break
     
     # Process cover URLs with priority
@@ -382,12 +382,12 @@ def get_song_metadata_by_isrc(isrc, app=None):
             if url:
                 metadata["cover_url"] = url
                 if logger:
-                    logger.info(f"DEBUG: Selected cover URL: {url}")
+                    logger.debug(f"Selected cover URL: {url}")
                 break
     
     if logger:
-        logger.info(f"=== DEBUG: Completed metadata refresh for ISRC: {isrc} ===")
-        logger.info(f"=== Final metadata: {json.dumps(metadata, default=str)} ===")
+        logger.debug("Completed metadata refresh for ISRC: %s", isrc)
+        logger.debug("Final metadata: %s", json.dumps(metadata, default=str))
     
     return metadata
 

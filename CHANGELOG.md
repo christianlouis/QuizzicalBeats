@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
+- Made token generation reject invalid lengths instead of returning weak or empty tokens.
+- Moved verbose metadata-refresh diagnostics from info logs to debug logs.
 - Made Deezer track import failures return structured import errors instead of escaping from `ImportHelper.import_item`.
 - Normalized OAuth token expiry storage for both `expires_in` and Authlib-style `expires_at` payloads.
 - Made Dropbox folder browsing force-refresh once after a 401 and return a reconnect-required payload when refresh credentials are revoked.
