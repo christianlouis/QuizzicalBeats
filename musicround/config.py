@@ -15,7 +15,8 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 
 class Config:
     # Debug settings
-    DEBUG = os.getenv("DEBUG", "True") == "True"
+    DEBUG = os.getenv("DEBUG", "False") == "True"
+    DEBUG2 = os.getenv("DEBUG2", "False") == "True"
     SECRET_KEY = os.getenv('SECRET_KEY')
     if not SECRET_KEY:
         raise ValueError("SECRET_KEY environment variable must be set. Generate a secure key with: python -c 'import secrets; print(secrets.token_hex(32))'")
@@ -80,6 +81,27 @@ class Config:
     # Reverse proxy settings
     USE_HTTPS = os.getenv("USE_HTTPS", "False") == "True"  # Force HTTPS URL generation
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", 'https' if USE_HTTPS else 'http')
+
+    # Session and remember-cookie security defaults
+    SESSION_COOKIE_SECURE = USE_HTTPS
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+    REMEMBER_COOKIE_SECURE = USE_HTTPS
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = os.getenv("REMEMBER_COOKIE_SAMESITE", "Lax")
+    try:
+        PERMANENT_SESSION_LIFETIME = timedelta(
+            hours=int(os.getenv("PERMANENT_SESSION_LIFETIME_HOURS", "12"))
+        )
+    except (TypeError, ValueError):
+        PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
+
+    # Minimal in-app authentication throttles. These are per-process safety nets,
+    # not a replacement for edge/WAF rate limiting.
+    LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5"))
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900"))
+    AUTOMATION_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTOMATION_RATE_LIMIT_ATTEMPTS", "10"))
+    AUTOMATION_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTOMATION_RATE_LIMIT_WINDOW_SECONDS", "300"))
     
     # Static OAuth URL configuration (for production environments)
     STATIC_OAUTH_URLS = os.getenv("STATIC_OAUTH_URLS", "False") == "True"
@@ -88,5 +110,4 @@ class Config:
     OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")
     OAUTH_AUTHENTIK_URL = os.getenv("OAUTH_AUTHENTIK_URL")
     OAUTH_DROPBOX_URL = os.getenv("OAUTH_DROPBOX_URL")
-
 
