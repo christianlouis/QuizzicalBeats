@@ -246,6 +246,62 @@ class TestAuthenticatedRoutes:
         assert b'manual-spotify-secret-token' not in response.data
         assert b'Manual token saved' in response.data
 
+    def test_profile_discards_expired_manual_spotify_token_before_validation(self, app, client, monkeypatch):
+        """Expired manual tokens should be removed before the profile tries to reuse them."""
+        from musicround.routes import users as users_routes
+
+        self._login(app, client)
+        fake_spotify = MagicMock()
+        monkeypatch.setattr(users_routes.oauth, 'spotify', fake_spotify, raising=False)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'expired-manual-token'
+            sess['bearer_token_added'] = (datetime.now() - timedelta(hours=2)).timestamp()
+            sess['token_source'] = 'manual'
+            sess['client_token_expiry'] = (datetime.now() + timedelta(hours=1)).timestamp()
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        fake_spotify.get.assert_not_called()
+        assert b'expired-manual-token' not in response.data
+        with client.session_transaction() as sess:
+            assert 'access_token' not in sess
+            assert 'bearer_token_added' not in sess
+            assert 'token_source' not in sess
+            assert 'client_token_expiry' not in sess
+
+    def test_profile_clears_rejected_manual_spotify_token(self, app, client, monkeypatch):
+        """A manual token rejected by Spotify must not stay active on the profile."""
+        from musicround.routes import users as users_routes
+
+        self._login(app, client)
+
+        class FakeResponse:
+            ok = False
+            status_code = 401
+            text = 'invalid token'
+
+            def json(self):
+                return {}
+
+        fake_spotify = MagicMock()
+        fake_spotify.get.return_value = FakeResponse()
+        monkeypatch.setattr(users_routes.oauth, 'spotify', fake_spotify, raising=False)
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'rejected-manual-token'
+            sess['bearer_token_added'] = datetime.now().timestamp()
+            sess['token_source'] = 'manual'
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'rejected-manual-token' not in response.data
+        assert b'Manually entered Spotify token is invalid or expired.' in response.data
+        with client.session_transaction() as sess:
+            assert 'access_token' not in sess
+            assert 'bearer_token_added' not in sess
+            assert 'token_source' not in sess
+
     def test_update_bearer_token_invalid_token_is_not_stored(self, app, client, monkeypatch):
         """Invalid manual Spotify tokens must not poison later Spotify calls."""
         from musicround.routes import users as users_routes

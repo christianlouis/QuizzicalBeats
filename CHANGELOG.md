@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required login for Spotify playlist import, direct-token, and diagnostic routes before resolving user, manual, or system fallback tokens.
 - Hardened Spotify direct-token handling with admin-only diagnostics, safe local return URLs, validation-before-store behavior, invalid-token cleanup, and a non-empty client diagnostic page.
 - Hardened manual Spotify bearer-token handling on the profile page so invalid tokens are rejected before storage and old session tokens are cleared on validation failure.
+- Cleared all manual Spotify session metadata when a browser-supplied token expires or is rejected during profile validation.
 - Stopped rendering Spotify, Dropbox, and manual bearer token fragments in profile/import HTML, fixed direct Spotify import form targets, and removed raw Dropbox provider bodies and tracebacks from browser-facing API errors.
 - Stopped the profile Dropbox folder-picker UI from rendering raw provider response or traceback fields if an error payload includes them.
 - Added Dropbox export coverage to ensure unhealthy artifact storage blocks export before Dropbox refresh or upload calls.

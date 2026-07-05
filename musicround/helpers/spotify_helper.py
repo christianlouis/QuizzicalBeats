@@ -16,6 +16,12 @@ from musicround.models import db, SystemSetting
 # valid for a normal Spotify access-token lifetime and require the user to
 # resupply a fresh one afterwards.
 MANUAL_BEARER_TOKEN_TTL_SECONDS = 3600
+MANUAL_BEARER_TOKEN_SESSION_KEYS = (
+    'access_token',
+    'bearer_token_added',
+    'token_source',
+    'client_token_expiry',
+)
 
 
 class SpotifyTokenRevokedError(Exception):
@@ -100,6 +106,12 @@ def _clear_system_spotify_tokens():
         "Discarded revoked system Spotify fallback refresh token. "
         "Re-authorize the service account via the admin Spotify token wizard."
     )
+
+
+def clear_manual_spotify_bearer_token():
+    """Remove all browser-session state for a manually supplied Spotify token."""
+    for key in MANUAL_BEARER_TOKEN_SESSION_KEYS:
+        session.pop(key, None)
 
 
 def get_current_user_spotify_token():
@@ -217,7 +229,7 @@ def get_manual_spotify_bearer_token():
         current_app.logger.info(
             "Manually supplied Spotify bearer token has no timestamp; ignoring it."
         )
-        session.pop('access_token', None)
+        clear_manual_spotify_bearer_token()
         return None
 
     try:
@@ -226,16 +238,14 @@ def get_manual_spotify_bearer_token():
         current_app.logger.info(
             "Manually supplied Spotify bearer token has invalid timestamp; ignoring it."
         )
-        session.pop('access_token', None)
-        session.pop('bearer_token_added', None)
+        clear_manual_spotify_bearer_token()
         return None
 
     if age_seconds > MANUAL_BEARER_TOKEN_TTL_SECONDS:
         current_app.logger.info(
             "Manually supplied Spotify bearer token has expired; ignoring it."
         )
-        session.pop('access_token', None)
-        session.pop('bearer_token_added', None)
+        clear_manual_spotify_bearer_token()
         return None
 
     return token

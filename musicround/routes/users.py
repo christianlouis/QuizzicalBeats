@@ -14,17 +14,15 @@ from sqlalchemy.exc import IntegrityError
 from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
-from musicround.helpers.spotify_helper import get_spotify_token, get_current_user_spotify_token, get_spotify_user_info as spotify_helper_get_user_info
+from musicround.helpers.spotify_helper import (
+    clear_manual_spotify_bearer_token,
+    get_spotify_token,
+    get_spotify_user_info as spotify_helper_get_user_info,
+)
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 _LOGIN_FAILURES = {}
 _AUTOMATION_FAILURES = {}
-_MANUAL_SPOTIFY_SESSION_KEYS = (
-    'access_token',
-    'token_source',
-    'bearer_token_added',
-    'client_token_expiry',
-)
 
 
 def _client_rate_limit_id():
@@ -128,8 +126,7 @@ def _spotify_display_name(spotify_user_data, fallback=None):
 
 
 def _clear_manual_spotify_session_token():
-    for key in _MANUAL_SPOTIFY_SESSION_KEYS:
-        session.pop(key, None)
+    clear_manual_spotify_bearer_token()
 
 
 def _store_manual_spotify_session_token(bearer_token, token_source):
@@ -575,12 +572,12 @@ def profile():
     
     # Get info about current tokens
     system_refresh_token = SystemSetting.get('fallback_spotify_refresh_token', '')
-    session_bearer = session.get('access_token', '') # This is the manually entered token or system token
-    token_source = session.get('token_source', '')
-    client_token_expiry = session.get('client_token_expiry', 0) # For system client_credentials token
     
     # Use centralized token management to get the best available token
     spotify_token, spotify_token_source = get_spotify_token()
+    session_bearer = session.get('access_token', '') # This is the manually entered token or system token
+    token_source = session.get('token_source', '')
+    client_token_expiry = session.get('client_token_expiry', 0) # For system client_credentials token
     
     # Fetch user info for the active token
     spotify_user_info = None # This is passed to the template
@@ -646,7 +643,11 @@ def profile():
                 else:
                     current_app.logger.error(f"Error fetching Spotify user info with manual bearer token: {resp.status_code} {resp.text}")
                     spotify_user_info = None
-                    if resp.status_code in [401, 403]: flash("Manually entered Spotify token is invalid or expired.", "warning")
+                    if resp.status_code in [401, 403]:
+                        _clear_manual_spotify_session_token()
+                        session_bearer = ''
+                        token_source = ''
+                        flash("Manually entered Spotify token is invalid or expired.", "warning")
 
             except Exception as user_info_error:
                 current_app.logger.error(f"Exception fetching Spotify user info with manual bearer token: {str(user_info_error)}")
@@ -665,7 +666,11 @@ def profile():
                         active_token_expiry = datetime.fromtimestamp(client_token_expiry) if client_token_expiry else None
                 else:
                     current_app.logger.warning(f"Manual/Session client credentials token validation failed. Status: {resp_cc.status_code}")
-                    if resp_cc.status_code in [401, 403]: flash("The client credentials token in session is invalid.", "warning")
+                    if resp_cc.status_code in [401, 403]:
+                        _clear_manual_spotify_session_token()
+                        session_bearer = ''
+                        token_source = ''
+                        flash("The client credentials token in session is invalid.", "warning")
 
             except Exception as cc_error:
                 current_app.logger.error(f"Exception validating client credentials token from session: {str(cc_error)}")
