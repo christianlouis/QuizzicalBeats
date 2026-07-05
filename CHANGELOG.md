@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stopped rendering Spotify, Dropbox, and manual bearer token fragments in profile/import HTML, fixed direct Spotify import form targets, and removed raw Dropbox provider bodies and tracebacks from browser-facing API errors.
 - Stopped the profile Dropbox folder-picker UI from rendering raw provider response or traceback fields if an error payload includes them.
 - Added Dropbox export coverage to ensure unhealthy artifact storage blocks export before Dropbox refresh or upload calls.
+- Sanitized Dropbox helper error payloads so upload, shared-link, and unexpected refresh failures no longer return provider bodies or exception text to callers.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.

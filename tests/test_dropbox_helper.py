@@ -100,3 +100,98 @@ def test_dropbox_refresh_if_needed_transient_failure_keeps_refresh_token(app):
 
         assert result == {'success': False, 'message': 'Failed to refresh token'}
         assert user.dropbox_refresh_token == 'old-dropbox-refresh'
+
+
+def test_dropbox_refresh_if_needed_unexpected_error_returns_safe_message(app):
+    with app.test_request_context('/'):
+        user = _make_dropbox_user()
+        with patch('musicround.helpers.dropbox_helper.refresh_dropbox_token') as mock_refresh:
+            mock_refresh.side_effect = RuntimeError('provider-secret-body old-dropbox-refresh')
+
+            result = dropbox_helper.refresh_dropbox_token_if_needed(user)
+
+        assert result == {
+            'success': False,
+            'message': dropbox_helper.DROPBOX_REFRESH_ERROR_MESSAGE,
+        }
+        assert 'provider-secret-body' not in result['message']
+        assert user.dropbox_refresh_token == 'old-dropbox-refresh'
+
+
+def test_upload_to_dropbox_hides_provider_error_body(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                409,
+                text='provider-secret-body old-dropbox-access traceback',
+            )
+
+            result = dropbox_helper.upload_to_dropbox(
+                'old-dropbox-access',
+                '/rounds/secret.json',
+                '{}',
+                mode='text',
+            )
+
+        assert result == {
+            'success': False,
+            'message': dropbox_helper.DROPBOX_UPLOAD_ERROR_MESSAGE,
+            'status_code': 409,
+        }
+        assert 'provider-secret-body' not in result['message']
+        assert 'old-dropbox-access' not in result['message']
+
+
+def test_upload_to_dropbox_hides_exception_text(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.side_effect = RuntimeError('provider-secret-body old-dropbox-access')
+
+            result = dropbox_helper.upload_to_dropbox(
+                'old-dropbox-access',
+                '/rounds/secret.json',
+                b'{}',
+            )
+
+        assert result == {
+            'success': False,
+            'message': dropbox_helper.DROPBOX_UPLOAD_ERROR_MESSAGE,
+        }
+
+
+def test_create_shared_link_hides_provider_error_body(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                500,
+                text='provider-secret-body old-dropbox-access traceback',
+            )
+
+            result = dropbox_helper.create_shared_link(
+                'old-dropbox-access',
+                '/rounds/secret.pdf',
+            )
+
+        assert result == {
+            'success': False,
+            'message': dropbox_helper.DROPBOX_SHARED_LINK_ERROR_MESSAGE,
+            'status_code': 500,
+        }
+        assert 'provider-secret-body' not in result['message']
+        assert 'old-dropbox-access' not in result['message']
+
+
+def test_create_shared_link_hides_exception_text(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.side_effect = RuntimeError('provider-secret-body old-dropbox-access')
+
+            result = dropbox_helper.create_shared_link(
+                'old-dropbox-access',
+                '/rounds/secret.pdf',
+            )
+
+        assert result == {
+            'success': False,
+            'message': dropbox_helper.DROPBOX_SHARED_LINK_ERROR_MESSAGE,
+        }

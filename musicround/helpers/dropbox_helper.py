@@ -14,6 +14,12 @@ from flask_login import current_user
 class DropboxTokenRevokedError(Exception):
     """Raised when Dropbox reports a permanently invalid refresh token."""
 
+
+DROPBOX_REFRESH_ERROR_MESSAGE = 'Dropbox token refresh failed. Please try again later.'
+DROPBOX_UPLOAD_ERROR_MESSAGE = 'Dropbox upload failed. Please try again or reconnect Dropbox.'
+DROPBOX_SHARED_LINK_ERROR_MESSAGE = 'Dropbox shared-link creation failed. Please try again or reconnect Dropbox.'
+
+
 def get_dropbox_auth_url():
     """Get the authorization URL for Dropbox OAuth flow"""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
@@ -301,7 +307,7 @@ def refresh_dropbox_token_if_needed(user, force=False):
             
     except Exception as e:
         current_app.logger.error(f"Error refreshing Dropbox token: {str(e)}")
-        return {'success': False, 'message': f'Error refreshing token: {str(e)}'}
+        return {'success': False, 'message': DROPBOX_REFRESH_ERROR_MESSAGE}
 
 def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
     """
@@ -368,7 +374,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
             
             return {
                 'success': False, 
-                'message': f"Error uploading file: {response.status_code} - {error_message}",
+                'message': DROPBOX_UPLOAD_ERROR_MESSAGE,
                 'status_code': response.status_code
             }
         
@@ -388,7 +394,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
         current_app.logger.error(traceback.format_exc())
         return {
             'success': False,
-            'message': f"Error uploading file: {str(e)}"
+            'message': DROPBOX_UPLOAD_ERROR_MESSAGE
         }
 
 def create_shared_link(access_token, dropbox_path):
@@ -492,7 +498,7 @@ def create_shared_link(access_token, dropbox_path):
         current_app.logger.error(f"Error creating shared link: {response.status_code} - {error_message}")
         return {
             'success': False,
-            'message': f"Error creating shared link: {response.status_code} - {error_message}",
+            'message': DROPBOX_SHARED_LINK_ERROR_MESSAGE,
             'status_code': response.status_code
         }
         
@@ -502,7 +508,7 @@ def create_shared_link(access_token, dropbox_path):
         current_app.logger.error(traceback.format_exc())
         return {
             'success': False,
-            'message': f"Error creating shared link: {str(e)}"
+            'message': DROPBOX_SHARED_LINK_ERROR_MESSAGE
         }
 
 def get_dropbox_account_info(access_token):
