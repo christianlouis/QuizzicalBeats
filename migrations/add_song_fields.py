@@ -16,7 +16,7 @@ depends_on = None
 
 def upgrade():
     # Add new columns to the song table
-    op.add_column('song', sa.Column('isrc', sa.String(50), nullable=True))
+    op.add_column('song', sa.Column('isrc', sa.String(20), nullable=True))
     op.add_column('song', sa.Column('album_name', sa.String(100), nullable=True))
     op.add_column('song', sa.Column('metadata_sources', sa.String(100), nullable=True))
     op.add_column('song', sa.Column('import_date', sa.DateTime, nullable=True))
@@ -92,6 +92,7 @@ def run_migration():
         
         # Define the new columns to add
         new_columns = [
+            ("isrc", "VARCHAR(20)"),
             ("album_name", "VARCHAR(200)"),
             ("metadata_sources", "VARCHAR(500)"),
             ("import_date", "DATETIME"),
@@ -106,6 +107,13 @@ def run_migration():
                 logger.info(f"Added column: {column_name} {column_type}")
             else:
                 logger.info(f"Column already exists: {column_name}")
+
+        indexes = [row[1] for row in cursor.execute("PRAGMA index_list(song)").fetchall()]
+        if "ix_song_isrc" not in indexes:
+            cursor.execute("CREATE INDEX ix_song_isrc ON song (isrc)")
+            logger.info("Added index: ix_song_isrc")
+        else:
+            logger.info("Index already exists: ix_song_isrc")
         
         # Commit changes and close connection
         conn.commit()

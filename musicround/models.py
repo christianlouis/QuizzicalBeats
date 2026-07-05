@@ -252,7 +252,7 @@ class Round(db.Model):
     name = db.Column(db.String(200), nullable=True)  # Optional name for the round
     round_type = db.Column(db.String(50), nullable=False)
     round_criteria_used = db.Column(db.String(500), nullable=False)
-    songs = db.Column(db.Text, nullable=False)  # JSON string of song IDs in order
+    songs = db.Column(db.Text, nullable=False)  # Comma-separated song IDs in saved order
     genre = db.Column(db.String(100))
     decade = db.Column(db.String(10))
     tag = db.Column(db.String(50))
