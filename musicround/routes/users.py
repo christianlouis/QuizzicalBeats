@@ -989,7 +989,8 @@ def use_refresh_token():
         current_user.id,
     )
     flash(
-        'Spotify tokens are refreshed automatically when needed. Please reconnect Spotify if it is expired.',
+        'Spotify tokens are refreshed automatically when needed. '
+        'Please reconnect Spotify if it is expired.',
         'info',
     )
     return redirect(url_for('users.profile'))
