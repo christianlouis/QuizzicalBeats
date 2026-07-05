@@ -2,10 +2,30 @@
 import pytest
 import json
 import os
+import sqlite3
 import zipfile
 import tempfile
 from unittest.mock import patch, MagicMock
 from musicround.models import SystemSetting
+
+
+def _write_sqlite_db(path, marker='backup'):
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute('CREATE TABLE IF NOT EXISTS smoke (value TEXT)')
+        conn.execute('DELETE FROM smoke')
+        conn.execute('INSERT INTO smoke (value) VALUES (?)', (marker,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _read_sqlite_marker(path):
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute('SELECT value FROM smoke').fetchone()[0]
+    finally:
+        conn.close()
 
 
 class TestListBackups:
@@ -196,16 +216,138 @@ class TestVerifyBackup:
         from musicround.helpers.backup_helper import verify_backup
 
         metadata = {'version': '1.0.0', 'timestamp': '2024-01-01T12:00:00'}
+        db_path = tmp_path / 'song_data.db'
+        _write_sqlite_db(db_path)
         zip_path = tmp_path / 'valid.zip'
         with zipfile.ZipFile(str(zip_path), 'w') as zf:
             zf.writestr('backup_metadata.json', json.dumps(metadata))
-            zf.writestr('song_data.db', b'sqlite3 content')
+            zf.write(db_path, 'song_data.db')
 
         with patch('os.path.exists', side_effect=lambda p: p == str(zip_path) or os.path.exists(p)), \
              patch('os.path.join', return_value=str(zip_path)):
             result = verify_backup('valid.zip')
         assert result['is_valid'] is True
         assert result['status'] == 'success'
+
+    def test_verify_backup_accepts_database_db_filename(self, app, tmp_path):
+        """Test verify_backup accepts legacy database.db archives."""
+        from musicround.helpers.backup_helper import verify_backup
+
+        db_path = tmp_path / 'database.db'
+        _write_sqlite_db(db_path)
+        zip_path = tmp_path / 'legacy_valid.zip'
+        with zipfile.ZipFile(str(zip_path), 'w') as zf:
+            zf.write(db_path, 'database.db')
+
+        with patch('os.path.exists', side_effect=lambda p: p == str(zip_path) or os.path.exists(p)), \
+             patch('os.path.join', return_value=str(zip_path)):
+            result = verify_backup('legacy_valid.zip')
+        assert result['is_valid'] is True
+        assert result['status'] == 'success'
+
+
+class TestRestoreBackup:
+    """Tests for restore_backup function."""
+
+    def test_restore_backup_accepts_database_db_filename(self, app, tmp_path):
+        """Test restore_backup restores a backup whose DB member is database.db."""
+        from musicround.helpers.backup_helper import restore_backup
+
+        backup_dir = tmp_path / 'backups'
+        backup_dir.mkdir()
+        live_db = tmp_path / 'live.db'
+        backup_db = tmp_path / 'database.db'
+        _write_sqlite_db(live_db, marker='live')
+        _write_sqlite_db(backup_db, marker='restored')
+
+        zip_path = backup_dir / 'legacy.zip'
+        with zipfile.ZipFile(str(zip_path), 'w') as zf:
+            zf.write(backup_db, 'database.db')
+            zf.writestr('backup_metadata.json', json.dumps({
+                'includes_mp3s': False,
+                'includes_config': False,
+            }))
+
+        orig_join = os.path.join
+
+        def mock_join(*args):
+            if args == ('/data', 'backups'):
+                return str(backup_dir)
+            return orig_join(*args)
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{live_db}'
+        with patch('os.path.join', side_effect=mock_join):
+            result = restore_backup('legacy.zip')
+
+        assert result['status'] == 'success'
+        assert _read_sqlite_marker(live_db) == 'restored'
+        assert list(tmp_path.glob('live.db.*.bak'))
+
+    def test_restore_backup_rejects_corrupted_database_before_overwrite(self, app, tmp_path):
+        """Test corrupted database archives do not overwrite the live DB."""
+        from musicround.helpers.backup_helper import restore_backup
+
+        backup_dir = tmp_path / 'backups'
+        backup_dir.mkdir()
+        live_db = tmp_path / 'live.db'
+        _write_sqlite_db(live_db, marker='live')
+
+        zip_path = backup_dir / 'bad-db.zip'
+        with zipfile.ZipFile(str(zip_path), 'w') as zf:
+            zf.writestr('song_data.db', b'not a sqlite database')
+            zf.writestr('backup_metadata.json', json.dumps({
+                'includes_mp3s': False,
+                'includes_config': False,
+            }))
+
+        orig_join = os.path.join
+
+        def mock_join(*args):
+            if args == ('/data', 'backups'):
+                return str(backup_dir)
+            return orig_join(*args)
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{live_db}'
+        with patch('os.path.join', side_effect=mock_join):
+            result = restore_backup('bad-db.zip')
+
+        assert result['status'] == 'error'
+        assert 'validation' in result['message'].lower()
+        assert _read_sqlite_marker(live_db) == 'live'
+        assert not list(tmp_path.glob('live.db.*.bak'))
+
+    def test_restore_backup_rejects_zip_slip_member(self, app, tmp_path):
+        """Test restore_backup rejects archive members outside the extraction dir."""
+        from musicround.helpers.backup_helper import restore_backup
+
+        backup_dir = tmp_path / 'backups'
+        backup_dir.mkdir()
+        live_db = tmp_path / 'live.db'
+        backup_db = tmp_path / 'song_data.db'
+        outside_target = tmp_path / 'escape.txt'
+        _write_sqlite_db(live_db, marker='live')
+        _write_sqlite_db(backup_db, marker='restored')
+
+        zip_path = backup_dir / 'zip-slip.zip'
+        with zipfile.ZipFile(str(zip_path), 'w') as zf:
+            zf.write(backup_db, 'song_data.db')
+            zf.writestr('../escape.txt', 'should not be extracted')
+
+        orig_join = os.path.join
+
+        def mock_join(*args):
+            if args == ('/data', 'backups'):
+                return str(backup_dir)
+            return orig_join(*args)
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{live_db}'
+        with patch('os.path.join', side_effect=mock_join):
+            result = restore_backup('zip-slip.zip')
+
+        assert result['status'] == 'error'
+        assert 'unsafe path' in result['message'].lower()
+        assert _read_sqlite_marker(live_db) == 'live'
+        assert not outside_target.exists()
 
 
 class TestScheduleBackup:

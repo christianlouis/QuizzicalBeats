@@ -14,6 +14,53 @@ from flask import current_app
 # Set up logging
 logger = logging.getLogger(__name__)
 
+BACKUP_DATABASE_FILENAMES = ('song_data.db', 'database.db')
+
+
+def _find_database_member(file_list):
+    for filename in BACKUP_DATABASE_FILENAMES:
+        if filename in file_list:
+            return filename
+    return None
+
+
+def _unsafe_zip_member_name(zip_info, target_dir):
+    member_name = zip_info.filename.replace('\\', '/')
+    if member_name.startswith('/') or member_name.startswith('../'):
+        return zip_info.filename
+
+    target_root = os.path.abspath(target_dir)
+    destination = os.path.abspath(os.path.join(target_dir, member_name))
+    if os.path.commonpath([target_root, destination]) != target_root:
+        return zip_info.filename
+
+    return None
+
+
+def _validate_zip_members(zipf, target_dir):
+    for zip_info in zipf.infolist():
+        unsafe_name = _unsafe_zip_member_name(zip_info, target_dir)
+        if unsafe_name:
+            return unsafe_name
+    return None
+
+
+def _validate_sqlite_database(db_path):
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            result = connection.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return False, str(exc)
+
+    if not result or result[0] != "ok":
+        return False, result[0] if result else "No integrity result returned"
+
+    return True, None
+
+
 def create_backup(backup_name=None, include_mp3s=True, include_config=True):
     """
     Create a full system backup including database, MP3s, and configuration.
@@ -263,6 +310,13 @@ def restore_backup(backup_filename):
         with tempfile.TemporaryDirectory() as temp_dir:
             # Extract the backup ZIP
             with zipfile.ZipFile(backup_path, 'r') as zipf:
+                unsafe_member = _validate_zip_members(zipf, temp_dir)
+                if unsafe_member:
+                    logger.error(f"Unsafe path found in backup archive: {unsafe_member}")
+                    return {
+                        "status": "error",
+                        "message": f"Backup archive contains unsafe path: {unsafe_member}"
+                    }
                 zipf.extractall(temp_dir)
             
             # Get backup metadata
@@ -277,10 +331,19 @@ def restore_backup(backup_filename):
                 }
             
             # Restore database
-            db_backup_path = os.path.join(temp_dir, 'song_data.db')
+            db_member_name = _find_database_member(os.listdir(temp_dir))
+            db_backup_path = os.path.join(temp_dir, db_member_name) if db_member_name else None
             db_path = current_app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
             
-            if os.path.exists(db_backup_path):
+            if db_backup_path and os.path.exists(db_backup_path):
+                is_valid_db, validation_error = _validate_sqlite_database(db_backup_path)
+                if not is_valid_db:
+                    logger.error(f"Database file in backup failed validation: {validation_error}")
+                    return {
+                        "status": "error",
+                        "message": "Database file in backup failed validation"
+                    }
+
                 # Create a backup of the current database before overwriting
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 db_current_backup = f"{db_path}.{timestamp}.bak"
@@ -418,7 +481,7 @@ def verify_backup(backup_filename):
                 }
             
             # Check for essential files
-            if 'song_data.db' not in zipf.namelist():
+            if not _find_database_member(zipf.namelist()):
                 return {
                     "status": "error",
                     "message": "Backup file does not contain a database",
@@ -765,7 +828,7 @@ def upload_backup(file):
         with zipfile.ZipFile(save_path, 'r') as zip_ref:
             file_list = zip_ref.namelist()
             # Check for essential files in the backup
-            if 'database.db' not in file_list and 'song_data.db' not in file_list:
+            if not _find_database_member(file_list):
                 # Clean up invalid backup
                 if os.path.exists(save_path):
                     os.remove(save_path)
