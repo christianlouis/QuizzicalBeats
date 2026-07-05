@@ -232,6 +232,13 @@ class TestAuthenticatedRoutes:
         response = client.get('/users/profile')
         assert response.status_code == 200
 
+    def test_legacy_use_refresh_token_redirects_when_logged_in(self, app, client):
+        """Legacy refresh-token endpoint must not return None/500."""
+        self._login(app, client)
+        response = client.post('/users/use-refresh-token')
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith('/users/profile')
+
     def test_api_tags_accessible_when_logged_in(self, app, client):
         """Test that API tags endpoint is accessible when logged in."""
         self._login(app, client)
