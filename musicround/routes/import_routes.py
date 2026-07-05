@@ -5,6 +5,7 @@ import json
 import time
 import random
 from datetime import datetime  # Add datetime import
+from urllib.parse import urlsplit
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
 from flask_login import current_user, login_required
 from musicround.models import Song, db
@@ -15,6 +16,56 @@ from musicround.helpers.spotify_helper import get_spotify_token
 from musicround.services import automation
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
+_DIRECT_SPOTIFY_SESSION_KEYS = (
+    'direct_bearer_token',
+    'direct_spotify_user',
+    'direct_spotify_username',
+)
+
+
+def _clear_direct_spotify_session():
+    """Remove temporary direct Spotify credentials from the browser session."""
+    for key in _DIRECT_SPOTIFY_SESSION_KEYS:
+        session.pop(key, None)
+
+
+def _safe_return_url(value, fallback_endpoint='import.direct_official_playlists'):
+    """Allow only local relative redirects from import forms."""
+    fallback = url_for(fallback_endpoint)
+    if not value:
+        return fallback
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if not value.startswith('/') or value.startswith('//') or '\n' in value or '\r' in value:
+        return fallback
+    return value
+
+
+def _validate_direct_spotify_token(bearer_token):
+    """Validate a manually supplied direct Spotify bearer token."""
+    from musicround.helpers.spotify_direct import SpotifyDirectClient
+
+    client = SpotifyDirectClient(bearer_token=bearer_token)
+    result = client._make_api_request("me")
+    if result and result.get('id'):
+        return result
+    return None
+
+
+def _store_direct_spotify_session(bearer_token, user_info):
+    """Persist direct Spotify token metadata after validation has succeeded."""
+    session['direct_bearer_token'] = bearer_token
+    session['direct_spotify_user'] = user_info['id']
+    session['direct_spotify_username'] = user_info.get('display_name') or user_info['id']
+
+
+def _require_import_diagnostics_admin():
+    """Restrict raw Spotify diagnostic views to admins."""
+    if current_user.is_admin:
+        return None
+    flash('Admin access required for Spotify diagnostics.', 'danger')
+    return redirect(url_for('core.view_songs'))
 
 def fetch_all_user_playlists(oauth_client, token, user_id, limit=50):
     """
@@ -470,8 +521,9 @@ def direct_official_playlists():
 @login_required
 def test_spotify_client():
     """Test route to compare different Spotify client implementations"""
-    if 'access_token' not in session:
-        return redirect(url_for('users.login'))
+    admin_response = _require_import_diagnostics_admin()
+    if admin_response:
+        return admin_response
     
     # Get Spotify account to check from query parameters
     account = request.args.get('account', 'spotify')
@@ -595,8 +647,9 @@ def get_raw_playlists():
     Get raw playlists from Spotify without any pagination logic.
     This helps diagnose issues with the playlist retrieval.
     """
-    if 'access_token' not in session:
-        return redirect(url_for('users.login'))
+    admin_response = _require_import_diagnostics_admin()
+    if admin_response:
+        return admin_response
     
     # Get Spotify account to check
     account = request.args.get('account', 'spotify')
@@ -687,28 +740,20 @@ def direct_spotify_auth():
     success = None
     
     if request.method == 'POST':
-        bearer_token = request.form.get('bearer_token')
+        bearer_token = request.form.get('bearer_token', '').strip()
         if bearer_token:
             try:
-                # Store the token in session
-                session['direct_bearer_token'] = bearer_token
-                
-                # Test the token with a simple request
-                from musicround.helpers.spotify_direct import SpotifyDirectClient
-                client = SpotifyDirectClient(bearer_token=bearer_token)
-                
-                # Try to get current user info as a test
-                result = client._make_api_request("me")
-                
+                result = _validate_direct_spotify_token(bearer_token)
                 if result and 'id' in result:
-                    session['direct_spotify_user'] = result['id']
-                    session['direct_spotify_username'] = result.get('display_name', result['id'])
+                    _store_direct_spotify_session(bearer_token, result)
                     success = f"Successfully authenticated as {session['direct_spotify_username']}"
                 else:
+                    _clear_direct_spotify_session()
                     error = "Token validation failed. Please check the token and try again."
             except Exception as e:
                 current_app.logger.error(f"Error validating bearer token: {e}")
-                error = f"Error: {str(e)}"
+                _clear_direct_spotify_session()
+                error = "Token validation failed. Please check the token and try again."
         else:
             error = "No bearer token provided"
             
@@ -729,42 +774,32 @@ def direct_spotify_auth():
 def update_direct_token():
     """Update the direct bearer token and redirect back to the referring page"""
     # Get return URL from form or default to playlist page
-    return_url = request.form.get('return_url') or url_for('import.direct_official_playlists')
+    return_url = _safe_return_url(request.form.get('return_url'))
     
     # Check if clearing token was requested
     if request.form.get('clear_token'):
-        session.pop('direct_bearer_token', None)
-        session.pop('direct_spotify_user', None)
-        session.pop('direct_spotify_username', None)
+        _clear_direct_spotify_session()
         flash('Bearer token cleared successfully', 'success')
         return redirect(return_url)
     
     # Get bearer token from form
-    bearer_token = request.form.get('bearer_token')
+    bearer_token = request.form.get('bearer_token', '').strip()
     if not bearer_token:
         flash('No bearer token provided', 'warning')
         return redirect(return_url)
     
     try:
-        # Store the token in session
-        session['direct_bearer_token'] = bearer_token
-        
-        # Test the token with a simple request
-        from musicround.helpers.spotify_direct import SpotifyDirectClient
-        client = SpotifyDirectClient(bearer_token=bearer_token)
-        
-        # Try to get current user info as a test
-        result = client._make_api_request("me")
-        
+        result = _validate_direct_spotify_token(bearer_token)
         if result and 'id' in result:
-            session['direct_spotify_user'] = result['id']
-            session['direct_spotify_username'] = result.get('display_name', result['id'])
+            _store_direct_spotify_session(bearer_token, result)
             flash(f'Successfully authenticated as {session["direct_spotify_username"]}', 'success')
         else:
+            _clear_direct_spotify_session()
             flash('Token validation failed. Please check the token and try again.', 'error')
     except Exception as e:
         current_app.logger.error(f"Error validating bearer token: {e}")
-        flash(f'Error validating token: {str(e)}', 'error')
+        _clear_direct_spotify_session()
+        flash('Token validation failed. Please check the token and try again.', 'error')
     
     return redirect(return_url)
 

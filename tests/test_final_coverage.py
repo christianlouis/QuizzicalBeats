@@ -3,14 +3,17 @@ import pytest
 from musicround.models import db, User, Song
 
 
-def _login(app, client, username='final_user', email='final@example.com'):
+def _login(app, client, username='final_user', email='final@example.com', is_admin=False):
     """Helper: create and log in a user."""
     with app.app_context():
         existing = User.query.filter_by(username=username).first()
         if not existing:
-            user = User(username=username, email=email)
+            user = User(username=username, email=email, is_admin=is_admin)
             user.password = 'FinalPass123!'
             db.session.add(user)
+            db.session.commit()
+        elif is_admin and not existing.is_admin:
+            existing.is_admin = True
             db.session.commit()
     client.post('/users/login', data={'username': username, 'password': 'FinalPass123!'})
 
@@ -163,6 +166,123 @@ class TestImportRoutesAccess:
         response = client.post('/import/update-direct-token', data={'bearer_token': 'token'})
         assert response.status_code == 302
         assert 'login' in response.headers['Location'].lower()
+
+    def test_spotify_diagnostic_routes_require_admin(self, app, client):
+        """Spotify diagnostics expose raw provider payloads and should be admin-only."""
+        _login(app, client)
+
+        for path in ('/import/test-spotify-client', '/import/raw-playlists'):
+            response = client.get(path)
+            assert response.status_code == 302
+            assert response.headers['Location'].endswith('/view-songs')
+
+    def test_spotify_client_diagnostic_uses_db_token_without_session_access_token(self, app, client, monkeypatch):
+        """Admins with linked Spotify tokens should not be rejected by stale session checks."""
+        from musicround.routes import import_routes
+
+        captured = {}
+
+        class FakeOAuthSpotify:
+            pass
+
+        def fake_fetch(oauth_client, token, user_id, limit=50):
+            captured['oauth_client'] = oauth_client
+            captured['token'] = token
+            captured['user_id'] = user_id
+            return []
+
+        _login(app, client, username='diag_admin', email='diag@example.com', is_admin=True)
+        with app.app_context():
+            user = User.query.filter_by(username='diag_admin').one()
+            user.spotify_token = 'db-spotify-token'
+            db.session.commit()
+
+        monkeypatch.setattr(import_routes.oauth, 'spotify', FakeOAuthSpotify(), raising=False)
+        monkeypatch.setattr(import_routes, 'fetch_all_user_playlists', fake_fetch)
+
+        response = client.get('/import/test-spotify-client')
+
+        assert response.status_code == 200
+        assert b'Spotify Client Test' in response.data
+        assert captured['token']['access_token'] == 'db-spotify-token'
+        assert captured['user_id'] == 'spotify'
+
+    def test_direct_auth_invalid_token_is_not_stored(self, app, client, monkeypatch):
+        """Invalid direct bearer tokens must not remain in the session."""
+        class FakeClient:
+            def __init__(self, bearer_token):
+                self.bearer_token = bearer_token
+
+            def _make_api_request(self, endpoint):
+                return None
+
+        _login(app, client)
+        monkeypatch.setattr('musicround.helpers.spotify_direct.SpotifyDirectClient', FakeClient)
+
+        response = client.post('/import/direct-auth', data={'bearer_token': 'bad-token'})
+
+        assert response.status_code == 200
+        assert b'Token validation failed' in response.data
+        assert b'bad-token' not in response.data
+        with client.session_transaction() as sess:
+            assert 'direct_bearer_token' not in sess
+            assert 'direct_spotify_user' not in sess
+
+    def test_direct_auth_success_stores_validated_token_metadata(self, app, client, monkeypatch):
+        """Valid direct bearer tokens are stored with the resolved Spotify user."""
+        class FakeClient:
+            def __init__(self, bearer_token):
+                self.bearer_token = bearer_token
+
+            def _make_api_request(self, endpoint):
+                return {'id': 'spotify-user', 'display_name': 'Spotify User'}
+
+        _login(app, client)
+        monkeypatch.setattr('musicround.helpers.spotify_direct.SpotifyDirectClient', FakeClient)
+
+        response = client.post('/import/direct-auth', data={'bearer_token': ' valid-token '})
+
+        assert response.status_code == 200
+        assert b'Successfully authenticated as Spotify User' in response.data
+        with client.session_transaction() as sess:
+            assert sess['direct_bearer_token'] == 'valid-token'
+            assert sess['direct_spotify_user'] == 'spotify-user'
+            assert sess['direct_spotify_username'] == 'Spotify User'
+
+    def test_update_direct_token_rejects_external_return_url(self, app, client, monkeypatch):
+        """Direct-token forms must not become open redirects."""
+        _login(app, client)
+
+        response = client.post(
+            '/import/update-direct-token',
+            data={'clear_token': '1', 'return_url': 'https://evil.example/phish'},
+        )
+
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith('/import/direct-official-playlists')
+
+    def test_update_direct_token_invalid_clears_existing_token(self, app, client, monkeypatch):
+        """Replacing a direct token with an invalid value should clear the old token."""
+        class FakeClient:
+            def __init__(self, bearer_token):
+                self.bearer_token = bearer_token
+
+            def _make_api_request(self, endpoint):
+                return None
+
+        _login(app, client)
+        with client.session_transaction() as sess:
+            sess['direct_bearer_token'] = 'old-token'
+            sess['direct_spotify_user'] = 'old-user'
+
+        monkeypatch.setattr('musicround.helpers.spotify_direct.SpotifyDirectClient', FakeClient)
+
+        response = client.post('/import/update-direct-token', data={'bearer_token': 'bad-token'})
+
+        assert response.status_code == 302
+        with client.session_transaction() as sess:
+            assert 'direct_bearer_token' not in sess
+            assert 'direct_spotify_user' not in sess
 
     def test_import_songs_page_accessible(self, app, client):
         """Test that import official playlists requires Spotify or redirects."""
