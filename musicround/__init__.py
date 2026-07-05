@@ -23,6 +23,26 @@ csrf = CSRFProtect()
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+DEFAULT_DATABASE_DIR = '/data'
+DEFAULT_DATABASE_PATH = os.path.join(DEFAULT_DATABASE_DIR, 'song_data.db')
+
+
+def _configure_database_uri(app):
+    """Use an explicit database URI when configured, otherwise fall back to SQLite."""
+    configured_uri = os.environ.get('SQLALCHEMY_DATABASE_URI') or app.config.get(
+        'SQLALCHEMY_DATABASE_URI'
+    )
+    if configured_uri:
+        app.config['SQLALCHEMY_DATABASE_URI'] = configured_uri
+        return
+
+    if not os.path.exists(DEFAULT_DATABASE_DIR):
+        os.makedirs(DEFAULT_DATABASE_DIR, exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DEFAULT_DATABASE_PATH}'
+    app.logger.warning(
+        "SQLALCHEMY_DATABASE_URI is not configured; using local SQLite fallback at %s",
+        DEFAULT_DATABASE_PATH,
+    )
 
 def run_migrations():
     """
@@ -114,13 +134,6 @@ def create_app(config=None):
             environ['HTTP_X_FORWARDED_PROTO'] = 'https'
             return self.app(environ, start_response)
     
-    # Create data directory if it doesn't exist
-    data_dir = '/data'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir, exist_ok=True)
-      # Set the database file path in the data directory
-    db_path = os.path.join(data_dir, 'song_data.db')
-
     # Configure the app
     app.config.from_object(Config)
     
@@ -131,8 +144,7 @@ def create_app(config=None):
         app.wsgi_app = ForceHTTPSMiddleware(app.wsgi_app)
         app.logger.info("Applying ForceHTTPSMiddleware - all URLs will use HTTPS scheme regardless of headers")
     
-    # Explicitly set the database URI to ensure correct path
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+    _configure_database_uri(app)
     
     # Initialize extensions with app
     db.init_app(app)
