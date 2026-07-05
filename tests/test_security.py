@@ -341,7 +341,10 @@ class TestAuthRateLimiting:
             mock_create.return_value = {'status': 'success', 'message': 'created'}
             response = client.post(
                 '/users/create-backup',
-                headers={'X-Automation-Token': 'stale-token'},
+                headers={
+                    'Accept': 'application/json',
+                    'X-Automation-Token': 'stale-token',
+                },
             )
 
         assert response.status_code == 200
