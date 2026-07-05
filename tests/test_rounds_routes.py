@@ -1,9 +1,9 @@
 """Tests for rounds blueprint routes."""
-import pytest
 import json
+from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
-from musicround.models import db, User, Song, Round
+from musicround.models import db, User, Song, Round, RoundExport
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -65,6 +65,39 @@ class TestRoundsListRoute:
         response = client.get('/rounds/')
         assert response.status_code == 200
         assert b'List Test Round' in response.data
+
+    def test_rounds_list_shows_readiness_and_schedule_status(self, app, client):
+        """Round list should show asset readiness and scheduled delivery state."""
+        _login(app, client)
+        song_id = _create_song(app)
+        ready_round_id = _create_round(app, [song_id], name='Ready Round')
+        partial_round_id = _create_round(app, [song_id], name='Partial Round')
+
+        with app.app_context():
+            ready_round = db.session.get(Round, ready_round_id)
+            ready_round.mp3_generated = True
+            ready_round.pdf_generated = True
+
+            partial_round = db.session.get(Round, partial_round_id)
+            partial_round.mp3_generated = True
+
+            export = RoundExport(
+                round_id=ready_round_id,
+                export_type='email',
+                status='scheduled',
+                destination='quizmaster@example.test',
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+
+        response = client.get('/rounds/')
+
+        assert response.status_code == 200
+        assert b'Assets ready' in response.data
+        assert b'Partial assets' in response.data
+        assert b'Scheduled' in response.data
+        assert b'2026-07-09 17:00' in response.data
 
 
 class TestRoundDetailRoute:

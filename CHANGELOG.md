@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
+- Added readiness and scheduled-delivery badges to the rounds list.
+- Added lazy-loaded preview players in the song library so large libraries do not render one audio element per song.
+- Added visible Spotify reconnect and token-expiry warnings on the profile page.
+- Added import-job retry tracking, dead-letter status, attempt counts, and an idempotent migration for existing databases.
 
 ### Fixed
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Made Deezer track import failures return structured import errors instead of escaping from `ImportHelper.import_item`.
+- Normalized OAuth token expiry storage for both `expires_in` and Authlib-style `expires_at` payloads.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

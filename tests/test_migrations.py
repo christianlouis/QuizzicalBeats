@@ -5,7 +5,7 @@ import sqlite3
 from flask import Flask
 
 from musicround import db
-from musicround.models import Round, Song
+from musicround.models import ImportJobRecord, Round, Song
 
 
 def _legacy_app(database_path):
@@ -79,6 +79,37 @@ def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tm
     expected_columns = {"mp3_generated", "pdf_generated", "last_generated_at"}
     assert expected_columns.issubset(columns)
     assert expected_columns.issubset(Round.__table__.columns.keys())
+
+
+def test_add_import_job_attempts_adds_retry_columns_to_legacy_table(tmp_path):
+    """Legacy import-job tables get retry attempt tracking columns."""
+    database_path = tmp_path / "legacy-import-jobs.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE import_job_record (
+                id INTEGER PRIMARY KEY,
+                service_name VARCHAR(50) NOT NULL,
+                item_type VARCHAR(20) NOT NULL,
+                item_id VARCHAR(255) NOT NULL,
+                priority INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                status VARCHAR(20),
+                error_message TEXT
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_import_job_attempts
+
+        assert add_import_job_attempts.run_migration() is True
+
+    columns = set(_column_names(database_path, "import_job_record"))
+    expected_columns = {"attempt_count", "max_attempts"}
+    assert expected_columns.issubset(columns)
+    assert expected_columns.issubset(ImportJobRecord.__table__.columns.keys())
 
 
 def test_round_songs_comment_matches_storage_behavior():

@@ -313,6 +313,32 @@ class TestImportQueueStatusRoute:
         assert b'broken-playlist' in response.data
         assert b'Preview import failed loudly' in response.data
 
+    def test_queue_status_shows_dead_letter_attempts_for_admin(self, app, client):
+        """Test queue-status renders dead-letter jobs and attempt counts."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='dead-letter-playlist',
+                    user_id=user.id,
+                    status='dead_letter',
+                    error_message='Manual review required',
+                    attempt_count=3,
+                    max_attempts=3,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status')
+
+        assert response.status_code == 200
+        assert b'dead-letter-playlist' in response.data
+        assert b'dead_letter' in response.data
+        assert b'3 / 3' in response.data
+
     def test_queue_status_shows_pending_database_job_for_admin(self, app, client):
         """Test queue-status uses pending ImportJobRecord rows as source of truth."""
         _login_admin(app, client)
@@ -326,6 +352,8 @@ class TestImportQueueStatusRoute:
                     user_id=user.id,
                     status='pending',
                     priority=3,
+                    attempt_count=1,
+                    max_attempts=3,
                 )
             )
             db.session.commit()
@@ -334,6 +362,7 @@ class TestImportQueueStatusRoute:
 
         assert response.status_code == 200
         assert b'pending-playlist' in response.data
+        assert b'1 / 3' in response.data
 
     def test_queue_status_orders_database_jobs_by_priority(self, app, client):
         """Test appended database jobs keep priority order in the status page."""

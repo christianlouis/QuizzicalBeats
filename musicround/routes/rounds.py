@@ -13,7 +13,7 @@ import json
 
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash
 from flask_login import current_user, login_required
-from musicround.models import Round, Song, db
+from musicround.models import Round, RoundExport, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -26,6 +26,66 @@ from musicround.helpers.storage_health import (
 )
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
+
+
+def _rounds_list_statuses(rounds):
+    """Build compact readiness and schedule metadata for the rounds list."""
+    round_ids = [round_.id for round_ in rounds]
+    scheduled_by_round = {}
+    if round_ids:
+        scheduled_exports = (
+            RoundExport.query
+            .filter(
+                RoundExport.round_id.in_(round_ids),
+                RoundExport.export_type == 'email',
+                RoundExport.status == 'scheduled',
+                RoundExport.scheduled_for.isnot(None),
+            )
+            .order_by(RoundExport.scheduled_for.asc(), RoundExport.id.asc())
+            .all()
+        )
+        for export in scheduled_exports:
+            scheduled_by_round.setdefault(export.round_id, export)
+
+    statuses = {}
+    for round_ in rounds:
+        if round_.mp3_generated and round_.pdf_generated:
+            readiness = {
+                'label': 'Assets ready',
+                'color': 'green',
+                'hint': 'MP3 and PDF have been generated.',
+            }
+        elif round_.mp3_generated or round_.pdf_generated:
+            readiness = {
+                'label': 'Partial assets',
+                'color': 'yellow',
+                'hint': 'Only one of MP3 or PDF has been generated.',
+            }
+        else:
+            readiness = {
+                'label': 'Needs assets',
+                'color': 'gray',
+                'hint': 'Generate MP3 and PDF before delivery.',
+            }
+
+        scheduled_export = scheduled_by_round.get(round_.id)
+        if scheduled_export:
+            schedule = {
+                'label': 'Scheduled',
+                'color': 'blue',
+                'scheduled_for': scheduled_export.scheduled_for,
+                'destination': scheduled_export.destination,
+            }
+        else:
+            schedule = {
+                'label': 'Not scheduled',
+                'color': 'gray',
+                'scheduled_for': None,
+                'destination': None,
+            }
+
+        statuses[round_.id] = {'readiness': readiness, 'schedule': schedule}
+    return statuses
 
 
 def _storage_failure_response(round_id, storage_health, status_code=503):
@@ -48,8 +108,8 @@ def _storage_failure_response(round_id, storage_health, status_code=503):
 @login_required
 def rounds_list():
     """Display a list of all rounds"""
-    rounds = Round.query.all()
-    return render_template('rounds.html', rounds=rounds)
+    rounds = Round.query.order_by(Round.created_at.desc(), Round.id.desc()).all()
+    return render_template('rounds.html', rounds=rounds, round_statuses=_rounds_list_statuses(rounds))
 
 @rounds_bp.route('/<int:round_id>')
 @login_required

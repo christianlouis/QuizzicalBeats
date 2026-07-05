@@ -311,6 +311,23 @@ def update_oauth_tokens(user, tokens, auth_provider):
     that omits it doesn't clobber a still-valid refresh token with None.
     """
     from musicround.models import db
+
+    def token_expiry_from_payload():
+        if tokens.get('expires_at') is not None:
+            try:
+                return datetime.fromtimestamp(int(float(tokens.get('expires_at'))))
+            except (TypeError, ValueError, OSError):
+                current_app.logger.warning("Could not parse OAuth expires_at value.")
+                return None
+        if tokens.get('expires_in'):
+            try:
+                return datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
+            except (TypeError, ValueError):
+                current_app.logger.warning("Could not parse OAuth expires_in value.")
+        return None
+
+    token_expiry = token_expiry_from_payload()
+
     if auth_provider == 'google':
         user.google_token = tokens.get('access_token')
         if tokens.get('refresh_token'):
@@ -323,14 +340,14 @@ def update_oauth_tokens(user, tokens, auth_provider):
         user.dropbox_token = tokens.get('access_token')
         if tokens.get('refresh_token'):
             user.dropbox_refresh_token = tokens.get('refresh_token')
-        if tokens.get('expires_in'):
-            user.dropbox_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
+        if token_expiry:
+            user.dropbox_token_expiry = token_expiry
     elif auth_provider == 'spotify':
         user.spotify_token = tokens.get('access_token')
         if tokens.get('refresh_token'):
             user.spotify_refresh_token = tokens.get('refresh_token')
-        if tokens.get('expires_in'):
-            user.spotify_token_expiry = datetime.now() + timedelta(seconds=int(tokens.get('expires_in')))
+        if token_expiry:
+            user.spotify_token_expiry = token_expiry
     user.last_login = datetime.now()
     try:
         db.session.commit()

@@ -643,6 +643,33 @@ def profile():
         spotify_status = 'bearer' 
     elif token_source in ['client_credentials', 'client_credentials_manual'] and session_bearer:
         spotify_status = 'client_credentials'
+
+    spotify_token_notice = None
+    if current_user.spotify_id and not (current_user.spotify_token and current_user.spotify_refresh_token):
+        spotify_token_notice = {
+            'level': 'danger',
+            'title': 'Reconnect required',
+            'message': 'Your Spotify account is linked, but stored credentials are missing.',
+        }
+    elif current_user.spotify_token:
+        if not current_user.spotify_token_expiry:
+            spotify_token_notice = {
+                'level': 'warning',
+                'title': 'Expiry unknown',
+                'message': 'Reconnect Spotify if imports or playlist lookups fail.',
+            }
+        elif current_user.spotify_token_expiry <= now:
+            spotify_token_notice = {
+                'level': 'danger',
+                'title': 'Token expired',
+                'message': 'Reconnect Spotify before importing playlists or refreshing metadata.',
+            }
+        elif current_user.spotify_token_expiry <= now + timedelta(minutes=15):
+            spotify_token_notice = {
+                'level': 'warning',
+                'title': 'Token expires soon',
+                'message': 'Refresh or reconnect Spotify before starting a long import.',
+            }
     
     return render_template(
         'users/profile.html', 
@@ -658,7 +685,8 @@ def profile():
         active_username=active_username,
         active_user_id=active_user_id,
         active_user_image=active_user_image,
-        active_token_expiry=active_token_expiry
+        active_token_expiry=active_token_expiry,
+        spotify_token_notice=spotify_token_notice
     )
 
 @users_bp.route('/edit-profile', methods=['GET', 'POST'])

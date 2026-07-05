@@ -263,6 +263,42 @@ class TestAuthenticatedRoutes:
         assert b'Reconnect required' in response.data
         assert b'Reconnect Dropbox' in response.data
 
+    def test_profile_shows_spotify_reconnect_when_credentials_cleared(self, app, client):
+        """A preserved Spotify id without tokens should become actionable."""
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.is_admin = True
+            user.spotify_id = 'spotify-account-id'
+            user.spotify_token = None
+            user.spotify_refresh_token = None
+            user.spotify_token_expiry = None
+            db.session.commit()
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'Reconnect required' in response.data
+        assert b'Reconnect Spotify' in response.data
+
+    def test_profile_warns_when_spotify_token_expires_soon(self, app, client):
+        """Profile should surface a clear warning for short-lived Spotify tokens."""
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.is_admin = True
+            user.spotify_id = 'spotify-account-id'
+            user.spotify_token = 'access-token'
+            user.spotify_refresh_token = 'refresh-token'
+            user.spotify_token_expiry = datetime.now() + timedelta(minutes=5)
+            db.session.commit()
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'Token expires soon' in response.data
+        assert b'long import' in response.data
+
     def test_legacy_use_refresh_token_redirects_when_logged_in(self, app, client):
         """Legacy refresh-token endpoint must not return None/500."""
         self._login(app, client)

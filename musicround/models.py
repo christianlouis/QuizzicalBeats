@@ -368,13 +368,15 @@ class ImportJobRecord(db.Model):
     item_id = db.Column(db.String(255), nullable=False)
     priority = db.Column(db.Integer, nullable=False, default=10)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    status = db.Column(db.String(20), default='pending')  # pending, processing, completed, failed
+    status = db.Column(db.String(20), default='pending')  # pending, processing, completed, failed, dead_letter
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     started_at = db.Column(db.DateTime)
     completed_at = db.Column(db.DateTime)
     error_message = db.Column(db.Text)
     imported_count = db.Column(db.Integer, default=0)
     skipped_count = db.Column(db.Integer, default=0)
+    attempt_count = db.Column(db.Integer, default=0)
+    max_attempts = db.Column(db.Integer, default=3)
     
     # Relationships
     user = db.relationship('User', backref=db.backref('import_jobs', lazy=True))

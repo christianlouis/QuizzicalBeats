@@ -161,10 +161,24 @@
                         </p>
                     </div>
                 </div>
+
+                {% if spotify_token_notice %}
+                <div class="mb-3 rounded-md border px-3 py-2 text-sm
+                    {% if spotify_token_notice.level == 'danger' %}
+                        bg-red-50 border-red-200 text-red-800
+                    {% else %}
+                        bg-yellow-50 border-yellow-200 text-yellow-800
+                    {% endif %}">
+                    <div class="font-semibold">{{ spotify_token_notice.title }}</div>
+                    <div>{{ spotify_token_notice.message }}</div>
+                </div>
+                {% endif %}
                 
                 <a href="{{ url_for('users.spotify_link') }}" class="inline-block w-full bg-{% if current_user.spotify_token %}gray-200 hover:bg-gray-300{% else %}[#1DB954] hover:bg-[#1ed760]{% endif %} text-{% if current_user.spotify_token %}gray-700{% else %}white{% endif %} text-center py-1 px-3 rounded-md text-sm transition-colors">
                     {% if current_user.spotify_token %}
                         Manage Connection
+                    {% elif current_user.spotify_id %}
+                        Reconnect Spotify
                     {% else %}
                         Connect Spotify
                     {% endif %}

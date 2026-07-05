@@ -98,11 +98,13 @@
 * [x] Add background worker process for playlist imports
 * [x] Support multiple concurrent import jobs
 * [x] Implement priority handling for import jobs
+* [x] Add retry tracking and dead-letter handling for failed import jobs
 
 ### 🎯 Milestone 11: **"Progress Pulse" Release** – Import Status Tracking
 
 * [ ] Real-time progress indicators for active imports
-* [ ] Detailed error reporting with recovery options
+* [x] Detailed error reporting with retry/dead-letter state
+* [ ] Manual recovery actions for failed imports
 * [ ] Email notifications when imports complete
 
 ### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
@@ -158,7 +160,8 @@
 
 * [ ] Email verification for new accounts
 * [ ] Notify users when round generation completes
-* [ ] Notify users of expiring OAuth tokens (Spotify, Dropbox)
+* [x] Notify users of expiring OAuth tokens in the profile UI
+* [ ] Send proactive email notifications for expiring OAuth tokens
 * [ ] Optional weekly usage summary for admins
 * [ ] Push notification support via browser or Telegram
 

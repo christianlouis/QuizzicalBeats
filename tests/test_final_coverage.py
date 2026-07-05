@@ -248,3 +248,23 @@ class TestCoreViewSongs:
         response = client.get('/view-songs')
         assert response.status_code == 200
         assert b'Known Artist XYZ' in response.data
+
+    def test_view_songs_lazy_loads_preview_players(self, app, client):
+        """The song table should not create an audio player for every preview URL."""
+        _login(app, client)
+        with app.app_context():
+            song = Song(
+                title='Preview Test',
+                artist='Preview Artist',
+                genre='Pop',
+                preview_url='https://example.com/preview.mp3',
+            )
+            db.session.add(song)
+            db.session.commit()
+
+        response = client.get('/view-songs')
+
+        assert response.status_code == 200
+        assert b'preview-load-btn' in response.data
+        assert b'data-preview-url="https://example.com/preview.mp3"' in response.data
+        assert b'<audio controls class="preview-audio w-full max-w-[180px]" src=' not in response.data

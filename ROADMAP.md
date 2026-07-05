@@ -114,19 +114,19 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ### 🚀 Upcoming Releases
 
 #### v2.0 - "Import Infrastructure" *(Q1 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Critical  
 **Effort**: 2-3 weeks
 
 **Goals**: Background processing for large imports
 
 **Features**:
-- [ ] Import queue system (Celery/RQ)
-- [ ] Background worker processes
-- [ ] Concurrent import job support
-- [ ] Priority queue handling
-- [ ] Job retry logic
-- [ ] Dead letter queue for failures
+- [x] Database-backed import queue system
+- [x] Background worker processes
+- [x] Concurrent import job support
+- [x] Priority queue handling
+- [x] Job retry logic
+- [x] Dead letter queue for failures
 
 **Success Metrics**:
 - Import 1000+ song playlists without timeout
@@ -134,8 +134,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - 99% job completion rate
 
 **Dependencies**:
-- Redis or RabbitMQ
 - Worker orchestration (Docker Compose)
+- Redis/RQ or Celery remains optional if import volume outgrows the database-backed queue
 
 ---
 
@@ -149,8 +149,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] WebSocket/SSE progress updates
 - [ ] Progress bars for active imports
-- [ ] Detailed error reporting
-- [ ] Recovery options for failed imports
+- [x] Detailed error reporting with retry/dead-letter state
+- [ ] Manual recovery options for failed imports
 - [ ] Email notifications on completion
 - [ ] Import history dashboard
 
@@ -386,7 +386,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Email verification
 - [ ] Round completion notifications
-- [ ] OAuth token expiration warnings
+- [x] OAuth token expiration warnings in the profile UI
+- [ ] Proactive OAuth token expiration emails
 - [ ] Admin usage summaries
 - [ ] Push notifications (browser/Telegram)
 - [ ] Notification preferences

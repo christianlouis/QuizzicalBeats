@@ -408,9 +408,42 @@ class TestImportWorker:
                 worker._process_job(job)
 
             updated = ImportJobRecord.query.get(record_id)
-            assert updated.status == 'failed'
+            assert updated.status == 'pending'
+            assert updated.attempt_count == 1
             assert updated.completed_at is not None
             assert 'Spotify exploded' in updated.error_message
+            assert 'retry queued' in updated.error_message
+
+    def test_process_job_moves_to_dead_letter_after_max_attempts(self, app):
+        """Exhausted import jobs should stop retrying and require manual review."""
+        with app.app_context():
+            user = User(username='deadworker', email='deadworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='bad',
+                user_id=user.id,
+                priority=1,
+                max_attempts=1,
+            )
+            record_id = record.id
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.side_effect = RuntimeError('Spotify exploded')
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record_id)
+            assert updated.status == 'dead_letter'
+            assert updated.attempt_count == 1
+            assert 'manual review required' in updated.error_message
 
     def test_process_job_unknown_user_does_not_import(self, app):
         """Test that jobs for missing users are ignored."""

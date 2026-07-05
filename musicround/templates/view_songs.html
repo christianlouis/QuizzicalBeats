@@ -228,7 +228,13 @@
                                 </td>
                                 <td class="px-4 py-3">
                                     {% if song.preview_url %}
-                                    <audio controls class="preview-audio w-full max-w-[180px]" src="{{ song.preview_url }}" preload="none">Your browser does not support the audio element.</audio>
+                                    <button type="button"
+                                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                                            data-preview-url="{{ song.preview_url|e }}"
+                                            title="Load preview"
+                                            aria-label="Load preview">
+                                        <i class="fas fa-play"></i>
+                                    </button>
                                     {% else %}
                                     <span class="text-gray-400">No preview</span>
                                     {% endif %}
@@ -697,6 +703,43 @@
                 if (currentPage < totalPages) {
                     currentPage++;
                     renderTable();
+                }
+            });
+
+            function escapeHtml(value) {
+                return $('<div>').text(value || '').html();
+            }
+
+            function renderPreviewCell(previewUrl) {
+                if (!previewUrl) {
+                    return '<span class="text-gray-400">No preview</span>';
+                }
+                const escapedUrl = escapeHtml(previewUrl);
+                return `
+                    <button type="button"
+                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                            data-preview-url="${escapedUrl}"
+                            title="Load preview"
+                            aria-label="Load preview">
+                        <i class="fas fa-play"></i>
+                    </button>
+                `;
+            }
+
+            $(document).on('click', '.preview-load-btn', function(e) {
+                e.stopPropagation();
+                const previewUrl = $(this).data('preview-url');
+                if (!previewUrl) {
+                    return;
+                }
+
+                const audio = $('<audio controls class="preview-audio w-full max-w-[180px]" preload="none">Your browser does not support audio.</audio>');
+                audio.attr('src', previewUrl);
+                $(this).replaceWith(audio);
+                const player = audio[0];
+                if (player) {
+                    player.load();
+                    player.play().catch(function() {});
                 }
             });
             
@@ -1235,16 +1278,9 @@
                     
                     row.find('td:nth-child(5)').text(data.year || '');
                     
-                    // Update audio preview
-                    if (data.preview_url) {
-                        const audioCell = row.find('td:nth-child(7)');
-                        if (audioCell.find('audio').length) {
-                            audioCell.find('audio').attr('src', data.preview_url);
-                            audioCell.find('audio')[0].load();
-                        } else {
-                            audioCell.html(`<audio controls class="preview-audio w-full max-w-[180px]" src="${data.preview_url}" preload="none">Your browser does not support audio.</audio>`);
-                        }
-                    }
+                    // Update audio preview without eagerly creating table audio players.
+                    const audioCell = row.find('td:nth-child(7)');
+                    audioCell.html(renderPreviewCell(data.preview_url));
                     
                     // Update delete button song title attribute
                     row.find('.delete-song-btn').data('song-title', data.title);
@@ -1475,4 +1511,3 @@
         });
     </script>
 {% endblock %}
-

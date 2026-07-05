@@ -27,6 +27,8 @@
                         <th class="px-4 py-3 text-left font-semibold">Name</th>
                         <th class="px-4 py-3 text-left font-semibold">Type</th>
                         <th class="px-4 py-3 text-left font-semibold">Criteria</th>
+                        <th class="px-4 py-3 text-left font-semibold">Readiness</th>
+                        <th class="px-4 py-3 text-left font-semibold">Schedule</th>
                         <th class="px-4 py-3 text-left font-semibold">Created</th>
                         <th class="px-4 py-3 text-left font-semibold">Actions</th>
                     </tr>
@@ -47,6 +49,27 @@
                             </span>
                         </td>
                         <td class="px-4 py-3">{{ round.round_criteria_used }}</td>
+                        {% set status = round_statuses.get(round.id) %}
+                        <td class="px-4 py-3">
+                            <span title="{{ status.readiness.hint }}" class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if status.readiness.color == 'green' %}bg-green-100 text-green-800
+                                {% elif status.readiness.color == 'yellow' %}bg-yellow-100 text-yellow-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ status.readiness.label }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if status.schedule.color == 'blue' %}bg-blue-100 text-blue-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ status.schedule.label }}
+                            </span>
+                            {% if status.schedule.scheduled_for %}
+                                <div class="mt-1 text-xs text-gray-500">
+                                    {{ status.schedule.scheduled_for.strftime('%Y-%m-%d %H:%M') }}
+                                </div>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 text-gray-600 text-sm">{{ round.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td class="px-4 py-3">
                             <a href="{{ url_for('rounds.round_detail', round_id=round.id) }}" 
@@ -57,7 +80,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                        <td colspan="8" class="px-4 py-8 text-center text-gray-500">
                             <p class="mb-3">You haven't created any music quizzes yet.</p>
                             <a href="{{ url_for('generate.build_music_round') }}" class="inline-block bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors text-sm">
                                 <i class="fas fa-plus-circle mr-1"></i> Create Your First Quiz

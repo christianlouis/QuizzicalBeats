@@ -827,6 +827,8 @@ def queue_status():
                 'item_id': job.item_id,
                 'user_id': job.user_id,
                 'record_id': job.id,
+                'attempt_count': job.attempt_count or 0,
+                'max_attempts': job.max_attempts or 3,
             })
         queue_snapshot.sort(
             key=lambda job: (
@@ -845,7 +847,8 @@ def queue_status():
         'queue_size': queue_size,
         'active_jobs': len(active_jobs),
         'completed_today': 0,
-        'failed_today': 0
+        'failed_today': 0,
+        'dead_letter_jobs': 0,
     }
     
     # If we have ImportJobRecord, get some stats
@@ -858,6 +861,8 @@ def queue_status():
                     stats['completed_today'] += 1
                 elif job.status == 'failed':
                     stats['failed_today'] += 1
+                elif job.status == 'dead_letter':
+                    stats['dead_letter_jobs'] += 1
 
     return render_template(
         'import_queue_status.html',
