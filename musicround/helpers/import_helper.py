@@ -381,7 +381,7 @@ class ImportHelper:
             }
 
     @staticmethod
-    def import_spotify_track(sp, track_id):
+    def import_spotify_track(sp, track_id, commit=True):
         """Import a single track from Spotify"""
         result = {
             'imported_count': 0,
@@ -555,7 +555,8 @@ class ImportHelper:
                 # Fetch audio features
                 ImportHelper._fetch_audio_features_for_song(sp, song, track_id, token=authlib_token_for_request) # Pass token
                 
-                # Final commit                db.session.commit()
+                if commit:
+                    db.session.commit()
                 result['imported_count'] += 1
                 result['song_id'] = song.id  # Add the song ID to the result
                 current_app.logger.info(f"Successfully imported Spotify track {track_id} as '{song.title}' with ID {song.id}")
@@ -677,7 +678,7 @@ class ImportHelper:
                         continue
                     
                     # Call import_spotify_track. It will handle its own token now.
-                    track_import_result = ImportHelper.import_spotify_track(sp, track_id)
+                    track_import_result = ImportHelper.import_spotify_track(sp, track_id, commit=False)
                     
                     result['imported_count'] += track_import_result.get('imported_count', 0)
                     result['skipped_count'] += track_import_result.get('skipped_count', 0)
@@ -805,7 +806,7 @@ class ImportHelper:
                         result['error_count'] +=1
                         continue
                       # Call import_spotify_track. It will handle its own token.
-                    track_import_result = ImportHelper.import_spotify_track(sp, track_id)
+                    track_import_result = ImportHelper.import_spotify_track(sp, track_id, commit=False)
                     
                     result['imported_count'] += track_import_result.get('imported_count', 0)
                     result['skipped_count'] += track_import_result.get('skipped_count', 0)
