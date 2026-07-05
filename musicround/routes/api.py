@@ -1307,10 +1307,9 @@ def list_root_folders(token, attempted_path=None):
         
         if response.status_code != 200:
             current_app.logger.error(f"Root folder listing failed: {response.status_code}, {response.text}")
-            return jsonify({
-                'error': f'Could not list root folders: {response.status_code}',
-                'attempted_path': attempted_path
-            }), response.status_code
+            payload_json = _safe_dropbox_api_error(response.status_code).get_json()
+            payload_json['attempted_path'] = attempted_path
+            return jsonify(payload_json), response.status_code
         
         # Process the successful response
         result = response.json()
@@ -1338,6 +1337,8 @@ def list_root_folders(token, attempted_path=None):
     except Exception as e:
         current_app.logger.error(f"Error listing root folders: {str(e)}")
         return jsonify({
-            'error': f'Error listing root folders: {str(e)}',
+            'error': 'Unexpected Dropbox root-folder listing error.',
+            'code': 'dropbox_root_folder_list_failed',
+            'message': 'An unexpected error occurred while listing Dropbox root folders',
             'attempted_path': attempted_path
         }), 500

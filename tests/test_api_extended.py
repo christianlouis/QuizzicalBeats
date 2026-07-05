@@ -472,3 +472,43 @@ class TestDropboxFolderApi:
         assert 'raw_response' not in data
         assert 'traceback' not in data
         assert 'provider-create-secret' not in response.get_data(as_text=True)
+
+    def test_root_folder_fallback_hides_raw_provider_body(self, app):
+        """Root-folder fallback should not expose Dropbox provider bodies."""
+        from musicround.routes.api import list_root_folders
+
+        with app.test_request_context('/api/dropbox/folders?path=/Missing'):
+            with patch('musicround.routes.api.requests.post') as mock_post:
+                mock_post.return_value = _make_response(
+                    503,
+                    json_body=None,
+                    text='provider-root-secret old-dropbox-access traceback',
+                )
+
+                response, status = list_root_folders('old-dropbox-access', attempted_path='/Missing')
+
+        data = response.get_json()
+        assert status == 503
+        assert data['code'] == 'dropbox_api_error'
+        assert data['status_code'] == 503
+        assert data['attempted_path'] == '/Missing'
+        assert 'provider-root-secret' not in response.get_data(as_text=True)
+        assert 'traceback' not in data
+
+    def test_root_folder_fallback_unexpected_error_hides_exception(self, app):
+        """Unexpected root-folder fallback failures should remain generic."""
+        from musicround.routes.api import list_root_folders
+
+        with app.test_request_context('/api/dropbox/folders?path=/Missing'):
+            with patch(
+                'musicround.routes.api.requests.post',
+                side_effect=RuntimeError('provider-root-secret old-dropbox-access'),
+            ):
+                response, status = list_root_folders('old-dropbox-access', attempted_path='/Missing')
+
+        data = response.get_json()
+        assert status == 500
+        assert data['code'] == 'dropbox_root_folder_list_failed'
+        assert data['attempted_path'] == '/Missing'
+        assert 'provider-root-secret' not in response.get_data(as_text=True)
+        assert 'old-dropbox-access' not in response.get_data(as_text=True)
