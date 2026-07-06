@@ -481,7 +481,7 @@ def update_round_review(round_id):
     if status == 'approved':
         rnd.approved_at = datetime.utcnow()
         rnd.approved_by_id = current_user.id
-    elif status in {'draft', 'rejected'}:
+    else:
         rnd.approved_at = None
         rnd.approved_by_id = None
     rnd.updated_at = datetime.utcnow()
@@ -532,7 +532,7 @@ def replacement_suggestions(round_id):
             limit=_int_arg('limit', default=8, minimum=1, maximum=25),
             query=request.args.get('query') or None,
             require_deezer_id=_bool_form_value('require_deezer_id', True),
-            verify_previews=_bool_form_value('verify_previews', False),
+            verify_previews=False,
         )
     except AutomationError as exc:
         return _automation_error_response(exc, 400)

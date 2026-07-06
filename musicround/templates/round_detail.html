@@ -96,7 +96,9 @@
             <div id="repair-suggestions" class="hidden mt-4 border border-orange-200 rounded-md p-4 bg-orange-50">
                 <h3 class="font-semibold text-orange-800 mb-3">Replacement Candidates</h3>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                    <label class="sr-only" for="replacement-position">Position</label>
                     <input type="number" id="replacement-position" min="1" max="25" class="px-3 py-2 border border-gray-300 rounded-md" placeholder="Position">
+                    <label class="sr-only" for="replacement-query">Optional artist/title filter</label>
                     <input type="text" id="replacement-query" class="px-3 py-2 border border-gray-300 rounded-md md:col-span-2" placeholder="Optional artist/title filter">
                     <button id="load-replacements-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
                         <i class="fas fa-search mr-2"></i> Find
@@ -966,6 +968,10 @@
                     `).join('');
                     document.querySelectorAll('.replace-song-btn').forEach(button => {
                         button.addEventListener('click', function() {
+                            if (this.disabled) {
+                                return;
+                            }
+                            this.disabled = true;
                             const body = new URLSearchParams({
                                 csrf_token: csrfToken,
                                 position: this.dataset.position,
@@ -987,7 +993,10 @@
                                     showToast('Song replaced; assets are stale and need regeneration', 'success');
                                     window.location.reload();
                                 })
-                                .catch(error => showToast(error.message, 'error'));
+                                .catch(error => {
+                                    this.disabled = false;
+                                    showToast(error.message, 'error');
+                                });
                         });
                     });
                 })

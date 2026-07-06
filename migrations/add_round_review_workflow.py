@@ -67,4 +67,8 @@ def run_migration():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    run_migration()
+    from musicround import create_app
+
+    app = create_app()
+    with app.app_context():
+        run_migration()
