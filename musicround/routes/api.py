@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from flask_login import login_required, current_user
 import requests  # Import requests for direct API calls
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
 from musicround.helpers.logging_utils import redact_authorization_header
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -1072,7 +1073,8 @@ def list_dropbox_folders():
         response = requests.post(
             'https://api.dropboxapi.com/2/files/list_folder',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox API response status: {response.status_code}")
@@ -1106,7 +1108,8 @@ def list_dropbox_folders():
                             response = requests.post(
                                 'https://api.dropboxapi.com/2/files/list_folder',
                                 headers=headers,
-                                json=data
+                                json=data,
+                                timeout=DROPBOX_API_TIMEOUT_SECONDS,
                             )
                             
                             if response.status_code == 200:
@@ -1229,7 +1232,8 @@ def create_dropbox_folder():
         response = requests.post(
             'https://api.dropboxapi.com/2/files/create_folder_v2',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox API response status: {response.status_code}")
@@ -1310,7 +1314,8 @@ def list_root_folders(token, attempted_path=None):
         response = requests.post(
             'https://api.dropboxapi.com/2/files/list_folder',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         if response.status_code != 200:

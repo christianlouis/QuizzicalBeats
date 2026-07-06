@@ -18,6 +18,7 @@ class DropboxTokenRevokedError(Exception):
 DROPBOX_REFRESH_ERROR_MESSAGE = 'Dropbox token refresh failed. Please try again later.'
 DROPBOX_UPLOAD_ERROR_MESSAGE = 'Dropbox upload failed. Please try again or reconnect Dropbox.'
 DROPBOX_SHARED_LINK_ERROR_MESSAGE = 'Dropbox shared-link creation failed. Please try again or reconnect Dropbox.'
+DROPBOX_API_TIMEOUT_SECONDS = 10
 
 
 def get_dropbox_auth_url():
@@ -45,7 +46,15 @@ def exchange_code_for_token(code):
         'redirect_uri': redirect_uri
     }
     
-    response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data)
+    try:
+        response = requests.post(
+            'https://api.dropboxapi.com/oauth2/token',
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        current_app.logger.error(f"Network error exchanging Dropbox code for token: {e}")
+        return None
     
     if response.status_code == 200:
         return response.json()
@@ -66,7 +75,11 @@ def refresh_dropbox_token(refresh_token):
     }
     
     try:
-        response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data, timeout=10)
+        response = requests.post(
+            'https://api.dropboxapi.com/oauth2/token',
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
+        )
     except requests.RequestException as e:
         current_app.logger.error(f"Network error refreshing Dropbox token: {e}")
         return None
@@ -189,7 +202,8 @@ def upload_and_share(file_path, dropbox_path):
             response = requests.post(
                 'https://content.dropboxapi.com/2/files/upload',
                 headers=headers,
-                data=file_data
+                data=file_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             if response.status_code != 200:
@@ -219,7 +233,8 @@ def upload_and_share(file_path, dropbox_path):
         response = requests.post(
             'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         # If the link already exists, we'll get a 409 error with "shared_link_already_exists"
@@ -232,7 +247,8 @@ def upload_and_share(file_path, dropbox_path):
             list_response = requests.post(
                 'https://api.dropboxapi.com/2/sharing/list_shared_links',
                 headers=headers,
-                json=list_data
+                json=list_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             if list_response.status_code == 200:
@@ -354,7 +370,8 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
         response = requests.post(
             'https://content.dropboxapi.com/2/files/upload',
             headers=headers,
-            data=data
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox upload response code: {response.status_code}")
@@ -436,7 +453,8 @@ def create_shared_link(access_token, dropbox_path):
         response = requests.post(
             'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Sharing API response code: {response.status_code}")
@@ -453,7 +471,8 @@ def create_shared_link(access_token, dropbox_path):
             list_response = requests.post(
                 'https://api.dropboxapi.com/2/sharing/list_shared_links',
                 headers=headers,
-                json=list_data
+                json=list_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             current_app.logger.debug(f"List shared links response code: {list_response.status_code}")
@@ -529,7 +548,8 @@ def get_dropbox_account_info(access_token):
         # According to the API documentation, this endpoint requires no request body
         response = requests.post(
             'https://api.dropboxapi.com/2/users/get_current_account',
-            headers=headers
+            headers=headers,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         if response.status_code == 200:

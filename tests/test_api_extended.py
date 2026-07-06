@@ -506,6 +506,9 @@ class TestDropboxFolderApi:
         data = response.get_json()
         assert response.status_code == 200
         assert data['folders'][0]['name'] == 'Rounds'
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args_list[0].kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args_list[1].kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert mock_post.call_args_list[1].kwargs['headers']['Authorization'] == (
             'Bearer new-dropbox-access'
         )
@@ -547,6 +550,8 @@ class TestDropboxFolderApi:
 
         data = response.get_json()
         assert response.status_code == 502
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args.kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert data['code'] == 'dropbox_api_error'
         assert data['status_code'] == 503
         assert 'raw_response' not in data
@@ -570,6 +575,8 @@ class TestDropboxFolderApi:
 
         data = response.get_json()
         assert response.status_code == 403
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args.kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert data['code'] == 'dropbox_api_error'
         assert data['status_code'] == 403
         assert 'details' not in data
@@ -608,6 +615,8 @@ class TestDropboxFolderApi:
 
         data = response.get_json()
         assert response.status_code == 502
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args.kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert data['code'] == 'dropbox_api_error'
         assert data['status_code'] == 502
         assert 'raw_response' not in data
@@ -663,6 +672,8 @@ class TestDropboxFolderApi:
 
         data = response.get_json()
         assert response.status_code == 409
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args.kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert data['code'] == 'dropbox_folder_exists'
         assert data['status_code'] == 409
         assert 'details' not in data
@@ -684,6 +695,8 @@ class TestDropboxFolderApi:
 
         data = response.get_json()
         assert status == 503
+        from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
+        assert mock_post.call_args.kwargs['timeout'] == DROPBOX_API_TIMEOUT_SECONDS
         assert data['code'] == 'dropbox_api_error'
         assert data['status_code'] == 503
         assert data['attempted_path'] == '/Missing'

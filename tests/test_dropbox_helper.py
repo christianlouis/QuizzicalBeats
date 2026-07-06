@@ -45,6 +45,17 @@ def test_refresh_dropbox_token_raises_on_invalid_grant(app):
             assert mock_post.call_args.kwargs['timeout'] == 10
 
 
+def test_exchange_code_for_token_uses_timeout_and_hides_network_errors(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.side_effect = dropbox_helper.requests.Timeout('provider timeout old-dropbox-code')
+
+            result = dropbox_helper.exchange_code_for_token('old-dropbox-code')
+
+        assert result is None
+        assert mock_post.call_args.kwargs['timeout'] == dropbox_helper.DROPBOX_API_TIMEOUT_SECONDS
+
+
 def test_refresh_dropbox_token_keeps_transient_failures_retryable(app):
     with app.app_context():
         with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
@@ -138,6 +149,7 @@ def test_upload_to_dropbox_hides_provider_error_body(app):
             'message': dropbox_helper.DROPBOX_UPLOAD_ERROR_MESSAGE,
             'status_code': 409,
         }
+        assert mock_post.call_args.kwargs['timeout'] == dropbox_helper.DROPBOX_API_TIMEOUT_SECONDS
         assert 'provider-secret-body' not in result['message']
         assert 'old-dropbox-access' not in result['message']
 
@@ -177,6 +189,7 @@ def test_create_shared_link_hides_provider_error_body(app):
             'message': dropbox_helper.DROPBOX_SHARED_LINK_ERROR_MESSAGE,
             'status_code': 500,
         }
+        assert mock_post.call_args.kwargs['timeout'] == dropbox_helper.DROPBOX_API_TIMEOUT_SECONDS
         assert 'provider-secret-body' not in result['message']
         assert 'old-dropbox-access' not in result['message']
 
@@ -195,3 +208,14 @@ def test_create_shared_link_hides_exception_text(app):
             'success': False,
             'message': dropbox_helper.DROPBOX_SHARED_LINK_ERROR_MESSAGE,
         }
+
+
+def test_get_dropbox_account_info_uses_timeout(app):
+    with app.app_context():
+        with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:
+            mock_post.return_value = _make_response(200, {'account_id': 'dbid:123'})
+
+            result = dropbox_helper.get_dropbox_account_info('old-dropbox-access')
+
+        assert result == {'account_id': 'dbid:123'}
+        assert mock_post.call_args.kwargs['timeout'] == dropbox_helper.DROPBOX_API_TIMEOUT_SECONDS
