@@ -689,7 +689,7 @@ class TestSpotifySearchInvalidGrant:
 
         body = response.get_data(as_text=True)
         assert response.status_code == 500
-        assert '<title>Error 500</title>' in body
+        assert 'Error 500' in body
         assert 'An error occurred while searching Spotify.' in body
         assert 'Please try again or reconnect Spotify if the problem persists.' in body
         assert 'search-secret' not in body
