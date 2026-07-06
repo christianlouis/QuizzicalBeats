@@ -269,14 +269,20 @@ class Round(db.Model):
     mp3_generated = db.Column(db.Boolean, default=False)  # Track if MP3 has been generated
     pdf_generated = db.Column(db.Boolean, default=False)  # Track if PDF has been generated
     last_generated_at = db.Column(db.DateTime, nullable=True)  # When files were last generated
+    review_status = db.Column(db.String(20), default='draft', nullable=False)
+    review_notes = db.Column(db.Text, nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    approved_by_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
 
     __table_args__ = (
         db.Index('idx_round_created_at', 'created_at'),
         db.Index('idx_round_generation_status', 'mp3_generated', 'pdf_generated'),
         db.Index('idx_round_owner_created', 'user_id', 'created_at'),
+        db.Index('idx_round_review_status', 'review_status', 'approved_at'),
     )
 
     owner = db.relationship('User', backref=db.backref('rounds', lazy='dynamic'), foreign_keys=[user_id])
+    approved_by = db.relationship('User', foreign_keys=[approved_by_id])
 
     def __repr__(self):
         return (

@@ -25,6 +25,8 @@ from musicround.helpers.storage_health import (
     round_mp3_dir,
     round_pdf_dir,
 )
+from musicround.services import automation
+from musicround.services.automation import AutomationError
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
@@ -239,6 +241,21 @@ def _storage_failure_response(round_id, storage_health, status_code=503):
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 
+def _automation_error_response(error, status_code=400):
+    details = getattr(error, 'details', None)
+    payload = {'success': False, 'error': str(error)}
+    if details:
+        payload['details'] = details
+    return jsonify(payload), status_code
+
+
+def _bool_form_value(name, default=False):
+    raw_value = request.form.get(name, request.args.get(name))
+    if raw_value is None:
+        return default
+    return str(raw_value).lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _round_generation_failure_response(round_id, log_message, user_message, status_code=500):
     """Return safe render-generation errors while preserving details in logs."""
     current_app.logger.error(log_message)
@@ -295,6 +312,75 @@ def rounds_list():
         round_statuses=_rounds_list_statuses(rounds),
     )
 
+
+@rounds_bp.route('/calendar')
+@login_required
+def rounds_calendar():
+    """Show scheduled round email exports as a lightweight quiz calendar."""
+    visible_round_ids = _visible_rounds_query().with_entities(Round.id)
+    exports = (
+        RoundExport.query.filter(
+            RoundExport.round_id.in_(visible_round_ids),
+            RoundExport.export_type == 'email',
+            RoundExport.scheduled_for.isnot(None),
+        )
+        .order_by(RoundExport.scheduled_for.asc(), RoundExport.id.asc())
+        .limit(100)
+        .all()
+    )
+    return render_template('round_calendar.html', exports=exports)
+
+
+@rounds_bp.route('/analytics')
+@login_required
+def rounds_analytics():
+    """Show catalog and music-round fatigue signals for planning."""
+    months = _int_arg('months', default=6, minimum=1, maximum=36)
+    limit = _int_arg('limit', default=20, minimum=1, maximum=100)
+    try:
+        summary = automation.round_analytics_summary(months=months, limit=limit)
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+        summary = None
+    return render_template(
+        'round_analytics.html',
+        summary=summary,
+        filters={'months': months, 'limit': limit},
+    )
+
+
+@rounds_bp.route('/planning')
+@login_required
+def round_planning():
+    """Render an agent-readable planning brief for the current quizmaster."""
+    months = _int_arg('months', default=3, minimum=1, maximum=24)
+    desired_song_count = _int_arg('desired_song_count', default=8, minimum=1, maximum=25)
+    theme = request.args.get('theme') or None
+    quiz_date = request.args.get('quiz_date') or None
+    brief = None
+    if theme or quiz_date:
+        try:
+            brief = automation.round_planning_brief(
+                user_id=current_user.id,
+                quiz_date=quiz_date,
+                theme=theme,
+                desired_song_count=desired_song_count,
+                months=months,
+            )
+        except AutomationError as exc:
+            flash(str(exc), 'error')
+    return render_template(
+        'round_planning.html',
+        brief=brief,
+        filters={
+            'theme': theme or '',
+            'quiz_date': quiz_date or '',
+            'months': months,
+            'desired_song_count': desired_song_count,
+        },
+    )
+
+
 @rounds_bp.route('/<int:round_id>')
 @login_required
 def round_detail(round_id):
@@ -318,7 +404,28 @@ def round_detail(round_id):
         except Exception as e:  # Catch a broader range of exceptions, including MissingTokenError
             current_app.logger.warning(f"Could not get Spotify user info using Authlib: {str(e)}")
         
-        return render_template('round_detail.html', round=rnd, songs=ordered_songs, user_info=user_info, email_error=email_error)
+        audio_scripts = (
+            RoundAudioScript.query.filter_by(round_id=rnd.id)
+            .order_by(RoundAudioScript.created_at.desc(), RoundAudioScript.id.desc())
+            .limit(25)
+            .all()
+        )
+        scheduled_exports = (
+            RoundExport.query.filter_by(round_id=rnd.id, export_type='email')
+            .order_by(RoundExport.timestamp.desc(), RoundExport.id.desc())
+            .limit(10)
+            .all()
+        )
+
+        return render_template(
+            'round_detail.html',
+            round=rnd,
+            songs=ordered_songs,
+            user_info=user_info,
+            email_error=email_error,
+            audio_scripts=audio_scripts,
+            scheduled_exports=scheduled_exports,
+        )
     else:
         return 'Round not found'
 
@@ -356,6 +463,164 @@ def update_round_songs(round_id):
     else:
         flash('No song order provided', 'error')
         
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/review', methods=['POST'])
+@login_required
+def update_round_review(round_id):
+    """Update human review state for a round."""
+    rnd = _get_editable_round_or_404(round_id)
+    status = (request.form.get('review_status') or '').strip().lower()
+    notes = (request.form.get('review_notes') or '').strip() or None
+    if status not in {'draft', 'reviewed', 'approved', 'rejected'}:
+        return _automation_error_response(AutomationError('Invalid review status.'), 400)
+
+    rnd.review_status = status
+    rnd.review_notes = notes
+    if status == 'approved':
+        rnd.approved_at = datetime.utcnow()
+        rnd.approved_by_id = current_user.id
+    elif status in {'draft', 'rejected'}:
+        rnd.approved_at = None
+        rnd.approved_by_id = None
+    rnd.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({
+            'success': True,
+            'review_status': rnd.review_status,
+            'approved_at': rnd.approved_at.isoformat() if rnd.approved_at else None,
+        })
+    flash('Round review status updated', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/quality', methods=['GET'])
+@login_required
+def round_quality(round_id):
+    """Return package quality and repair guidance for a round."""
+    _get_visible_round_or_404(round_id)
+    try:
+        result = automation.round_repair_report(
+            round_id=round_id,
+            user_id=current_user.id,
+            expected_song_count=_int_arg('expected_song_count', default=8, minimum=1, maximum=25),
+            min_preview_seconds=float(request.args.get('min_preview_seconds', 20.0)),
+            max_preview_seconds=float(request.args.get('max_preview_seconds', 35.0)),
+        )
+    except ValueError:
+        return _automation_error_response(AutomationError('Preview duration values must be numeric.'), 400)
+    except AutomationError as exc:
+        return _automation_error_response(exc, 400)
+    return jsonify({'success': True, **result})
+
+
+@rounds_bp.route('/<int:round_id>/replacement-suggestions', methods=['GET'])
+@login_required
+def replacement_suggestions(round_id):
+    """Return replacement candidates for one round position."""
+    _get_visible_round_or_404(round_id)
+    position = _int_arg('position', default=None, minimum=1, maximum=25)
+    if position is None:
+        return _automation_error_response(AutomationError('position is required.'), 400)
+    try:
+        result = automation.suggest_replacement_songs(
+            round_id=round_id,
+            position=position,
+            limit=_int_arg('limit', default=8, minimum=1, maximum=25),
+            query=request.args.get('query') or None,
+            require_deezer_id=_bool_form_value('require_deezer_id', True),
+            verify_previews=_bool_form_value('verify_previews', False),
+        )
+    except AutomationError as exc:
+        return _automation_error_response(exc, 400)
+    return jsonify({'success': True, **result})
+
+
+@rounds_bp.route('/<int:round_id>/replace-song', methods=['POST'])
+@login_required
+def replace_round_song(round_id):
+    """Replace one song in a round from a reviewed suggestion."""
+    _get_editable_round_or_404(round_id)
+    position = request.form.get('position')
+    replacement_song_id = request.form.get('replacement_song_id')
+    try:
+        result = automation.replace_round_song(
+            round_id=round_id,
+            position=int(position),
+            replacement_song_id=int(replacement_song_id),
+            inspect_after=_bool_form_value('inspect_after', False),
+            user_id=current_user.id,
+        )
+    except (TypeError, ValueError):
+        return _automation_error_response(
+            AutomationError('position and replacement_song_id are required integers.'),
+            400,
+        )
+    except AutomationError as exc:
+        return _automation_error_response(exc, 400)
+    return jsonify({'success': True, **result})
+
+
+@rounds_bp.route('/<int:round_id>/draft-audio-scripts', methods=['POST'])
+@login_required
+def draft_audio_scripts(round_id):
+    """Draft and persist intro/replay/outro scripts for review."""
+    _get_editable_round_or_404(round_id)
+    try:
+        automation.draft_round_audio_scripts(
+            round_id=round_id,
+            user_id=current_user.id,
+            quiz_date=request.form.get('quiz_date') or None,
+            theme=request.form.get('theme') or None,
+            tone=request.form.get('tone') or 'warm, concise, lightly humorous',
+            persist=True,
+        )
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash('Audio script drafts created', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/draft-track-hints', methods=['POST'])
+@login_required
+def draft_track_hints(round_id):
+    """Draft and persist per-track hint scripts for review."""
+    _get_editable_round_or_404(round_id)
+    try:
+        automation.draft_round_track_hints(
+            round_id=round_id,
+            user_id=current_user.id,
+            tone=request.form.get('tone') or 'concise, playful, no title or artist spoilers',
+            persist=True,
+        )
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash('Track hint drafts created', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/audio-scripts/<int:script_id>', methods=['POST'])
+@login_required
+def update_audio_script(round_id, script_id):
+    """Review or edit one stored audio script."""
+    _get_editable_round_or_404(round_id)
+    script = RoundAudioScript.query.filter_by(id=script_id, round_id=round_id).first_or_404()
+    try:
+        automation.update_round_audio_script(
+            script.id,
+            text=request.form.get('text'),
+            status=request.form.get('status') or None,
+            selected=_bool_form_value('selected', False),
+        )
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash('Audio script updated', 'success')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 @rounds_bp.route('/round/<int:round_id>/mp3', methods=['POST'])

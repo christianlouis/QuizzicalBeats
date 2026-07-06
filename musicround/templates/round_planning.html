@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+
+{% block title %}Round Planning Brief - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-2">Round Planning Brief</h1>
+    <p class="text-gray-600 mb-6">Agent-readable context for building a themed, robust music round.</p>
+
+    <form method="get" class="bg-white shadow-md rounded-lg p-6 grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="theme">Theme</label>
+            <input id="theme" name="theme" type="text" value="{{ filters.theme }}" class="px-3 py-2 border border-gray-300 rounded-md" placeholder="festival headliners">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="quiz_date">Quiz Date</label>
+            <input id="quiz_date" name="quiz_date" type="datetime-local" value="{{ filters.quiz_date }}" class="px-3 py-2 border border-gray-300 rounded-md">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="desired_song_count">Songs</label>
+            <input id="desired_song_count" name="desired_song_count" type="number" min="1" max="25" value="{{ filters.desired_song_count }}" class="px-3 py-2 border border-gray-300 rounded-md">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="months">History Window</label>
+            <input id="months" name="months" type="number" min="1" max="24" value="{{ filters.months }}" class="px-3 py-2 border border-gray-300 rounded-md">
+        </div>
+        <div class="md:col-span-2">
+            <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md transition-colors font-semibold">
+                <i class="fas fa-wand-magic-sparkles mr-2"></i> Build Brief
+            </button>
+        </div>
+    </form>
+
+    {% if brief %}
+    <div class="bg-white shadow-md rounded-lg p-6 space-y-5">
+        <div>
+            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-2">{{ brief.theme or 'Music round' }}</h2>
+            <p class="text-gray-700">{{ brief.agent_prompt }}</p>
+        </div>
+        <div>
+            <h3 class="font-semibold text-navy-800 mb-2">Constraints</h3>
+            <ul class="list-disc pl-5 text-gray-700">
+                {% for item in brief.constraints %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% if brief.date_notes %}
+        <div>
+            <h3 class="font-semibold text-navy-800 mb-2">Date Notes</h3>
+            <ul class="list-disc pl-5 text-gray-700">
+                {% for item in brief.date_notes %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <div>
+            <h3 class="font-semibold text-navy-800 mb-2">Recent Song Warnings</h3>
+            {% set warnings = brief.quizmaster_context.recent_usage.selected_song_warnings %}
+            {% if warnings %}
+            <ul class="list-disc pl-5 text-gray-700">
+                {% for warning in warnings %}
+                <li>{{ warning.warning }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-gray-500">No selected-song warnings in this brief.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

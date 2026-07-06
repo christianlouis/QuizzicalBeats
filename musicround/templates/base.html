@@ -145,6 +145,16 @@
                                 <li>
                                     <a class="text-white hover:text-teal-500" href="{{ url_for('rounds.rounds_list') }}">View Rounds</a>
                                 </li>
+                                <li class="group relative">
+                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                        Round Ops <i class="fas fa-chevron-down ml-1"></i>
+                                    </button>
+                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.rounds_calendar') }}">Calendar</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.rounds_analytics') }}">Analytics</a></li>
+                                        <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.round_planning') }}">Planning Brief</a></li>
+                                    </ul>
+                                </li>
                                 {% if current_user.is_admin %}
                                 <li class="group relative">
                                     <button class="peer flex items-center text-white hover:text-teal-500">
@@ -244,4 +254,3 @@
     {% endblock %}
 </body>
 </html>
-

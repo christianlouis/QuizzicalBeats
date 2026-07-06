@@ -52,6 +52,19 @@
                 </p>
                 <p class="text-gray-700 mt-1"><span class="font-semibold text-teal-700">Criteria:</span> {{ round.round_criteria_used }}</p>
                 <p class="text-gray-700 mt-1"><span class="font-semibold text-teal-700">Created:</span> {{ round.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                <p class="text-gray-700 mt-1">
+                    <span class="font-semibold text-teal-700">Review:</span>
+                    <span class="px-2 py-1 text-xs font-semibold rounded-full
+                        {% if round.review_status == 'approved' %}bg-green-100 text-green-800
+                        {% elif round.review_status == 'reviewed' %}bg-blue-100 text-blue-800
+                        {% elif round.review_status == 'rejected' %}bg-red-100 text-red-800
+                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                        {{ round.review_status|capitalize }}
+                    </span>
+                    {% if round.approved_at %}
+                    <span class="ml-2 text-sm text-gray-500">{{ round.approved_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% endif %}
+                </p>
             </div>
             
             <div class="self-end mt-4 md:mt-0">
@@ -63,6 +76,69 @@
             <div class="text-center px-6 py-2 rounded-full bg-navy-100 text-navy-800 font-semibold inline-block">
                 <span>{{ songs|length }} Songs</span>
             </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div class="bg-white shadow-md rounded-lg p-6 lg:col-span-2">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-navy-800 font-montserrat">Quality Gate</h2>
+                    <p class="text-sm text-gray-600">Package check before scheduling or email delivery.</p>
+                </div>
+                <button id="inspect-round-btn" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                    <i class="fas fa-stethoscope mr-2"></i> Inspect Round
+                </button>
+            </div>
+            <div id="quality-result" class="border border-gray-200 rounded-md p-4 bg-gray-50 text-sm text-gray-700">
+                <p>Run the package check to see preview, MP3, PDF, and duration readiness.</p>
+            </div>
+            <div id="repair-suggestions" class="hidden mt-4 border border-orange-200 rounded-md p-4 bg-orange-50">
+                <h3 class="font-semibold text-orange-800 mb-3">Replacement Candidates</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                    <input type="number" id="replacement-position" min="1" max="25" class="px-3 py-2 border border-gray-300 rounded-md" placeholder="Position">
+                    <input type="text" id="replacement-query" class="px-3 py-2 border border-gray-300 rounded-md md:col-span-2" placeholder="Optional artist/title filter">
+                    <button id="load-replacements-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                        <i class="fas fa-search mr-2"></i> Find
+                    </button>
+                </div>
+                <div id="replacement-list" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Review State</h2>
+            <form method="POST" action="{{ url_for('rounds.update_round_review', round_id=round.id) }}" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="review_status">Status</label>
+                    <select id="review_status" name="review_status" class="px-3 py-2 border border-gray-300 rounded-md">
+                        {% for status in ['draft', 'reviewed', 'approved', 'rejected'] %}
+                        <option value="{{ status }}" {% if round.review_status == status %}selected{% endif %}>{{ status|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="review_notes">Notes</label>
+                    <textarea id="review_notes" name="review_notes" rows="4" class="px-3 py-2 border border-gray-300 rounded-md">{{ round.review_notes or '' }}</textarea>
+                </div>
+                <button type="submit" class="w-full bg-navy-700 hover:bg-navy-800 text-white py-2 px-4 rounded transition-colors font-semibold">
+                    <i class="fas fa-check mr-2"></i> Save Review
+                </button>
+            </form>
+            {% if scheduled_exports %}
+            <div class="mt-6">
+                <h3 class="font-semibold text-navy-800 mb-2">Email History</h3>
+                <div class="space-y-2">
+                    {% for export in scheduled_exports %}
+                    <div class="text-xs border border-gray-200 rounded p-2">
+                        <div class="font-semibold">{{ export.status|capitalize }}{% if export.scheduled_for %} for {{ export.scheduled_for.strftime('%Y-%m-%d %H:%M') }}{% endif %}</div>
+                        <div class="text-gray-500">{{ export.destination or 'No destination' }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -171,6 +247,61 @@
             <button id="export-dropbox-btn" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
                 <i class="fab fa-dropbox mr-2"></i> Export to Dropbox
             </button>
+        </div>
+    </div>
+
+    <div class="bg-white shadow-md rounded-lg p-6 mb-8">
+        <div class="flex flex-col lg:flex-row lg:justify-between gap-6">
+            <div class="lg:w-1/2">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Announcements & Hints</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <form method="POST" action="{{ url_for('rounds.draft_audio_scripts', round_id=round.id) }}" class="border border-gray-200 rounded-md p-4 space-y-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <h3 class="font-semibold text-navy-800">Intro, Replay, Outro</h3>
+                        <input type="text" name="theme" class="px-3 py-2 border border-gray-300 rounded-md" placeholder="Theme" value="{{ round.name or '' }}">
+                        <input type="datetime-local" name="quiz_date" class="px-3 py-2 border border-gray-300 rounded-md">
+                        <input type="text" name="tone" class="px-3 py-2 border border-gray-300 rounded-md" value="warm, concise, lightly humorous">
+                        <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors">
+                            <i class="fas fa-pen-nib mr-2"></i> Draft Scripts
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('rounds.draft_track_hints', round_id=round.id) }}" class="border border-gray-200 rounded-md p-4 space-y-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <h3 class="font-semibold text-navy-800">Per-Track Hints</h3>
+                        <textarea name="tone" rows="4" class="px-3 py-2 border border-gray-300 rounded-md">concise, playful, no title or artist spoilers</textarea>
+                        <button type="submit" class="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
+                            <i class="fas fa-lightbulb mr-2"></i> Draft Hints
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="lg:w-1/2">
+                <h3 class="font-semibold text-navy-800 mb-3">Script Review Queue</h3>
+                <div class="space-y-3 max-h-96 overflow-y-auto pr-2">
+                    {% for script in audio_scripts %}
+                    <form method="POST" action="{{ url_for('rounds.update_audio_script', round_id=round.id, script_id=script.id) }}" class="border border-gray-200 rounded-md p-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <span class="font-semibold text-sm">{{ script.script_type|replace('_', ' ')|title }}{% if script.cue_position %} #{{ script.cue_position }}{% endif %}</span>
+                            <select name="status" class="text-xs px-2 py-1 border border-gray-300 rounded-md w-auto">
+                                {% for status in ['draft', 'reviewed', 'approved', 'rejected', 'used'] %}
+                                <option value="{{ status }}" {% if script.status == status %}selected{% endif %}>{{ status|capitalize }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <textarea name="text" rows="3" class="text-sm px-3 py-2 border border-gray-300 rounded-md">{{ script.text }}</textarea>
+                        <label class="mt-2 flex items-center text-sm text-gray-700">
+                            <input type="checkbox" name="selected" class="mr-2" {% if script.selected %}checked{% endif %}> Selected for playback
+                        </label>
+                        <button type="submit" class="mt-2 bg-navy-700 hover:bg-navy-800 text-white py-1.5 px-3 rounded text-sm transition-colors">
+                            Save Script
+                        </button>
+                    </form>
+                    {% else %}
+                    <p class="text-sm text-gray-500">No script drafts yet.</p>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
     </div>
 
@@ -502,6 +633,7 @@
         const toastMessage = document.getElementById('toast-message');
         const toastIcon = document.getElementById('toast-icon');
         const toastCloseBtn = document.getElementById('toast-close-btn');
+        const csrfToken = '{{ csrf_token() }}';
         
         // Toast notification functions
         function showToast(message, type = 'success') {
@@ -534,6 +666,18 @@
         
         function hideToast() {
             toast.style.transform = 'translateX(100%)';
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, function(character) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[character];
+            });
         }
         
         // Close toast button event
@@ -728,6 +872,134 @@
             editTitleForm.classList.add('hidden');
             quizTitleDisplay.classList.remove('hidden');
         });
+
+        const inspectRoundBtn = document.getElementById('inspect-round-btn');
+        const qualityResult = document.getElementById('quality-result');
+        const repairSuggestions = document.getElementById('repair-suggestions');
+        const replacementPosition = document.getElementById('replacement-position');
+        const replacementQuery = document.getElementById('replacement-query');
+        const loadReplacementsBtn = document.getElementById('load-replacements-btn');
+        const replacementList = document.getElementById('replacement-list');
+
+        function renderQualityReport(data) {
+            const report = data.report || {};
+            const quality = data.quality || {};
+            const badgeClass = report.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+            const blockers = (report.blockers || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+            const actions = (report.actions || []).map(item => `<li>${escapeHtml(item.message)}</li>`).join('');
+            const failed = (report.failed_positions || []).map(item => {
+                const position = Number(item.position) || '';
+                return `<button type="button" class="failed-position bg-orange-100 hover:bg-orange-200 text-orange-800 px-2 py-1 rounded text-xs mr-2 mb-2" data-position="${position}">Position ${position}</button>`;
+            }).join('');
+            qualityResult.innerHTML = `
+                <div class="flex flex-wrap items-center gap-3 mb-3">
+                    <span class="px-2 py-1 text-xs font-semibold rounded-full ${badgeClass}">${escapeHtml(quality.status || report.status || 'unknown')}</span>
+                    <span>${escapeHtml(report.summary || '')}</span>
+                </div>
+                ${blockers ? `<div class="mb-3"><h3 class="font-semibold text-red-800">Blockers</h3><ul class="list-disc pl-5">${blockers}</ul></div>` : ''}
+                ${actions ? `<div class="mb-3"><h3 class="font-semibold text-navy-800">Repair Actions</h3><ul class="list-disc pl-5">${actions}</ul></div>` : ''}
+                ${failed ? `<div><h3 class="font-semibold text-orange-800 mb-2">Failed Positions</h3>${failed}</div>` : ''}
+            `;
+            if ((report.failed_positions || []).length > 0) {
+                repairSuggestions.classList.remove('hidden');
+            }
+            document.querySelectorAll('.failed-position').forEach(button => {
+                button.addEventListener('click', function() {
+                    replacementPosition.value = this.dataset.position;
+                    loadReplacements();
+                });
+            });
+        }
+
+        if (inspectRoundBtn) {
+            inspectRoundBtn.addEventListener('click', function() {
+                qualityResult.innerHTML = '<p><i class="fas fa-spinner fa-spin mr-2"></i>Running package check...</p>';
+                fetch('{{ url_for("rounds.round_quality", round_id=round.id) }}')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data.success) {
+                            throw new Error(data.error || 'Quality check failed');
+                        }
+                        renderQualityReport(data);
+                        showToast(data.report && data.report.ok ? 'Round passed quality gate' : 'Round needs repair', data.report && data.report.ok ? 'success' : 'warning');
+                    })
+                    .catch(error => {
+                        qualityResult.innerHTML = `<p class="text-red-700">${error.message}</p>`;
+                        showToast(error.message, 'error');
+                    });
+            });
+        }
+
+        function loadReplacements() {
+            const position = replacementPosition.value;
+            if (!position) {
+                showToast('Choose a failed position first', 'warning');
+                return;
+            }
+            replacementList.innerHTML = '<p><i class="fas fa-spinner fa-spin mr-2"></i>Loading candidates...</p>';
+            const params = new URLSearchParams({
+                position,
+                limit: '8',
+                require_deezer_id: 'true',
+                query: replacementQuery.value || ''
+            });
+            fetch(`{{ url_for("rounds.replacement_suggestions", round_id=round.id) }}?${params.toString()}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        throw new Error(data.error || 'Could not load replacements');
+                    }
+                    if (!data.suggestions || data.suggestions.length === 0) {
+                        replacementList.innerHTML = '<p class="text-sm text-gray-600">No replacement candidates found.</p>';
+                        return;
+                    }
+                    replacementList.innerHTML = data.suggestions.map(song => `
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 bg-white border border-orange-100 rounded p-3">
+                            <div>
+                                <div class="font-semibold">${escapeHtml(song.artist)} - ${escapeHtml(song.title)}</div>
+                                <div class="text-xs text-gray-500">${escapeHtml(song.year || 'Unknown year')}${song.genre ? ' · ' + escapeHtml(song.genre) : ''} · used ${Number(song.used_count || 0)}x</div>
+                            </div>
+                            <button type="button" class="replace-song-btn bg-teal-500 hover:bg-teal-600 text-white py-1.5 px-3 rounded text-sm" data-song-id="${Number(song.id)}" data-position="${Number(position)}">
+                                Replace
+                            </button>
+                        </div>
+                    `).join('');
+                    document.querySelectorAll('.replace-song-btn').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const body = new URLSearchParams({
+                                csrf_token: csrfToken,
+                                position: this.dataset.position,
+                                replacement_song_id: this.dataset.songId
+                            });
+                            fetch('{{ url_for("rounds.replace_round_song", round_id=round.id) }}', {
+                                method: 'POST',
+                                headers: {
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Content-Type': 'application/x-www-form-urlencoded'
+                                },
+                                body: body.toString()
+                            })
+                                .then(response => response.json())
+                                .then(result => {
+                                    if (!result.success) {
+                                        throw new Error(result.error || 'Replacement failed');
+                                    }
+                                    showToast('Song replaced; assets are stale and need regeneration', 'success');
+                                    window.location.reload();
+                                })
+                                .catch(error => showToast(error.message, 'error'));
+                        });
+                    });
+                })
+                .catch(error => {
+                    replacementList.innerHTML = `<p class="text-red-700">${error.message}</p>`;
+                    showToast(error.message, 'error');
+                });
+        }
+
+        if (loadReplacementsBtn) {
+            loadReplacementsBtn.addEventListener('click', loadReplacements);
+        }
 
         // MP3 generation with AJAX
         generateMp3Btn.addEventListener('click', function() {
@@ -1177,4 +1449,3 @@
     });
 </script>
 {% endblock %}
-

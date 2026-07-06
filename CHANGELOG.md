@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a browser round-ops workflow with round calendar, catalog/fatigue analytics, quizmaster planning briefs, round review/approval state, package quality inspection, actionable replacement suggestions, and browser review of announcement and per-track hint script drafts.
 - Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
 - Added import queue and worker health to service-health payloads, including pending/dead-letter job warnings.
 - Added readiness and scheduled-delivery badges to the rounds list.

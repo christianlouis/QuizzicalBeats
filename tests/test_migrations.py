@@ -255,6 +255,40 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     assert "cue_position" in RoundAudioScript.__table__.columns.keys()
 
 
+def test_add_round_review_workflow_to_legacy_database(tmp_path):
+    """Legacy round tables get human review and approval columns."""
+    database_path = tmp_path / "legacy-round-review.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE round (
+                id INTEGER PRIMARY KEY,
+                round_type VARCHAR(50) NOT NULL,
+                round_criteria_used VARCHAR(500) NOT NULL,
+                songs TEXT NOT NULL,
+                created_at DATETIME
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_round_review_workflow
+
+        assert add_round_review_workflow.run_migration() is True
+        assert add_round_review_workflow.run_migration() is None
+
+    round_columns = set(_column_names(database_path, "round"))
+    assert {
+        "review_status",
+        "review_notes",
+        "approved_at",
+        "approved_by_id",
+    }.issubset(round_columns)
+    assert "idx_round_review_status" in _index_names(database_path, "round")
+    assert "review_status" in Round.__table__.columns.keys()
+
+
 def test_round_songs_comment_matches_storage_behavior():
     """Round.songs remains documented and parsed as comma-separated IDs."""
     round_ = Round(
