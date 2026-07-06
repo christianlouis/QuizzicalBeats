@@ -71,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made tag-based round generation match tag names after trimming and case folding.
 - Made the rounds list flag non-eight-song rounds, unresolved song IDs, and failed email deliveries before quiz rounds reach inbox workflows.
 - Preserved Spotify playlist import order when the importer returns database song IDs directly.
+- Kept round package preview failures aligned to stored round positions even when unresolved song IDs create gaps.
+- Added playlist import position maps to MCP round-creation success and repair payloads.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

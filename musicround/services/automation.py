@@ -70,6 +70,25 @@ def _ordered_round_songs(round_obj: Round) -> list[Song]:
     return [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
 
 
+def _playlist_position_map(song_ids: list[int], expected_count: int | None = None) -> list[dict[str, Any]]:
+    limit = expected_count if expected_count is not None else len(song_ids)
+    return [
+        {
+            "position": index + 1,
+            "song_id": song_id if index < len(song_ids) else None,
+            "resolved": index < len(song_ids),
+        }
+        for index, song_id in enumerate(song_ids[:limit])
+    ] + [
+        {
+            "position": index + 1,
+            "song_id": None,
+            "resolved": False,
+        }
+        for index in range(len(song_ids), limit)
+    ]
+
+
 def _song_summary(song: Song) -> dict[str, Any]:
     data = song.to_dict()
     preview_url = (
@@ -1180,6 +1199,7 @@ def create_round_from_playlist(
         ) or _deezer_playlist_song_ids(playlist_id, count)
     if not song_ids:
         raise AutomationError("Playlist import did not return song IDs to build a round.")
+    position_map = _playlist_position_map(song_ids, count)
     if len(song_ids) < count:
         message = (
             f"Playlist import resolved {len(song_ids)} songs; "
@@ -1195,6 +1215,12 @@ def create_round_from_playlist(
                 "expected_song_count": count,
                 "resolved_song_count": len(song_ids),
                 "missing_count": count - len(song_ids),
+                "resolved_positions": position_map,
+                "missing_positions": [
+                    item["position"]
+                    for item in position_map
+                    if not item["resolved"]
+                ],
                 "import": imported,
                 "hints": [message],
                 "remediation": [
@@ -1213,7 +1239,11 @@ def create_round_from_playlist(
         count=count,
         song_ids=song_ids[:count],
     )
-    return {"import": imported, "round": round_result["round"]}
+    return {
+        "import": imported,
+        "round": round_result["round"],
+        "resolved_positions": position_map,
+    }
 
 
 def generate_round_pdf(round_id: int) -> dict[str, Any]:
@@ -1598,7 +1628,20 @@ def inspect_round_package(
 
     user = _find_user(user_id)
     song_ids = _round_song_ids(round_obj)
-    songs = _ordered_round_songs(round_obj)
+    songs_by_id = {
+        song.id: song
+        for song in Song.query.filter(Song.id.in_(song_ids)).all()
+    }
+    songs = [songs_by_id[song_id] for song_id in song_ids if song_id in songs_by_id]
+    song_slots = [
+        {
+            "position": index,
+            "stored_song_id": song_id,
+            "resolved": song_id in songs_by_id,
+            "song": _song_summary(songs_by_id[song_id]) if song_id in songs_by_id else None,
+        }
+        for index, song_id in enumerate(song_ids, start=1)
+    ]
     issues: list[dict[str, Any]] = []
     preview_checks: list[dict[str, Any]] = []
     remediation: list[dict[str, Any]] = []
@@ -1684,10 +1727,15 @@ def inspect_round_package(
         )
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        for index, song in enumerate(songs, start=1):
+        for slot in song_slots:
+            song = songs_by_id.get(slot["stored_song_id"])
+            if not song:
+                continue
+            index = slot["position"]
             preview_url, audio, issue = _download_preview_audio(song, temp_dir)
             check = {
                 "position": index,
+                "stored_song_id": slot["stored_song_id"],
                 "song_id": song.id,
                 "title": song.title,
                 "artist": song.artist,
@@ -1863,6 +1911,7 @@ def inspect_round_package(
         "actual_song_count": actual_song_count,
         "resolved_song_count": resolved_song_count,
         "song_count": len(songs),
+        "song_slots": song_slots,
         "preview_checks": preview_checks,
         "components": components,
         "storage": storage,

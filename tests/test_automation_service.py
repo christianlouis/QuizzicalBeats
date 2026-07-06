@@ -208,6 +208,39 @@ class TestRoundAutomation:
             assert exc_info.value.details["status"] == "needs_more_songs"
             assert exc_info.value.details["expected_song_count"] == 8
             assert exc_info.value.details["resolved_song_count"] == 1
+            assert exc_info.value.details["resolved_positions"][0] == {
+                "position": 1,
+                "song_id": song.id,
+                "resolved": True,
+            }
+            assert exc_info.value.details["missing_positions"] == [2, 3, 4, 5, 6, 7, 8]
+
+    def test_create_round_from_playlist_returns_resolved_position_map(self, app):
+        with app.app_context():
+            first_song = _create_song(title="First", artist="A")
+            second_song = _create_song(title="Second", artist="B")
+
+            with (
+                patch(
+                    "musicround.services.automation.import_catalog_item",
+                    return_value={"item_id": "playlist123", "result": {}},
+                ),
+                patch(
+                    "musicround.services.automation._spotify_playlist_song_ids",
+                    return_value=[first_song.id, second_song.id],
+                ),
+            ):
+                result = automation.create_round_from_playlist(
+                    "spotify",
+                    "playlist123",
+                    count=2,
+                )
+
+            assert result["round"]["song_ids"] == [first_song.id, second_song.id]
+            assert result["resolved_positions"] == [
+                {"position": 1, "song_id": first_song.id, "resolved": True},
+                {"position": 2, "song_id": second_song.id, "resolved": True},
+            ]
 
     def test_replace_round_song_updates_position_and_invalidates_assets(self, app):
         with app.app_context():
@@ -530,6 +563,76 @@ class TestAssetInspection:
                 issue["code"] == "resolved_song_count_mismatch"
                 for issue in result["issues"]
             )
+            assert result["song_slots"][0]["position"] == 1
+            assert result["song_slots"][0]["resolved"] is True
+            assert result["song_slots"][1] == {
+                "position": 2,
+                "stored_song_id": 999999,
+                "resolved": False,
+                "song": None,
+            }
+            assert result["remediation"][0]["positions"] == [2]
+
+    def test_inspect_round_package_keeps_preview_failures_on_stored_positions(self, app):
+        with app.app_context():
+            user = _create_user()
+            first_song = _create_song(title="First", artist="Artist", deezer_id="101")
+            third_song = _create_song(title="Third", artist="Artist", deezer_id="303")
+            round_id = automation.create_round(
+                name="Gap Then Preview Failure",
+                round_type="manual",
+                song_ids=[first_song.id, third_song.id],
+            )["round"]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.songs = f"{first_song.id},999999,{third_song.id}"
+            db.session.commit()
+
+            def fake_download(song, _temp_dir):
+                duration = 10000 if song.id == third_song.id else 30000
+                return (
+                    f"https://example.test/{song.id}.mp3",
+                    AudioSegment.silent(duration=duration),
+                    None,
+                )
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    side_effect=fake_download,
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000, 1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 85},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id,
+                    user_id=user.id,
+                    expected_song_count=3,
+                    min_preview_seconds=20,
+                )
+
+            failed_checks = [
+                check for check in result["preview_checks"] if check["issue_code"] == "preview_too_short"
+            ]
+            replace_actions = [
+                action for action in result["remediation"] if action["action"] == "replace_position"
+            ]
+            assert failed_checks[0]["position"] == 3
+            assert failed_checks[0]["stored_song_id"] == third_song.id
+            assert replace_actions[0]["position"] == 3
+            assert result["report"]["failed_positions"][0]["position"] == 3
 
     def test_inspect_round_package_warns_for_missing_preview(self, app):
         with app.app_context():
