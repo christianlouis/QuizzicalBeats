@@ -270,6 +270,32 @@ The `RoundExport` table tracks exports of rounds to various destinations.
 - `idx_round_export_schedule` supports due scheduled-email processing.
 - `idx_round_export_round_timestamp` supports round export history views.
 
+### PlannedQuizRound
+
+The `PlannedQuizRound` table stores upcoming quiz dates before a concrete round
+or scheduled export exists.
+
+| Column              | Type         | Description                                      |
+|---------------------|--------------|--------------------------------------------------|
+| id                  | Integer      | Primary key                                      |
+| quiz_date           | DateTime     | Planned quiz date                                |
+| quizmaster_id       | Integer      | Optional foreign key to User                     |
+| theme               | String(200)  | Optional theme or planning label                 |
+| brief               | Text         | Agent-facing planning notes                      |
+| source_playlist_url | String(500)  | Optional source playlist URL                     |
+| due_at              | DateTime     | Optional internal due time before send           |
+| status              | String(20)   | planned, drafted, blocked, approved, scheduled, or sent |
+| round_id            | Integer      | Optional foreign key to generated Round          |
+| export_id           | Integer      | Optional foreign key to scheduled RoundExport    |
+| created_at          | DateTime     | Creation timestamp                               |
+| updated_at          | DateTime     | Last update timestamp                            |
+
+**Query indexes:**
+- `idx_planned_quiz_round_status_due` supports production-board and due-soon
+  lookups.
+- `idx_planned_quiz_round_quizmaster_date` supports per-quizmaster planning
+  views.
+
 ### SystemSetting
 
 The `SystemSetting` table stores application-wide settings.
@@ -287,6 +313,8 @@ The `SystemSetting` table stores application-wide settings.
 - **User → UserPreferences**: One-to-one. A user has one set of preferences.
 - **User ↔ Roles**: Many-to-many through user_roles. A user can have multiple roles, and a role can be assigned to multiple users.
 - **User → RoundExports**: One-to-many. A user can create multiple exports.
+- **User → PlannedQuizRounds**: One-to-many. A quizmaster can own multiple
+  planned quiz dates.
 
 ### Song Relationships
 
@@ -297,6 +325,8 @@ The `SystemSetting` table stores application-wide settings.
 
 - **Round → RoundExports**: One-to-many. A round can have multiple exports.
 - **Round → Songs**: Many-to-many (implicit). A round contains multiple songs referenced by ID.
+- **Round → PlannedQuizRounds**: One-to-many. A planned quiz date can point at
+  the generated round once it exists.
 
 ## Data Model Features
 

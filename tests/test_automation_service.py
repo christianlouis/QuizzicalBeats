@@ -15,6 +15,7 @@ os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 from musicround.helpers.import_queue import ImportQueue
 from musicround.models import (
     ImportJobRecord,
+    PlannedQuizRound,
     Round,
     RoundAudioScript,
     RoundExport,
@@ -1474,6 +1475,80 @@ class TestAgentPlanningAutomation:
             assert any("exactly 8 songs" in item for item in result["constraints"])
             assert any("summer" in item for item in result["date_notes"])
             assert "agent_prompt" in result
+
+    def test_planned_quiz_round_lifecycle(self, app):
+        with app.app_context():
+            user = _create_user(username="planner", email="planner@example.test")
+            song = _create_song(title="As It Was", artist="Harry Styles")
+            round_id = automation.create_round(
+                name="Planned Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            export = RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination="planner@example.test",
+                status="scheduled",
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                quizmaster_id=user.id,
+                theme="festival headliners",
+                brief="Build eight robust songs.",
+                due_at="2026-07-09T17:00:00+02:00",
+                source_playlist_url="https://open.spotify.com/playlist/example",
+            )
+            plan_id = created["plan"]["id"]
+            listed = automation.list_planned_quiz_rounds(quizmaster_id=user.id)
+            linked = automation.link_planned_quiz_round(
+                plan_id,
+                round_id=round_id,
+                export_id=export.id,
+                status="scheduled",
+            )
+
+            assert created["created"] is True
+            assert created["plan"]["quiz_date"] == "2026-07-09T17:00:00Z"
+            assert created["plan"]["due_at"] == "2026-07-09T15:00:00Z"
+            assert listed["count"] == 1
+            assert linked["plan"]["round_id"] == round_id
+            assert linked["plan"]["export_id"] == export.id
+            assert linked["plan"]["status"] == "scheduled"
+            assert PlannedQuizRound.query.get(plan_id).round_id == round_id
+
+    def test_planned_quiz_round_rejects_invalid_links(self, app):
+        with app.app_context():
+            user = _create_user()
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                quizmaster_id=user.id,
+            )
+
+            with pytest.raises(automation.AutomationError) as exc_info:
+                automation.link_planned_quiz_round(created["plan"]["id"], round_id=9999)
+
+            assert "Round 9999 was not found" in str(exc_info.value)
+
+    def test_planned_quiz_round_can_be_unassigned(self, app):
+        with app.app_context():
+            _create_user(username="planner-a", email="planner-a@example.test")
+            _create_user(username="planner-b", email="planner-b@example.test")
+
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                theme="unassigned production slot",
+            )
+
+            assert created["created"] is True
+            assert created["plan"]["quizmaster_id"] is None
+            assert created["plan"]["quizmaster"] is None
 
     def test_draft_round_audio_scripts_uses_round_context(self, app):
         with app.app_context():

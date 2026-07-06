@@ -328,6 +328,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Complete round creation from fully resolved text playlists
 - [ ] User review/edit interface
 - [x] Recent usage and fatigue context for prompt optimization
+- [x] Planned quiz date records for agentic scheduled generation
 - [x] Draft intro/replay/outro script support for generated rounds
 - [x] Persisted script review workflow before TTS assignment
 - [ ] AI provider abstraction (OpenAI, Anthropic, local)

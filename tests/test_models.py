@@ -3,7 +3,8 @@ import pytest
 from datetime import datetime, timedelta
 from musicround.models import (
     db, User, Role, UserPreferences, Tag, SongTag, Song,
-    Round, RoundAudioScript, RoundExport, RoundShare, SystemSetting, ImportJobRecord,
+    PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, SystemSetting,
+    ImportJobRecord,
 )
 
 
@@ -751,3 +752,34 @@ class TestImportJobRecordModel:
             item_id='something', user_id=user.id, priority=10,
         )
         assert job.item_url is None
+
+
+class TestPlannedQuizRoundModel:
+    """Tests for planned quiz production entries."""
+
+    def test_planned_quiz_round_creation(self, app):
+        user = User(username='planner', email='planner@example.com')
+        db.session.add(user)
+        db.session.commit()
+
+        plan = PlannedQuizRound(
+            quiz_date=datetime(2026, 7, 9, 17, 0),
+            quizmaster_id=user.id,
+            theme='festival headliners',
+            brief='Eight robust songs.',
+            due_at=datetime(2026, 7, 9, 15, 0),
+        )
+        db.session.add(plan)
+        db.session.commit()
+
+        fetched = PlannedQuizRound.query.first()
+        assert fetched.status == 'planned'
+        assert fetched.quizmaster.username == 'planner'
+        assert fetched.theme == 'festival headliners'
+
+    def test_planned_quiz_round_rejects_invalid_status(self, app):
+        with pytest.raises(ValueError):
+            PlannedQuizRound(
+                quiz_date=datetime(2026, 7, 9, 17, 0),
+                status='not-a-real-status',
+            )

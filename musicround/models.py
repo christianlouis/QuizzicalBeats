@@ -428,6 +428,48 @@ class RoundExport(db.Model):
         return f"RoundExport(id={self.id}, round_id={self.round_id}, type='{self.export_type}', timestamp='{self.timestamp}')"
 
 
+class PlannedQuizRound(db.Model):
+    """
+    Planned quiz dates before a concrete round/export exists.
+    """
+    __tablename__ = 'planned_quiz_round'
+
+    id = db.Column(db.Integer, primary_key=True)
+    quiz_date = db.Column(db.DateTime, nullable=False)
+    quizmaster_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    theme = db.Column(db.String(200), nullable=True)
+    brief = db.Column(db.Text, nullable=True)
+    source_playlist_url = db.Column(db.String(500), nullable=True)
+    due_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default='planned', nullable=False)
+    round_id = db.Column(db.Integer, db.ForeignKey('round.id', ondelete='SET NULL'), nullable=True)
+    export_id = db.Column(db.Integer, db.ForeignKey('round_export.id', ondelete='SET NULL'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_planned_quiz_round_status_due', 'status', 'due_at', 'quiz_date'),
+        db.Index('idx_planned_quiz_round_quizmaster_date', 'quizmaster_id', 'quiz_date'),
+    )
+
+    quizmaster = db.relationship('User', backref=db.backref('planned_quiz_rounds', lazy='dynamic'))
+    round = db.relationship('Round', backref=db.backref('planned_entries', lazy='dynamic'))
+    export = db.relationship('RoundExport', backref=db.backref('planned_entries', lazy='dynamic'))
+
+    @validates('status')
+    def _validate_status(self, key, value):
+        allowed_statuses = {'planned', 'drafted', 'blocked', 'approved', 'scheduled', 'sent'}
+        if value not in allowed_statuses:
+            raise ValueError(f"Invalid planned quiz status: {value!r}")
+        return value
+
+    def __repr__(self):
+        return (
+            f"PlannedQuizRound(id={self.id}, quiz_date='{self.quiz_date}', "
+            f"status='{self.status}')"
+        )
+
+
 class SystemSetting(db.Model):
     __tablename__ = 'system_settings'
     id = db.Column(db.Integer, primary_key=True)

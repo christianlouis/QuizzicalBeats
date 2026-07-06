@@ -180,6 +180,7 @@
   * [x] Create quiz rounds from fully resolved text playlists
   * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
   * [x] Provide recent usage/fatigue context for agentic song selection
+  * [x] Store planned quiz dates and link them to generated rounds/scheduled exports
   * [x] Draft intro/replay/outro scripts for later TTS generation
   * [x] Store and review generated intro/replay/outro scripts before assigning TTS audio
   * [ ] Include fallback logic when metadata is sparse

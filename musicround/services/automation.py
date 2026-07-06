@@ -35,6 +35,7 @@ from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
 from musicround.models import (
     ImportJobRecord,
+    PlannedQuizRound,
     Round,
     RoundAudioScript,
     RoundExport,
@@ -158,6 +159,26 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "last_generated_at": (
             round_obj.last_generated_at.isoformat() if round_obj.last_generated_at else None
         ),
+    }
+
+
+def _planned_quiz_round_summary(plan: PlannedQuizRound) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "quiz_date": _datetime_payload(plan.quiz_date),
+        "quizmaster_id": plan.quizmaster_id,
+        "quizmaster": _user_summary(plan.quizmaster),
+        "theme": plan.theme,
+        "brief": plan.brief,
+        "source_playlist_url": plan.source_playlist_url,
+        "due_at": _datetime_payload(plan.due_at),
+        "status": plan.status,
+        "round_id": plan.round_id,
+        "round": _round_summary(plan.round) if plan.round else None,
+        "export_id": plan.export_id,
+        "export": _round_export_summary(plan.export) if plan.export else None,
+        "created_at": _datetime_payload(plan.created_at),
+        "updated_at": _datetime_payload(plan.updated_at),
     }
 
 
@@ -2417,6 +2438,131 @@ def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
         },
         "recent_usage": recent_usage_summary(user_id=user.id, months=months, limit=25),
     }
+
+
+def create_planned_quiz_round(
+    quiz_date: str | datetime,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | datetime | None = None,
+    source_playlist_url: str | None = None,
+    status: str = "planned",
+) -> dict[str, Any]:
+    """Create a planned quiz entry before a concrete round exists."""
+    quizmaster = _find_user(quizmaster_id) if quizmaster_id is not None else None
+    plan = PlannedQuizRound(
+        quiz_date=_parse_datetime_utc(quiz_date),
+        quizmaster_id=quizmaster.id if quizmaster else None,
+        theme=(theme or "").strip() or None,
+        brief=(brief or "").strip() or None,
+        source_playlist_url=(source_playlist_url or "").strip() or None,
+        due_at=_parse_datetime_utc(due_at) if due_at else None,
+        status=status,
+    )
+    db.session.add(plan)
+    db.session.commit()
+    return {"created": True, "plan": _planned_quiz_round_summary(plan)}
+
+
+def list_planned_quiz_rounds(
+    quizmaster_id: int | None = None,
+    status: str | None = None,
+    include_past: bool = True,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List planned quiz entries for production-board and MCP callers."""
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+
+    query = PlannedQuizRound.query
+    if quizmaster_id is not None:
+        _find_user(quizmaster_id)
+        query = query.filter_by(quizmaster_id=quizmaster_id)
+    if status:
+        status = status.strip().lower()
+        if status not in {'planned', 'drafted', 'blocked', 'approved', 'scheduled', 'sent'}:
+            raise AutomationError(f"Invalid planned quiz status: {status!r}.")
+        query = query.filter_by(status=status)
+    if not include_past:
+        query = query.filter(PlannedQuizRound.quiz_date >= datetime.utcnow())
+
+    plans = (
+        query.order_by(PlannedQuizRound.quiz_date.asc(), PlannedQuizRound.id.asc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(plans),
+        "plans": [_planned_quiz_round_summary(plan) for plan in plans],
+        "filters": {
+            "quizmaster_id": quizmaster_id,
+            "status": status,
+            "include_past": include_past,
+            "limit": limit,
+        },
+    }
+
+
+def update_planned_quiz_round(
+    plan_id: int,
+    quiz_date: str | datetime | None = None,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | datetime | None = None,
+    source_playlist_url: str | None = None,
+    status: str | None = None,
+    round_id: int | None = None,
+    export_id: int | None = None,
+) -> dict[str, Any]:
+    """Update a planned quiz entry and optionally link generated artifacts."""
+    plan = db.session.get(PlannedQuizRound, plan_id)
+    if not plan:
+        raise AutomationError(f"Planned quiz round {plan_id} was not found.")
+
+    if quiz_date is not None:
+        plan.quiz_date = _parse_datetime_utc(quiz_date)
+    if quizmaster_id is not None:
+        plan.quizmaster_id = _find_user(quizmaster_id).id
+    if theme is not None:
+        plan.theme = theme.strip() or None
+    if brief is not None:
+        plan.brief = brief.strip() or None
+    if due_at is not None:
+        plan.due_at = _parse_datetime_utc(due_at) if due_at else None
+    if source_playlist_url is not None:
+        plan.source_playlist_url = source_playlist_url.strip() or None
+    if status is not None:
+        plan.status = status.strip().lower()
+    if round_id is not None:
+        if not db.session.get(Round, round_id):
+            raise AutomationError(f"Round {round_id} was not found.")
+        plan.round_id = round_id
+    if export_id is not None:
+        if not db.session.get(RoundExport, export_id):
+            raise AutomationError(f"RoundExport {export_id} was not found.")
+        plan.export_id = export_id
+    plan.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"updated": True, "plan": _planned_quiz_round_summary(plan)}
+
+
+def link_planned_quiz_round(
+    plan_id: int,
+    round_id: int | None = None,
+    export_id: int | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Link a planned quiz entry to a generated round and/or scheduled export."""
+    if round_id is None and export_id is None and status is None:
+        raise AutomationError("Provide round_id, export_id, or status to update the plan.")
+    return update_planned_quiz_round(
+        plan_id,
+        round_id=round_id,
+        export_id=export_id,
+        status=status,
+    )
 
 
 def round_planning_brief(
