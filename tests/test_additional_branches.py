@@ -146,6 +146,28 @@ class TestSystemHealthRoute:
         response = client.get('/users/system-health')
         assert response.status_code in (200, 302, 500)  # may fail if admin_required checks roles
 
+    def test_system_health_database_error_hides_exception_details(self, app, client, monkeypatch):
+        """System-health should not render database exception details."""
+        from musicround.helpers import backup_helper
+        from musicround.helpers import database_config
+
+        def fail_database_summary(uri):
+            raise RuntimeError('database-uri-secret token=health-secret traceback')
+
+        _create_user(app, 'health_admin_error', 'healthadminerror@example.com', is_admin=True)
+        _login(app, client, 'health_admin_error')
+        monkeypatch.setattr(database_config, 'database_summary', fail_database_summary)
+        monkeypatch.setattr(backup_helper, 'list_backups', lambda: [])
+
+        response = client.get('/users/system-health')
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Database status check failed. Check the server logs.' in body
+        assert 'database-uri-secret' not in body
+        assert 'health-secret' not in body
+        assert 'traceback' not in body
+
 
 class TestSongApiExtendedBranches:
     """Tests for uncovered branches in song API."""

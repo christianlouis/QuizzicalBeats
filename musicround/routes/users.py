@@ -1737,7 +1737,10 @@ def system_health():
             database_stats["file_size"] = "Managed database"
     except Exception as e:
         current_app.logger.error(f"Error checking database status: {str(e)}")
-        database_status = {"color": "red", "message": f"Database error: {str(e)}"}
+        database_status = {
+            "color": "red",
+            "message": "Database status check failed. Check the server logs.",
+        }
     
     # Check storage status
     storage_status = {"color": "green", "message": "All storage locations are accessible and writable."}
@@ -1814,7 +1817,7 @@ def system_health():
                 api_status = {"color": "yellow", "message": "Some API services are unavailable."}
     except Exception as e:
         spotify_service["status"] = "error"
-        spotify_service["message"] = f"Error: {str(e)}"
+        spotify_service["message"] = "Spotify status check failed. Check the server logs."
         api_status = {"color": "yellow", "message": "Some API services have errors."}
     
     service_stats.append(spotify_service)
@@ -1835,7 +1838,7 @@ def system_health():
                 api_status = {"color": "yellow", "message": "Some API services have warnings."}
     except Exception as e:
         deezer_service["status"] = "error"
-        deezer_service["message"] = f"Error: {str(e)}"
+        deezer_service["message"] = "Deezer status check failed. Check the server logs."
         api_status = {"color": "yellow", "message": "Some API services have errors."}
     
     service_stats.append(deezer_service)
@@ -1858,7 +1861,10 @@ def system_health():
         memory_status = {"color": "gray", "message": "Memory usage information not available (psutil not installed)."}
     except Exception as e:
         # Other errors
-        memory_status = {"color": "gray", "message": f"Error checking memory: {str(e)}"}
+        memory_status = {
+            "color": "gray",
+            "message": "Memory status check failed. Check the server logs.",
+        }
         current_app.logger.error(f"Error checking memory: {str(e)}")
     
     # System information

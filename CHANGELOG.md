@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sanitized direct Spotify playlist-browser failures so provider and bearer-token details stay out of browser flash messages.
 - Sanitized one-time admin setup failures so database exception details stay out of browser flash messages.
 - Sanitized Flask-Admin bulk-action failures so database exception details stay out of browser flash messages.
+- Sanitized system-health status failures so database, API, and memory exception details stay out of the admin status page.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.
