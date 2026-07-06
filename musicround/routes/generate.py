@@ -63,21 +63,15 @@ def get_songs_by_tag(tag_name, limit=8):
     if not normalized_tag_name:
         return []
 
-    songs = []
-    seen_song_ids = set()
-    for tag in Tag.query.all():
-        if _normalize_tag_name(tag.name).casefold() != normalized_tag_name.casefold():
-            continue
-
-        for song in tag.songs:
-            song_key = song.id or (song.title, song.artist)
-            if song_key in seen_song_ids:
-                continue
-            seen_song_ids.add(song_key)
-            songs.append(song)
-            if len(songs) >= limit:
-                return songs
-    return songs
+    normalized_sql = db.func.lower(db.func.trim(Tag.name))
+    return (
+        Song.query.join(Song.tags)
+        .filter(normalized_sql == normalized_tag_name.casefold())
+        .order_by(Song.id.asc())
+        .distinct()
+        .limit(limit)
+        .all()
+    )
 
 def get_least_used_genres():
     """
