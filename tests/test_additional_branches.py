@@ -1,7 +1,8 @@
 """Additional tests for setup, system health, and API branches."""
-import pytest
 import json
-from musicround.models import db, User, Role, Song, Tag
+import pytest
+from musicround.helpers.import_queue import ImportQueue
+from musicround.models import db, ImportJobRecord, User, Role, Song, Tag
 
 
 def _create_user(app, username, email, password='TestPass123!', is_admin=False):
@@ -101,8 +102,69 @@ class TestSystemHealthRoute:
         assert data['ok'] is True
         assert data['status'] == 'ok'
         assert data['services']['database']['status'] == 'ok'
+        assert data['services']['import_queue']['initialized'] is True
         assert 'password' not in json.dumps(data).lower()
         assert 'token' not in json.dumps(data).lower()
+
+    def test_import_queue_health_reports_pending_without_local_workers(self, app):
+        """Queue health should warn when imports are waiting but local workers are disabled."""
+        from musicround.helpers.service_health import import_queue_service_health
+
+        with app.app_context():
+            app.config['import_queue'] = ImportQueue()
+            app.config['import_workers'] = []
+            app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = False
+            user = User(username='queue_health_user', email='queue-health@example.com')
+            db.session.add(user)
+            db.session.commit()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='pending-playlist',
+                    user_id=user.id,
+                    status='pending',
+                )
+            )
+            db.session.commit()
+
+            health = import_queue_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['jobs']['pending'] == 1
+        assert health['issues'][0]['code'] == 'import_jobs_waiting_without_local_workers'
+
+    def test_import_queue_health_reports_dead_letter_jobs(self, app):
+        """Dead-letter jobs should be visible as repairable health warnings."""
+        from musicround.helpers.service_health import import_queue_service_health
+
+        with app.app_context():
+            app.config['import_queue'] = ImportQueue()
+            app.config['import_workers'] = [object()]
+            app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = True
+            app.config['IMPORT_WORKER_COUNT_RESOLVED'] = 1
+            user = User(username='queue_dead_user', email='queue-dead@example.com')
+            db.session.add(user)
+            db.session.commit()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='dead-playlist',
+                    user_id=user.id,
+                    status='dead_letter',
+                )
+            )
+            db.session.commit()
+
+            health = import_queue_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['worker_count'] == 1
+        assert health['jobs']['dead_letter'] == 1
+        assert any(issue['code'] == 'import_jobs_need_manual_review' for issue in health['issues'])
 
     def test_healthz_reports_degraded_storage(self, client, monkeypatch):
         """Storage failures should make /healthz fail for deployment gates."""

@@ -140,6 +140,8 @@ def test_create_app_does_not_start_import_workers_by_default(monkeypatch):
     app = create_app()
 
     assert app.config['import_workers'] == []
+    assert app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] is False
+    assert app.config['IMPORT_WORKER_COUNT_RESOLVED'] >= 1
     with app.app_context():
         db.session.remove()
         db.drop_all()

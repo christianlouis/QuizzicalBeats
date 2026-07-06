@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from flask import current_app
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 from musicround.helpers.database_config import database_summary
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status
@@ -115,6 +115,92 @@ def email_service_health(required: bool = False) -> dict[str, Any]:
     }
 
 
+def import_queue_service_health() -> dict[str, Any]:
+    """Return public-safe import queue and worker health."""
+    from musicround.models import ImportJobRecord, db
+
+    issues: list[dict[str, Any]] = []
+    queue = current_app.config.get("import_queue") or current_app.config.get("IMPORT_QUEUE")
+    workers = current_app.config.get("import_workers") or []
+    workers_enabled = bool(current_app.config.get("IMPORT_WORKERS_ENABLED_RESOLVED"))
+    configured_worker_count = int(current_app.config.get("IMPORT_WORKER_COUNT_RESOLVED") or 0)
+
+    if queue is None:
+        issues.append(
+            _issue(
+                "import_queue_not_initialized",
+                "Import queue is not initialized.",
+                hint="Check app startup and import queue configuration.",
+            )
+        )
+
+    counts = {
+        "pending": 0,
+        "processing": 0,
+        "completed": 0,
+        "failed": 0,
+        "dead_letter": 0,
+    }
+    try:
+        rows = (
+            db.session.query(ImportJobRecord.status, func.count(ImportJobRecord.id))
+            .group_by(ImportJobRecord.status)
+            .all()
+        )
+        for status, count in rows:
+            counts[status or "unknown"] = int(count or 0)
+    except Exception as exc:
+        current_app.logger.error("Import queue health probe failed: %s", exc, exc_info=True)
+        issues.append(
+            _issue(
+                "import_queue_probe_failed",
+                "Import queue health probe failed.",
+                hint="Check the import job table and database connectivity.",
+            )
+        )
+
+    if workers_enabled and not workers:
+        issues.append(
+            _issue(
+                "import_workers_enabled_not_running",
+                "Import workers are enabled but no worker threads are registered.",
+                hint="Check worker startup logs.",
+            )
+        )
+    if counts["pending"] and not workers_enabled:
+        issues.append(
+            _issue(
+                "import_jobs_waiting_without_local_workers",
+                "Import jobs are pending while local in-process workers are disabled.",
+                severity="warning",
+                hint="Ensure a dedicated worker process is running or enable workers for this process.",
+                details={"pending": counts["pending"]},
+            )
+        )
+    if counts["dead_letter"]:
+        issues.append(
+            _issue(
+                "import_jobs_need_manual_review",
+                "Some import jobs are in dead-letter state.",
+                severity="warning",
+                hint="Review and retry or discard dead-letter import jobs.",
+                details={"dead_letter": counts["dead_letter"]},
+            )
+        )
+
+    return {
+        "status": _status_from_issues(issues),
+        "ok": not any(issue.get("severity") == "error" for issue in issues),
+        "initialized": queue is not None,
+        "workers_enabled": workers_enabled,
+        "worker_count": len(workers),
+        "configured_worker_count": configured_worker_count,
+        "queue_size": queue.qsize() if queue is not None else None,
+        "jobs": counts,
+        "issues": issues,
+    }
+
+
 def spotify_service_health(user: Any | None = None) -> dict[str, Any]:
     """Return Spotify configuration and optional user-connection health."""
     issues: list[dict[str, Any]] = []
@@ -199,6 +285,7 @@ def application_health_payload(include_storage: bool = True) -> dict[str, Any]:
     """Return a public-safe health payload for uptime checks."""
     services = {
         "database": database_service_health(),
+        "import_queue": import_queue_service_health(),
         "spotify": spotify_service_health(),
         "email": email_service_health(required=False),
     }

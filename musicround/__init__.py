@@ -433,6 +433,8 @@ def create_app(config=None):
     app.config['import_queue'] = import_queue
 
     workers_enabled = _import_workers_enabled(app)
+    app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = workers_enabled
+    app.config['IMPORT_WORKER_COUNT_RESOLVED'] = worker_count
 
     workers = []
     if workers_enabled:
