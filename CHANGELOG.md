@@ -28,8 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added round owner/share models and MCP helpers for quizmaster collaboration handoff.
 - Added persisted round-audio script drafts, review status, and MCP helpers to approve script text before TTS audio generation.
 - Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
+- Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 
 ### Fixed
+- Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.
+- Stopped headered CSV playlist imports from treating the header row as a song and now flags missing artist/title cells for review.
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Normalized Spotify profile display names on the connection-management page and removed the obsolete admin token-wizard template.
 - Required login for Spotify playlist import, direct-token, and diagnostic routes before resolving user, manual, or system fallback tokens.

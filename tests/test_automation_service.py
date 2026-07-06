@@ -1292,6 +1292,45 @@ class TestAgentPlanningAutomation:
             assert result["low_confidence"][0]["issues"] == ["missing_artist"]
             assert result["ready_for_import"] is False
 
+    def test_parse_text_playlist_reads_headered_csv_columns(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "artist,title\n"
+                "Harry Styles,As It Was\n"
+                "Shania Twain,Man! I Feel Like A Woman!\n"
+            )
+
+            assert result["count"] == 2
+            assert result["candidates"][0]["line"] == 2
+            assert result["candidates"][0]["artist"] == "Harry Styles"
+            assert result["candidates"][0]["title"] == "As It Was"
+            assert result["candidates"][1]["artist"] == "Shania Twain"
+            assert result["low_confidence_count"] == 0
+            assert result["ready_for_import"] is True
+
+    def test_parse_text_playlist_reads_semicolon_csv_title_artist(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "title;artist\n"
+                "As It Was;Harry Styles\n"
+            )
+
+            assert result["candidates"][0]["title"] == "As It Was"
+            assert result["candidates"][0]["artist"] == "Harry Styles"
+
+    def test_parse_text_playlist_marks_csv_rows_with_missing_values(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "artist,title\n"
+                "Harry Styles,\n"
+                ",Man! I Feel Like A Woman!\n"
+            )
+
+            assert result["count"] == 2
+            assert result["low_confidence_count"] == 2
+            assert result["low_confidence"][0]["issues"] == ["missing_title"]
+            assert result["low_confidence"][1]["issues"] == ["missing_artist"]
+
     def test_retry_import_job_requeues_dead_letter_job(self, app):
         with app.app_context():
             user = _create_user()

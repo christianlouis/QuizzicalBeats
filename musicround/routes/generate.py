@@ -1,4 +1,5 @@
 import random
+import re
 from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import current_user, login_required
@@ -11,6 +12,42 @@ generate_bp = Blueprint('generate', __name__)
 
 # Constants
 songs_per_round = 8
+_TAG_ALIAS_MAP = {
+    'hip-hop': 'Hip-Hop',
+    'hip hop': 'Hip-Hop',
+    'hiphop': 'Hip-Hop',
+    'r&b': 'R&B',
+    'rnb': 'R&B',
+    'rhythm and blues': 'R&B',
+    'rock': 'Rock',
+    'metal': 'Metal',
+    'country': 'Country',
+    'pop': 'Pop',
+    'punk': 'Punk',
+    'indie': 'Indie',
+    'electronic': 'Electronic',
+    'edm': 'Electronic',
+    'dance': 'Dance',
+    'soul': 'Soul',
+    'funk': 'Funk',
+    'jazz': 'Jazz',
+    'blues': 'Blues',
+    'folk': 'Folk',
+    'disco': 'Disco',
+    'new wave': 'New Wave',
+    'alternative': 'Alternative',
+    'classic rock': 'Classic Rock',
+    'hard rock': 'Hard Rock',
+}
+_INTERNAL_TAG_PREFIXES = (
+    'seed:',
+    'source:',
+    'import:',
+    'spotify:',
+    'deezer:',
+    'lastfm:',
+    'chart-source:',
+)
 
 # Helper functions
 def get_all_decades():
@@ -56,8 +93,39 @@ def get_all_tags():
 
 
 def _normalize_tag_name(tag_name):
-    """Trim tag names before matching or showing them in builder controls."""
-    return (tag_name or '').strip()
+    """Return a quizmaster-facing tag label, or None for internal/noisy tags."""
+    normalized = re.sub(r'\s+', ' ', (tag_name or '').strip())
+    if not normalized:
+        return None
+
+    lowered = normalized.casefold()
+    if lowered.startswith(_INTERNAL_TAG_PREFIXES):
+        return None
+    if '://' in lowered or lowered.startswith(('www.', '#')):
+        return None
+    if '@' in normalized:
+        return None
+    if len(normalized) > 40:
+        return None
+    if len(normalized.split()) > 4:
+        return None
+
+    return _TAG_ALIAS_MAP.get(lowered, normalized)
+
+
+def _tag_lookup_variants(tag_name):
+    """Return normalized DB comparison values for a public tag label."""
+    normalized_tag_name = _normalize_tag_name(tag_name)
+    if not normalized_tag_name:
+        return []
+
+    variants = {normalized_tag_name.casefold()}
+    variants.update(
+        alias.casefold()
+        for alias, canonical in _TAG_ALIAS_MAP.items()
+        if canonical.casefold() == normalized_tag_name.casefold()
+    )
+    return sorted(variants)
 
 
 def get_songs_by_tag(tag_name, limit=8):
@@ -68,10 +136,11 @@ def get_songs_by_tag(tag_name, limit=8):
     if not normalized_tag_name:
         return []
 
+    lookup_variants = _tag_lookup_variants(normalized_tag_name)
     normalized_sql = db.func.lower(db.func.trim(Tag.name))
     return (
         Song.query.join(Song.tags)
-        .filter(normalized_sql == normalized_tag_name.lower())
+        .filter(normalized_sql.in_(lookup_variants))
         .order_by(Song.id.asc())
         .distinct()
         .limit(limit)

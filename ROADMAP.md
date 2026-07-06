@@ -1,7 +1,7 @@
 # Quizzical Beats - Project Roadmap
 
 **Version**: 2026.Q3
-**Last Updated**: July 5, 2026
+**Last Updated**: July 6, 2026
 
 ## Vision Statement
 
@@ -175,16 +175,16 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.2 - "Server Stability" *(Q1 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Critical  
 **Effort**: 1 week
 
 **Goals**: Production-grade web server
 
 **Features**:
-- [ ] Replace Flask dev server with Gunicorn
-- [ ] Configure worker processes (4-8 workers)
-- [ ] Graceful shutdown/restart
+- [x] Replace Flask dev server with Gunicorn
+- [x] Configure worker processes and threads
+- [x] Graceful shutdown/restart through Gunicorn entrypoint
 - [ ] Nginx reverse proxy configuration
 - [ ] SSL termination
 - [ ] Static file optimization
@@ -482,23 +482,23 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Persistent user settings
 - [ ] Default round format preferences
 - [ ] Personal tag system
-- [x] Tag filtering and sorting in the round builder
+- [x] Curated tag filtering and sorting in the round builder, including internal/noisy tag suppression
 - [ ] Dark mode toggle
 - [ ] UI customization
 
 ---
 
 #### v4.3 - "Deployment Dynamo" *(Q4 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 2 weeks
 
 **Goals**: CI/CD and automation
 
 **Features**:
-- [ ] GitHub Actions CI/CD pipeline
-- [ ] Automated testing
-- [ ] Automated builds
+- [x] GitHub Actions CI/CD pipeline
+- [x] Automated testing
+- [x] Automated Docker builds
 - [ ] Nightly backup jobs
 - [ ] Sentry error tracking
 - [ ] Auto-updater script

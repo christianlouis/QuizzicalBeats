@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import csv
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -2089,6 +2090,74 @@ def _split_playlist_line(line: str) -> tuple[str | None, str | None, float, list
     return text, None, 0.35, issues
 
 
+def _playlist_candidate(
+    line_number: int,
+    raw_line: str,
+    title: str | None,
+    artist: str | None,
+    confidence: float = 0.95,
+    issues: list[str] | None = None,
+) -> dict[str, Any] | None:
+    title = (title or "").strip()
+    artist = (artist or "").strip()
+    issues = list(issues or [])
+    if not title and not artist:
+        return None
+    if not title:
+        if "missing_title" not in issues:
+            issues.append("missing_title")
+        confidence = min(confidence, 0.35)
+    if not artist:
+        if "missing_artist" not in issues:
+            issues.append("missing_artist")
+        confidence = min(confidence, 0.35)
+    return {
+        "line": line_number,
+        "raw": raw_line.strip(),
+        "title": title or None,
+        "artist": artist or None,
+        "confidence": confidence,
+        "needs_review": confidence < 0.8 or bool(issues),
+        "issues": issues,
+    }
+
+
+def _parse_headered_csv_playlist(text: str, limit: int) -> list[dict[str, Any]] | None:
+    """Parse CSV-like rows only when explicit artist/title headers are present."""
+    non_empty_lines = [line for line in text.splitlines() if line.strip()]
+    if not non_empty_lines:
+        return None
+
+    delimiter = ";" if non_empty_lines[0].count(";") > non_empty_lines[0].count(",") else ","
+    header = next(csv.reader([non_empty_lines[0]], delimiter=delimiter), [])
+    normalized_header = [column.strip().casefold() for column in header]
+    title_headers = {"title", "song", "song title", "track", "track title"}
+    artist_headers = {"artist", "artists", "artist name", "performer"}
+    if not title_headers.intersection(normalized_header):
+        return None
+    if not artist_headers.intersection(normalized_header):
+        return None
+
+    reader = csv.DictReader(text.splitlines(), delimiter=delimiter)
+    fieldnames = reader.fieldnames or []
+    title_field = next(field for field in fieldnames if field.strip().casefold() in title_headers)
+    artist_field = next(field for field in fieldnames if field.strip().casefold() in artist_headers)
+    candidates: list[dict[str, Any]] = []
+    for line_number, row in enumerate(reader, start=2):
+        if len(candidates) >= limit:
+            break
+        raw_line = non_empty_lines[line_number - 1] if line_number - 1 < len(non_empty_lines) else ""
+        candidate = _playlist_candidate(
+            line_number,
+            raw_line,
+            row.get(title_field),
+            row.get(artist_field),
+        )
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
 def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     """Parse pasted text or CSV-like playlist rows into reviewable candidates."""
     if not text or not text.strip():
@@ -2096,26 +2165,18 @@ def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     if limit < 1 or limit > 500:
         raise AutomationError("limit must be between 1 and 500.")
 
-    candidates = []
-    low_confidence = []
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        if len(candidates) >= limit:
-            break
-        title, artist, confidence, issues = _split_playlist_line(raw_line)
-        if title is None:
-            continue
-        candidate = {
-            "line": line_number,
-            "raw": raw_line.strip(),
-            "title": title,
-            "artist": artist,
-            "confidence": confidence,
-            "needs_review": confidence < 0.8 or bool(issues),
-            "issues": issues,
-        }
-        candidates.append(candidate)
-        if candidate["needs_review"]:
-            low_confidence.append(candidate)
+    candidates = _parse_headered_csv_playlist(text, limit)
+    if candidates is None:
+        candidates = []
+        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            if len(candidates) >= limit:
+                break
+            title, artist, confidence, issues = _split_playlist_line(raw_line)
+            candidate = _playlist_candidate(line_number, raw_line, title, artist, confidence, issues)
+            if candidate:
+                candidates.append(candidate)
+
+    low_confidence = [candidate for candidate in candidates if candidate["needs_review"]]
 
     return {
         "count": len(candidates),

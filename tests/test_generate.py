@@ -161,12 +161,31 @@ class TestGetAllTags:
                 Tag(name=' rock '),
                 Tag(name='Rock'),
                 Tag(name='Country'),
+                Tag(name='hip hop'),
             ])
             db.session.commit()
 
             result = get_all_tags()
 
-        assert result == ['Country', 'rock']
+        assert result == ['Country', 'Hip-Hop', 'Rock']
+
+    def test_filters_internal_and_noisy_tags(self, app):
+        """Builder tags should hide import internals and obvious free-text noise."""
+        from musicround.routes.generate import get_all_tags
+        with app.app_context():
+            db.session.add_all([
+                Tag(name='seed:wacken-2026'),
+                Tag(name='source:billboard'),
+                Tag(name='https://example.test/playlist'),
+                Tag(name='not actually a usable quiz tag'),
+                Tag(name='Metal'),
+                Tag(name='Pop'),
+            ])
+            db.session.commit()
+
+            result = get_all_tags()
+
+        assert result == ['Metal', 'Pop']
 
 
 class TestGetSongsByTag:
@@ -211,6 +230,36 @@ class TestGetSongsByTag:
             result = get_songs_by_tag('ROCK')
 
         assert {song.title for song in result} == {'Trimmed Rock Song', 'Cased Rock Song'}
+
+    def test_matches_public_tag_aliases(self, app):
+        """Test public tag aliases resolve to raw imported tag variants."""
+        from musicround.routes.generate import get_songs_by_tag
+        with app.app_context():
+            tag = Tag(name='hip hop')
+            song = Song(title='Alias Tag Song', artist='A', genre='Hip-Hop')
+            db.session.add_all([tag, song])
+            db.session.commit()
+            song.tags.append(tag)
+            db.session.commit()
+
+            result = get_songs_by_tag('Hip-Hop')
+
+        assert [song.title for song in result] == ['Alias Tag Song']
+
+    def test_rejects_internal_tag_round_selection(self, app):
+        """Internal tags should not be selectable even if they exist in storage."""
+        from musicround.routes.generate import get_songs_by_tag
+        with app.app_context():
+            tag = Tag(name='seed:wacken')
+            song = Song(title='Internal Tag Song', artist='A', genre='Metal')
+            db.session.add_all([tag, song])
+            db.session.commit()
+            song.tags.append(tag)
+            db.session.commit()
+
+            result = get_songs_by_tag('seed:wacken')
+
+        assert result == []
 
     def test_respects_limit(self, app):
         """Test get_songs_by_tag respects the limit parameter."""
