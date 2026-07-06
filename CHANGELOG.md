@@ -70,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made Dropbox folder browsing force-refresh once after a 401 and return a reconnect-required payload when refresh credentials are revoked.
 - Made tag-based round generation match tag names after trimming and case folding.
 - Made the rounds list flag non-eight-song rounds, unresolved song IDs, and failed email deliveries before quiz rounds reach inbox workflows.
+- Preserved Spotify playlist import order when the importer returns database song IDs directly.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

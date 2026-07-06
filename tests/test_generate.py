@@ -1,4 +1,6 @@
 """Tests for generate blueprint helper functions and routes."""
+from types import SimpleNamespace
+
 import pytest
 from musicround.models import db, User, Song, Round, Tag
 
@@ -453,6 +455,72 @@ class TestBuildMusicRoundRoute:
         assert body.index('First In Playlist') < body.index('Second In Database')
         assert 'Not In Playlist' not in body
         assert 'Deezer Playlist: playlist123' in body
+
+    def test_spotify_playlist_import_preserves_imported_song_order(self, app, monkeypatch):
+        """Spotify imported DB IDs should keep playlist order for review and export."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 3
+            first_song = Song(title='First In Playlist', artist='Artist A', spotify_id='first')
+            second_song = Song(title='Second In Playlist', artist='Artist B', spotify_id='second')
+            third_song = Song(title='Third In Playlist', artist='Artist C', spotify_id='third')
+            db.session.add_all([first_song, second_song, third_song])
+            db.session.commit()
+            ordered_ids = [third_song.id, first_song.id, second_song.id]
+
+        def fake_import_item(**_kwargs):
+            return {
+                'imported_count': 3,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': [],
+                'imported_song_ids': ordered_ids,
+            }
+
+        monkeypatch.setattr('musicround.routes.generate.ImportHelper.import_item', fake_import_item)
+        monkeypatch.setattr('musicround.routes.generate.get_spotify_token', lambda: ('token', 'system'))
+        monkeypatch.setattr('musicround.routes.generate.oauth', SimpleNamespace(spotify=object()))
+
+        from musicround.routes.generate import get_songs_from_spotify_playlist
+        with app.app_context():
+            songs = get_songs_from_spotify_playlist('playlist123')
+
+        assert [song.title for song in songs] == [
+            'Third In Playlist',
+            'First In Playlist',
+            'Second In Playlist',
+        ]
+
+    def test_spotify_playlist_import_ignores_duplicate_and_invalid_song_ids(self, app, monkeypatch):
+        """Spotify imported DB IDs should be sanitized without changing usable order."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 3
+            first_song = Song(title='First In Playlist', artist='Artist A', spotify_id='first')
+            second_song = Song(title='Second In Playlist', artist='Artist B', spotify_id='second')
+            db.session.add_all([first_song, second_song])
+            db.session.commit()
+            returned_ids = [second_song.id, 'not-an-id', second_song.id, first_song.id, 999999]
+
+        def fake_import_item(**_kwargs):
+            return {
+                'imported_count': 2,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': [],
+                'imported_song_ids': returned_ids,
+            }
+
+        monkeypatch.setattr('musicround.routes.generate.ImportHelper.import_item', fake_import_item)
+        monkeypatch.setattr('musicround.routes.generate.get_spotify_token', lambda: ('token', 'system'))
+        monkeypatch.setattr('musicround.routes.generate.oauth', SimpleNamespace(spotify=object()))
+
+        from musicround.routes.generate import get_songs_from_spotify_playlist
+        with app.app_context():
+            songs = get_songs_from_spotify_playlist('playlist123')
+
+        assert [song.title for song in songs] == [
+            'Second In Playlist',
+            'First In Playlist',
+        ]
 
     def test_import_spotify_playlist_rejects_partial_round(self, app, client, monkeypatch):
         """Playlist import should not offer a saveable review if too few tracks resolve."""

@@ -400,9 +400,28 @@ def get_songs_from_spotify_playlist(playlist_id):
 
         # If we have imported_song_ids, use them (these are DB IDs)
         if import_result.get('imported_song_ids'):
-            song_db_ids = import_result['imported_song_ids']
-            imported_songs = Song.query.filter(Song.id.in_(song_db_ids)).all()
-            return imported_songs[:songs_per_round]
+            song_db_ids = []
+            seen_song_ids = set()
+            for raw_song_id in import_result['imported_song_ids']:
+                try:
+                    song_id = int(raw_song_id)
+                except (TypeError, ValueError):
+                    continue
+                if song_id in seen_song_ids:
+                    continue
+                song_db_ids.append(song_id)
+                seen_song_ids.add(song_id)
+
+            if not song_db_ids:
+                current_app.logger.warning(f"No song IDs returned after importing Spotify playlist {playlist_id}")
+                return []
+
+            songs_by_id = {
+                song.id: song
+                for song in Song.query.filter(Song.id.in_(song_db_ids)).all()
+            }
+            ordered_songs = [songs_by_id[song_id] for song_id in song_db_ids if song_id in songs_by_id]
+            return ordered_songs[:songs_per_round]
 
         # If no imported_song_ids, fetch all Spotify IDs from the playlist and get those songs from DB
         # Use the Spotify API directly to get the playlist track IDs
