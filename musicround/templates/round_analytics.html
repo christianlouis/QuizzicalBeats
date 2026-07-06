@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+
+{% block title %}Round Analytics - Quizzical Beats{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-navy-800 font-montserrat">Round Analytics</h1>
+            <p class="text-gray-600 mt-1">Catalog coverage, fatigue signals, and replacement pressure.</p>
+        </div>
+        <form method="get" class="flex items-end gap-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1" for="months">Months</label>
+                <input id="months" name="months" type="number" min="1" max="36" value="{{ filters.months }}" class="px-3 py-2 border border-gray-300 rounded-md">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1" for="limit">Limit</label>
+                <input id="limit" name="limit" type="number" min="1" max="100" value="{{ filters.limit }}" class="px-3 py-2 border border-gray-300 rounded-md">
+            </div>
+            <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md transition-colors">Apply</button>
+        </form>
+    </div>
+
+    {% if summary %}
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Songs</div><div class="text-3xl font-bold text-navy-800">{{ summary.song_count }}</div></div>
+        <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Rounds</div><div class="text-3xl font-bold text-navy-800">{{ summary.round_count }}</div></div>
+        <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Recent Rounds</div><div class="text-3xl font-bold text-navy-800">{{ summary.recent_round_count }}</div></div>
+        <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Missing Previews</div><div class="text-3xl font-bold text-red-700">{{ summary.missing_preview_count }}</div></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Most Used</h2>
+            <div class="space-y-2">
+                {% for song in summary.most_used_songs %}
+                <div class="border-b border-gray-100 pb-2">
+                    <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
+                    <div class="text-xs text-gray-500">Used {{ song.used_count or 0 }}x{% if song.last_used %} · {{ song.last_used }}{% endif %}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Unused Candidates</h2>
+            <div class="space-y-2">
+                {% for song in summary.unused_candidates %}
+                <div class="border-b border-gray-100 pb-2">
+                    <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
+                    <div class="text-xs text-gray-500">{{ song.year or 'Unknown year' }}{% if song.genre %} · {{ song.genre }}{% endif %}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Genres</h2>
+            <div class="space-y-2">
+                {% for genre, count in summary.genre_counts.items() %}
+                <div>
+                    <div class="flex justify-between text-sm"><span>{{ genre }}</span><span>{{ count }}</span></div>
+                    <div class="h-2 bg-gray-100 rounded"><div class="h-2 bg-teal-500 rounded" style="width: {{ (count / summary.song_count * 100) if summary.song_count else 0 }}%"></div></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

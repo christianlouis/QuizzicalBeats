@@ -172,6 +172,50 @@ class TestRoundsListRoute:
         assert b'Paged Round 29' not in second_page.data
         assert b'Page 2 of 2' in second_page.data
 
+    def test_round_calendar_shows_scheduled_exports(self, app, client):
+        """Round calendar should expose scheduled delivery dates."""
+        _login(app, client)
+        song_ids = _create_songs(app, 8, title_prefix='Calendar Song')
+        round_id = _create_round(app, song_ids, name='Calendar Round')
+        with app.app_context():
+            db.session.add(RoundExport(
+                round_id=round_id,
+                export_type='email',
+                status='scheduled',
+                destination='rounds@example.test',
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            ))
+            db.session.commit()
+
+        response = client.get('/rounds/calendar')
+
+        assert response.status_code == 200
+        assert b'Calendar Round' in response.data
+        assert b'2026-07-09 17:00' in response.data
+
+    def test_round_analytics_page_renders_summary(self, app, client):
+        """Round analytics should render catalog health signals."""
+        _login(app, client)
+        _create_song(app, title='Analytics Song')
+
+        response = client.get('/rounds/analytics?months=6&limit=5')
+
+        assert response.status_code == 200
+        assert b'Round Analytics' in response.data
+        assert b'Missing Previews' in response.data
+
+    def test_round_planning_page_renders_brief(self, app, client):
+        """Planning page should turn quizmaster context into a brief."""
+        _login(app, client)
+
+        response = client.get(
+            '/rounds/planning?theme=festival&quiz_date=2026-07-09T19:00&desired_song_count=8'
+        )
+
+        assert response.status_code == 200
+        assert b'Round Planning Brief' in response.data
+        assert b'Build exactly 8 songs' in response.data
+
     def test_rounds_list_only_shows_visible_owned_or_shared_rounds(self, app, client):
         """Round ownership should keep private rounds out of other quizmasters' lists."""
         _login(app, client, username='visible_owner', email='visible_owner@example.com')
@@ -255,6 +299,28 @@ class TestRoundDetailRoute:
         response = client.get(f'/rounds/{round_id}')
         assert response.status_code == 200
 
+    def test_round_detail_shows_review_and_audio_scripts(self, app, client):
+        """Round detail should surface review state and script drafts."""
+        _login(app, client)
+        song_id = _create_song(app, title='Script Detail Song')
+        round_id = _create_round(app, [song_id], name='Script Detail Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.review_status = 'reviewed'
+            db.session.add(RoundAudioScript(
+                round_id=round_id,
+                script_type='intro',
+                text='Welcome to the review round',
+                status='draft',
+            ))
+            db.session.commit()
+
+        response = client.get(f'/rounds/{round_id}')
+
+        assert response.status_code == 200
+        assert b'Reviewed' in response.data
+        assert b'Welcome to the review round' in response.data
+
     def test_round_detail_hides_private_round_owned_by_other_user(self, app, client):
         """Private owned rounds should not be visible to other quizmasters."""
         _login(app, client, username='viewer_one', email='viewer_one@example.com')
@@ -320,6 +386,130 @@ class TestRoundDetailRoute:
         assert response.status_code == 200
         with app.app_context():
             assert db.session.get(Round, round_id).name == 'Editor Updated Round'
+
+    def test_update_round_review_marks_approval(self, app, client):
+        """Review route should persist approved state and notes."""
+        _login(app, client)
+        song_id = _create_song(app, title='Approved Song')
+        round_id = _create_round(app, [song_id], name='Approval Round')
+
+        response = client.post(
+            f'/rounds/{round_id}/review',
+            data={'review_status': 'approved', 'review_notes': 'Ready for Thursday'},
+        )
+
+        assert response.status_code == 302
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            assert round_.review_status == 'approved'
+            assert round_.review_notes == 'Ready for Thursday'
+            assert round_.approved_at is not None
+            assert round_.approved_by_id is not None
+
+        response = client.post(
+            f'/rounds/{round_id}/review',
+            data={'review_status': 'reviewed', 'review_notes': 'Needs another pass'},
+        )
+
+        assert response.status_code == 302
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            assert round_.review_status == 'reviewed'
+            assert round_.review_notes == 'Needs another pass'
+            assert round_.approved_at is None
+            assert round_.approved_by_id is None
+
+    def test_round_quality_endpoint_returns_repair_report(self, app, client):
+        """Quality endpoint should expose automation repair feedback."""
+        _login(app, client)
+        song_id = _create_song(app, title='Quality Song')
+        round_id = _create_round(app, [song_id], name='Quality Round')
+        payload = {
+            'quality': {'status': 'needs_substitution'},
+            'report': {'ok': False, 'summary': 'Needs replacement', 'failed_positions': []},
+        }
+        with patch('musicround.routes.rounds.automation.round_repair_report', return_value=payload):
+            response = client.get(f'/rounds/{round_id}/quality')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['report']['summary'] == 'Needs replacement'
+
+    def test_replacement_endpoints_proxy_automation(self, app, client):
+        """Replacement routes should make repair candidates actionable."""
+        _login(app, client)
+        song_id = _create_song(app, title='Broken Song')
+        replacement_id = _create_song(app, title='Replacement Song')
+        round_id = _create_round(app, [song_id], name='Repair Round')
+        suggestions = {
+            'round_id': round_id,
+            'position': 1,
+            'suggestions': [{'id': replacement_id, 'title': 'Replacement Song'}],
+            'count': 1,
+        }
+        replacement = {
+            'round': {'id': round_id},
+            'position': 1,
+            'replacement_song': {'id': replacement_id},
+        }
+        with patch('musicround.routes.rounds.automation.suggest_replacement_songs', return_value=suggestions):
+            response = client.get(f'/rounds/{round_id}/replacement-suggestions?position=1')
+        assert response.status_code == 200
+        assert response.get_json()['suggestions'][0]['id'] == replacement_id
+
+        with patch('musicround.routes.rounds.automation.replace_round_song', return_value=replacement):
+            response = client.post(
+                f'/rounds/{round_id}/replace-song',
+                data={'position': '1', 'replacement_song_id': str(replacement_id)},
+            )
+        assert response.status_code == 200
+        assert response.get_json()['success'] is True
+
+    def test_audio_script_routes_create_and_update_review_records(self, app, client):
+        """Script routes should connect browser review to automation helpers."""
+        _login(app, client)
+        song_id = _create_song(app, title='Announcement Song')
+        round_id = _create_round(app, [song_id], name='Announcement Round')
+
+        with patch('musicround.routes.rounds.automation.draft_round_audio_scripts') as draft_scripts:
+            response = client.post(
+                f'/rounds/{round_id}/draft-audio-scripts',
+                data={'theme': 'summer', 'tone': 'warm'},
+            )
+        assert response.status_code == 302
+        draft_scripts.assert_called_once()
+
+        with patch('musicround.routes.rounds.automation.draft_round_track_hints') as draft_hints:
+            response = client.post(
+                f'/rounds/{round_id}/draft-track-hints',
+                data={'tone': 'playful'},
+            )
+        assert response.status_code == 302
+        draft_hints.assert_called_once()
+
+        with app.app_context():
+            script = RoundAudioScript(
+                round_id=round_id,
+                script_type='intro',
+                text='Draft',
+                status='draft',
+            )
+            db.session.add(script)
+            db.session.commit()
+            script_id = script.id
+
+        response = client.post(
+            f'/rounds/{round_id}/audio-scripts/{script_id}',
+            data={'text': 'Approved draft', 'status': 'approved', 'selected': 'on'},
+        )
+
+        assert response.status_code == 302
+        with app.app_context():
+            script = db.session.get(RoundAudioScript, script_id)
+            assert script.status == 'approved'
+            assert script.selected is True
+            assert script.text == 'Approved draft'
 
 
 class TestRoundUpdateName:
