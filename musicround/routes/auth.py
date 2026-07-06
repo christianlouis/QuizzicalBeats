@@ -10,6 +10,7 @@ from datetime import datetime
 import requests
 import secrets
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_spotify_user_info, get_oauth_redirect_uri
+from musicround.helpers.utils import is_safe_url
 from musicround.helpers.logging_utils import oauth_token_log_summary
 
 # Create blueprint
@@ -81,7 +82,7 @@ def callback():
             current_app.logger.info(f"User {user.username} logged in via Spotify ({spotify_info.get('name')})")
             
             next_page = request.args.get('next') or session.pop('next_url', None)
-            if not next_page or not next_page.startswith('/'):
+            if not is_safe_url(next_page):
                 next_page = url_for('core.index')
             return redirect(next_page)
         else:

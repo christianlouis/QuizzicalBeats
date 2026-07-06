@@ -302,3 +302,26 @@ def generate_tts_mp3(text, username, mp3_type, service='polly', voice=None, mode
     except Exception as e:
         current_app.logger.error(f"Error generating TTS MP3: {str(e)}")
         return None
+
+from urllib.parse import urlparse
+
+def is_safe_url(target):
+    """
+    Validates redirect URLs to prevent Open Redirect vulnerabilities.
+    Ensures the URL is a relative path and not pointing to an external domain.
+    """
+    if not target or not isinstance(target, str):
+        return False
+
+    if not target.startswith('/'):
+        return False
+
+    # Block bypass patterns
+    if target.startswith('//') or target.startswith('\\\\') or target.startswith('/\\') or target.startswith('\\/'):
+        return False
+
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return False
+
+    return True
