@@ -19,11 +19,17 @@ def get_all_decades():
     based on the first 3 digits of the year + '0'.
     """
     all_decades = []
-    for song in Song.query.all():
-        if song.year:
-            decade = str(song.year)[:3] + '0'
-            if decade not in all_decades:
-                all_decades.append(decade)
+    years = (
+        Song.query.with_entities(Song.year)
+        .filter(Song.year.isnot(None))
+        .order_by(Song.year.asc())
+        .distinct()
+        .all()
+    )
+    for (year,) in years:
+        decade = str(year)[:3] + '0'
+        if decade not in all_decades:
+            all_decades.append(decade)
     return all_decades
 
 def get_all_genres():
