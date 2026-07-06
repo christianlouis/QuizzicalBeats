@@ -185,6 +185,43 @@ class TestDeleteBackup:
         assert 'Permission denied' not in result['message']
 
 
+class TestCreateBackup:
+    """Tests for create_backup function."""
+
+    def test_create_backup_rejects_managed_database_without_uri_leak(self, app):
+        """Application backups should fail safely for non-SQLite databases."""
+        from musicround.helpers.backup_helper import BACKUP_SQLITE_ONLY_MESSAGE, create_backup
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = (
+            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+        )
+        app.config['DATABASE_BACKEND'] = 'postgresql'
+
+        with patch('musicround.helpers.backup_helper.os.makedirs'):
+            result = create_backup()
+
+        assert result['status'] == 'error'
+        assert result['message'] == BACKUP_SQLITE_ONLY_MESSAGE
+        assert result['path'] is None
+        assert 'super-secret' not in result['message']
+        assert 'postgresql://' not in result['message']
+
+    def test_create_backup_missing_sqlite_file_hides_path(self, app, tmp_path):
+        """Missing SQLite files should not be returned verbatim to the browser."""
+        from musicround.helpers.backup_helper import create_backup
+
+        missing_db = tmp_path / 'missing.db'
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{missing_db}'
+        app.config['DATABASE_BACKEND'] = 'sqlite'
+
+        with patch('musicround.helpers.backup_helper.os.makedirs'):
+            result = create_backup()
+
+        assert result['status'] == 'error'
+        assert result['message'] == 'Database file not found.'
+        assert str(missing_db) not in result['message']
+
+
 class TestVerifyBackup:
     """Tests for verify_backup function."""
 
@@ -277,6 +314,25 @@ class TestVerifyBackup:
 
 class TestRestoreBackup:
     """Tests for restore_backup function."""
+
+    def test_restore_backup_rejects_managed_database_without_uri_leak(self, app):
+        """Application restores should fail safely for non-SQLite databases."""
+        from musicround.helpers.backup_helper import BACKUP_SQLITE_ONLY_MESSAGE, restore_backup
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = (
+            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+        )
+        app.config['DATABASE_BACKEND'] = 'postgresql'
+
+        with patch('musicround.helpers.backup_helper.os.path.exists', return_value=True), \
+             patch('musicround.helpers.backup_helper.zipfile.ZipFile') as zip_file:
+            result = restore_backup('valid.zip')
+
+        assert result['status'] == 'error'
+        assert result['message'] == BACKUP_SQLITE_ONLY_MESSAGE
+        assert 'super-secret' not in result['message']
+        assert 'postgresql://' not in result['message']
+        zip_file.assert_not_called()
 
     def test_restore_backup_accepts_database_db_filename(self, app, tmp_path):
         """Test restore_backup restores a backup whose DB member is database.db."""
@@ -497,6 +553,26 @@ class TestGetBackupSummary:
 
         assert summary['schedule_enabled'] is True
         assert summary['next_backup'] is not None
+
+    def test_get_backup_summary_reports_managed_database_backup_warning(self, app):
+        """Backup summary should expose a safe warning for managed databases."""
+        from musicround.helpers.backup_helper import get_backup_summary
+
+        app.config['SQLALCHEMY_DATABASE_URI'] = (
+            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+        )
+        app.config['DATABASE_BACKEND'] = 'postgresql'
+
+        with patch('musicround.helpers.backup_helper.list_backups', return_value=[]):
+            summary = get_backup_summary()
+
+        assert summary['supports_application_backup'] is False
+        assert summary['database_backend'] == 'postgresql'
+        assert summary['database_host'] == 'postgres.example'
+        assert summary['database_name'] == 'quizzicalbeats'
+        assert 'managed database backup tooling' in summary['backup_warning']
+        assert 'super-secret' not in summary['backup_warning']
+        assert 'postgresql://' not in summary['backup_warning']
 
 
 class TestGenerateBackupConfigSuggestion:

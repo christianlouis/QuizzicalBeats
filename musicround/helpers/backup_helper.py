@@ -12,15 +12,60 @@ from datetime import datetime
 import tempfile
 from flask import current_app
 
+from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
 BACKUP_DATABASE_FILENAMES = ('song_data.db', 'database.db')
+BACKUP_SQLITE_ONLY_MESSAGE = (
+    "Application backup and restore only support SQLite file databases. "
+    "Use managed database backup tooling for the configured database backend."
+)
+BACKUP_SQLITE_MEMORY_MESSAGE = (
+    "Application backup and restore require a SQLite file database. "
+    "In-memory databases cannot be backed up."
+)
 
 
 def _safe_backup_error_message(action):
     """Return a browser-safe backup operation error message."""
     return f"{action} failed. Check the server logs."
+
+
+def _application_backup_support():
+    db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    summary = database_summary(db_uri)
+    supported = is_sqlite_database_uri(db_uri)
+    warning = None
+    if not supported:
+        warning = BACKUP_SQLITE_ONLY_MESSAGE
+    elif db_uri.endswith(':memory:'):
+        supported = False
+        warning = BACKUP_SQLITE_MEMORY_MESSAGE
+
+    return {
+        "supported": supported,
+        "warning": warning,
+        "database_backend": current_app.config.get("DATABASE_BACKEND") or summary["backend"],
+        "database": summary["database"],
+        "host": summary["host"],
+        "redacted_uri": summary["redacted_uri"],
+    }
+
+
+def _configured_sqlite_database_path():
+    db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    support = _application_backup_support()
+    if not support["supported"]:
+        logger.warning(
+            "Application backup requested for unsupported database backend %s (%s)",
+            support["database_backend"],
+            support["redacted_uri"],
+        )
+        return None, support["warning"]
+
+    return db_uri.replace('sqlite:///', '', 1), None
 
 
 def _find_database_member(file_list):
@@ -99,7 +144,13 @@ def create_backup(backup_name=None, include_mp3s=True, include_config=True):
         # Create a temporary directory for collecting files
         with tempfile.TemporaryDirectory() as temp_dir:
             # Step 1: Backup the database
-            db_path = current_app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
+            db_path, database_error = _configured_sqlite_database_path()
+            if database_error:
+                return {
+                    "status": "error",
+                    "message": database_error,
+                    "path": None
+                }
             
             if os.path.exists(db_path):
                 # Create a copy of the database (to avoid locking issues)
@@ -117,7 +168,7 @@ def create_backup(backup_name=None, include_mp3s=True, include_config=True):
                 logger.error(f"Database not found at {db_path}")
                 return {
                     "status": "error",
-                    "message": f"Database not found at {db_path}",
+                    "message": "Database file not found.",
                     "path": None
                 }
             
@@ -314,6 +365,13 @@ def restore_backup(backup_filename):
             "status": "error",
             "message": f"Backup file {backup_filename} not found"
         }
+
+    db_path, database_error = _configured_sqlite_database_path()
+    if database_error:
+        return {
+            "status": "error",
+            "message": database_error
+        }
     
     try:
         # Create a temporary directory for extracting backup
@@ -343,7 +401,6 @@ def restore_backup(backup_filename):
             # Restore database
             db_member_name = _find_database_member(os.listdir(temp_dir))
             db_backup_path = os.path.join(temp_dir, db_member_name) if db_member_name else None
-            db_path = current_app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
             
             if db_backup_path and os.path.exists(db_backup_path):
                 is_valid_db, validation_error = _validate_sqlite_database(db_backup_path)
@@ -615,6 +672,7 @@ def get_backup_summary():
     
     # Get latest backup info
     latest_backup = backups[0] if backups else None
+    application_backup = _application_backup_support()
     
     return {
         "backup_count": len(backups),
@@ -624,7 +682,12 @@ def get_backup_summary():
         "schedule_frequency": schedule_frequency,
         "next_backup": next_backup,
         "backup_location": "/data/backups",
-        "retention_days": retention_days
+        "retention_days": retention_days,
+        "supports_application_backup": application_backup["supported"],
+        "backup_warning": application_backup["warning"],
+        "database_backend": application_backup["database_backend"],
+        "database_host": application_backup["host"],
+        "database_name": application_backup["database"],
     }
 
 def generate_backup_config_suggestion(retention_days=30):

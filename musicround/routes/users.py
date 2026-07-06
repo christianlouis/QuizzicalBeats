@@ -1422,6 +1422,11 @@ def backup_manager():
     next_backup = backup_summary.get('next_backup')
     backup_location = backup_summary.get('backup_location')
     retention_days = backup_summary.get('retention_days', 30)
+    supports_application_backup = backup_summary.get('supports_application_backup', True)
+    backup_warning = backup_summary.get('backup_warning')
+    database_backend = backup_summary.get('database_backend', 'sqlite')
+    database_host = backup_summary.get('database_host')
+    database_name = backup_summary.get('database_name')
     
     # Generate configuration suggestion instead of Docker Compose labels
     config_suggestion = generate_backup_config_suggestion(retention_days=retention_days)
@@ -1446,6 +1451,11 @@ def backup_manager():
         next_backup=next_backup,
         backup_location=backup_location,
         retention_days=retention_days,
+        supports_application_backup=supports_application_backup,
+        backup_warning=backup_warning,
+        database_backend=database_backend,
+        database_host=database_host,
+        database_name=database_name,
         show_schedule_form=show_schedule_form,
         show_create_form=show_create_form,
         notification=notification,
