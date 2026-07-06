@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserved Spotify playlist import order when the importer returns database song IDs directly.
 - Kept round package preview failures aligned to stored round positions even when unresolved song IDs create gaps.
 - Added playlist import position maps to MCP round-creation success and repair payloads.
+- Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"

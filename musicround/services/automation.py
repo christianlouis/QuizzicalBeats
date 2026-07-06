@@ -72,23 +72,69 @@ def _ordered_round_songs(round_obj: Round) -> list[Song]:
     return [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
 
 
-def _playlist_position_map(song_ids: list[int], expected_count: int | None = None) -> list[dict[str, Any]]:
+def _playlist_position_map(
+    song_ids: list[int],
+    expected_count: int | None = None,
+    source_positions: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     limit = expected_count if expected_count is not None else len(song_ids)
-    return [
-        {
+    if source_positions:
+        positions = []
+        selected = source_positions[:limit]
+        for index, source in enumerate(selected):
+            song_id = source.get("song_id")
+            try:
+                song_id = int(song_id) if song_id is not None else None
+            except (TypeError, ValueError):
+                song_id = None
+            status = source.get("status") or ("resolved" if song_id else "failed")
+            positions.append({
+                "position": source.get("position") or index + 1,
+                "song_id": song_id,
+                "resolved": bool(song_id) and status == "resolved",
+                "status": status,
+                "spotify_track_id": source.get("spotify_track_id"),
+                "artist": source.get("artist"),
+                "title": source.get("title"),
+                "reason": source.get("reason"),
+            })
+        for index in range(len(selected), limit):
+            positions.append({
+                "position": index + 1,
+                "song_id": None,
+                "resolved": False,
+                "status": "missing",
+                "spotify_track_id": None,
+                "artist": None,
+                "title": None,
+                "reason": "no_playlist_position",
+            })
+        return positions
+
+    positions = []
+    for index, song_id in enumerate(song_ids[:limit]):
+        positions.append({
             "position": index + 1,
-            "song_id": song_id if index < len(song_ids) else None,
-            "resolved": index < len(song_ids),
-        }
-        for index, song_id in enumerate(song_ids[:limit])
-    ] + [
-        {
+            "song_id": song_id,
+            "resolved": True,
+            "status": "resolved",
+            "spotify_track_id": None,
+            "artist": None,
+            "title": None,
+            "reason": None,
+        })
+    for index in range(len(song_ids), limit):
+        positions.append({
             "position": index + 1,
             "song_id": None,
             "resolved": False,
-        }
-        for index in range(len(song_ids), limit)
-    ]
+            "status": "missing",
+            "spotify_track_id": None,
+            "artist": None,
+            "title": None,
+            "reason": "not_resolved",
+        })
+    return positions
 
 
 def _song_summary(song: Song) -> dict[str, Any]:
@@ -1213,15 +1259,24 @@ def create_round_from_playlist(
     """Import a playlist and create a manual round from the imported songs."""
     imported = import_catalog_item(service_name, "playlist", playlist_id_or_url, user_id=user_id)
     playlist_id = imported["item_id"]
-    if service_name.lower() == "spotify":
+    source_positions = imported.get("result", {}).get("playlist_positions") or []
+    if source_positions:
+        position_map = _playlist_position_map([], count, source_positions=source_positions)
+        song_ids = [
+            item["song_id"]
+            for item in position_map
+            if item["resolved"] and item.get("song_id") is not None
+        ]
+    elif service_name.lower() == "spotify":
         song_ids = _spotify_playlist_song_ids(playlist_id, count, user_id)
+        position_map = _playlist_position_map(song_ids, count)
     else:
         song_ids = imported.get("result", {}).get(
             "imported_song_ids"
         ) or _deezer_playlist_song_ids(playlist_id, count)
-    if not song_ids:
+        position_map = _playlist_position_map(song_ids, count)
+    if not song_ids and not position_map:
         raise AutomationError("Playlist import did not return song IDs to build a round.")
-    position_map = _playlist_position_map(song_ids, count)
     if len(song_ids) < count:
         message = (
             f"Playlist import resolved {len(song_ids)} songs; "

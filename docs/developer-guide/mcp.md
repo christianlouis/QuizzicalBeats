@@ -113,7 +113,10 @@ explicitly set.
    every row resolves.
 5. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
-   round when fewer than the requested eight tracks resolve.
+   round when fewer than the requested eight tracks resolve. Spotify playlist
+   imports include `resolved_positions` with playlist position, Spotify track
+   ID, artist, title, QB song ID, status, and failure reason so agents can
+   repair specific positions.
 6. Link the plan to the generated round with `link_planned_quiz_round`.
 7. Generate PDF and MP3 files with `generate_round_assets`.
 8. Inspect the generated files and previews with `inspect_round_package`.

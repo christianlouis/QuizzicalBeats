@@ -87,6 +87,44 @@ class FakeSpotifyClient:
         raise AssertionError(f'Unexpected Spotify path: {path}')
 
 
+class FakeSpotifyPlaylistClient:
+    """Spotify client stub for playlist position mapping."""
+
+    token = None
+
+    def __init__(self):
+        self.calls = []
+
+    def get(self, path, token=None):
+        self.calls.append((path, token))
+        if path == 'playlists/playlist-positions?fields=name,tracks.next':
+            return FakeSpotifyResponse({
+                'name': 'Position Test',
+                'tracks': {'next': None},
+            })
+        if path == 'playlists/playlist-positions/tracks':
+            return FakeSpotifyResponse({
+                'items': [
+                    {
+                        'track': {
+                            'id': 'spotify-existing',
+                            'name': 'Existing Track',
+                            'artists': [{'name': 'Existing Artist'}],
+                        }
+                    },
+                    {
+                        'track': {
+                            'id': None,
+                            'name': 'Broken Track',
+                            'artists': [{'name': 'Broken Artist'}],
+                        }
+                    },
+                ],
+                'next': None,
+            })
+        raise AssertionError(f'Unexpected Spotify path: {path}')
+
+
 class FailingSpotifyClient:
     """Spotify client stub that fails every request."""
 
@@ -386,6 +424,49 @@ class TestImportHelperSpotifyTokens:
         ]
         assert 'secret' not in response['errors'][0]
         assert 'refresh_token' not in response['errors'][0]
+
+    def test_spotify_playlist_returns_position_mapping_for_existing_and_failed_tracks(self, app):
+        """Playlist imports should expose repairable per-position mapping details."""
+        spotify = FakeSpotifyPlaylistClient()
+        with app.test_request_context():
+            existing = Song(
+                title='Existing Track',
+                artist='Existing Artist',
+                spotify_id='spotify-existing',
+            )
+            db.session.add(existing)
+            db.session.commit()
+
+            response = ImportHelper.import_item(
+                'spotify',
+                'playlist',
+                'playlist-positions',
+                oauth_spotify=spotify,
+                spotify_token='manual-token',
+            )
+
+        assert response['imported_count'] == 0
+        assert response['skipped_count'] == 1
+        assert response['error_count'] == 1
+        assert response['imported_song_ids'] == [existing.id]
+        assert response['playlist_positions'][0] == {
+            'position': 1,
+            'spotify_track_id': 'spotify-existing',
+            'artist': 'Existing Artist',
+            'title': 'Existing Track',
+            'song_id': existing.id,
+            'status': 'resolved',
+            'reason': None,
+        }
+        assert response['playlist_positions'][1] == {
+            'position': 2,
+            'spotify_track_id': None,
+            'artist': 'Broken Artist',
+            'title': 'Broken Track',
+            'song_id': None,
+            'status': 'failed',
+            'reason': 'missing_spotify_track_id',
+        }
 
     def test_spotify_track_http_status_returns_sanitized_error(self, app):
         """Spotify HTTP errors must not expose provider response details."""

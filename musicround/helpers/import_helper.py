@@ -339,7 +339,14 @@ class ImportHelper:
                     imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id, token=auth_token)
                     if imported_songs and imported_songs.get('error_count', 0) > 0:
                         return imported_songs
-                    if not imported_songs or imported_songs.get('imported_count', 0) == 0:
+                    if (
+                        not imported_songs
+                        or (
+                            imported_songs.get('imported_count', 0) == 0
+                            and imported_songs.get('skipped_count', 0) == 0
+                            and not imported_songs.get('imported_song_ids')
+                        )
+                    ):
                         current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
                         item_label = ImportHelper._safe_item_label(item_id)
                         return {
@@ -526,6 +533,7 @@ class ImportHelper:
             if existing_song:
                 current_app.logger.info(f'Spotify track ID {track_id} already exists as song: {existing_song.title} by {existing_song.artist}')
                 result['skipped_count'] += 1
+                result['song_id'] = existing_song.id
                 return result
                 
             resp = sp.get(f'tracks/{track_id}', token=authlib_token_for_request)
@@ -557,6 +565,7 @@ class ImportHelper:
                     # Potentially update other Spotify-specific fields if they are missing or different
                     db.session.commit()
                     result['skipped_count'] += 1
+                    result['song_id'] = existing_by_isrc.id
                     return result
                 
                 current_app.logger.info(f"Looking up comprehensive metadata for ISRC: {isrc}")
@@ -799,7 +808,8 @@ class ImportHelper:
             'skipped_count': 0,
             'error_count': 0,
             'errors': [],
-            'imported_song_ids': []  # Track IDs of successfully imported songs
+            'imported_song_ids': [],  # Database song IDs in playlist order
+            'playlist_positions': [],
         }
 
         authlib_token_for_request = ImportHelper._resolve_spotify_auth_token(token)
@@ -846,20 +856,45 @@ class ImportHelper:
                     current_app.logger.warning(f"No tracks found in playlist '{playlist_name}' (ID: {playlist_id}). It might be empty.")
                 
                 for item_wrapper in track_items:
+                    position = len(result['playlist_positions']) + 1
                     track_info_obj = item_wrapper.get('track')
                     if not track_info_obj or not isinstance(track_info_obj, dict): # Skip if track is None (e.g., local file) or not a dict
                         current_app.logger.warning(f"Skipping item in playlist '{playlist_name}' (ID: {playlist_id}) as it's not a valid track object or is unavailable: {track_info_obj}")
                         item_label = ImportHelper._safe_item_label(playlist_id)
                         result['errors'].append(f"Skipped an invalid/unavailable item in Spotify playlist {item_label}.")
+                        result['playlist_positions'].append({
+                            'position': position,
+                            'spotify_track_id': None,
+                            'artist': None,
+                            'title': None,
+                            'song_id': None,
+                            'status': 'failed',
+                            'reason': 'unavailable_track',
+                        })
                         # Not necessarily an error_count increment unless we want to be strict
                         continue
 
                     track_id = track_info_obj.get('id')
+                    artists = ", ".join(
+                        artist.get('name', '')
+                        for artist in track_info_obj.get('artists', [])
+                        if artist.get('name')
+                    ) or None
+                    title = track_info_obj.get('name')
                     if not track_id: # Should not happen if track_info_obj is valid
                         current_app.logger.warning(f"Skipping track with no ID in playlist '{playlist_name}' (ID: {playlist_id})")
                         item_label = ImportHelper._safe_item_label(playlist_id)
                         result['errors'].append(f"Found a track with no ID in Spotify playlist {item_label}.")
                         result['error_count'] +=1
+                        result['playlist_positions'].append({
+                            'position': position,
+                            'spotify_track_id': None,
+                            'artist': artists,
+                            'title': title,
+                            'song_id': None,
+                            'status': 'failed',
+                            'reason': 'missing_spotify_track_id',
+                        })
                         continue
                     track_import_result = ImportHelper.import_spotify_track(
                         sp,
@@ -874,9 +909,18 @@ class ImportHelper:
                     if track_import_result.get('errors'):
                         result['errors'].extend(track_import_result['errors'])
                     
-                    # Track the song ID if it was successfully imported
-                    if track_import_result.get('imported_count', 0) > 0 and track_import_result.get('song_id'):
-                        result['imported_song_ids'].append(track_import_result['song_id'])
+                    song_id = track_import_result.get('song_id')
+                    if song_id:
+                        result['imported_song_ids'].append(song_id)
+                    result['playlist_positions'].append({
+                        'position': position,
+                        'spotify_track_id': track_id,
+                        'artist': artists,
+                        'title': title,
+                        'song_id': song_id,
+                        'status': 'resolved' if song_id else 'failed',
+                        'reason': None if song_id else 'import_failed',
+                    })
                 
                 tracks_url = tracks_data.get('next')
                 if tracks_url:
@@ -884,6 +928,7 @@ class ImportHelper:
                 else:
                     current_app.logger.info(f"No more track pages for playlist '{playlist_name}' (ID: {playlist_id}).")
             db.session.commit() # Commit any changes made by track imports
+            return result
         except Exception as e:
             current_app.logger.error(
                 "Error importing Spotify playlist %s: %s",

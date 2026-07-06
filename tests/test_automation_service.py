@@ -209,11 +209,10 @@ class TestRoundAutomation:
             assert exc_info.value.details["status"] == "needs_more_songs"
             assert exc_info.value.details["expected_song_count"] == 8
             assert exc_info.value.details["resolved_song_count"] == 1
-            assert exc_info.value.details["resolved_positions"][0] == {
-                "position": 1,
-                "song_id": song.id,
-                "resolved": True,
-            }
+            assert exc_info.value.details["resolved_positions"][0]["position"] == 1
+            assert exc_info.value.details["resolved_positions"][0]["song_id"] == song.id
+            assert exc_info.value.details["resolved_positions"][0]["resolved"] is True
+            assert exc_info.value.details["resolved_positions"][1]["reason"] == "not_resolved"
             assert exc_info.value.details["missing_positions"] == [2, 3, 4, 5, 6, 7, 8]
 
     def test_create_round_from_playlist_returns_resolved_position_map(self, app):
@@ -224,7 +223,31 @@ class TestRoundAutomation:
             with (
                 patch(
                     "musicround.services.automation.import_catalog_item",
-                    return_value={"item_id": "playlist123", "result": {}},
+                    return_value={
+                        "item_id": "playlist123",
+                        "result": {
+                            "playlist_positions": [
+                                {
+                                    "position": 1,
+                                    "spotify_track_id": "spotify-first",
+                                    "artist": "A",
+                                    "title": "First",
+                                    "song_id": first_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                                {
+                                    "position": 2,
+                                    "spotify_track_id": "spotify-second",
+                                    "artist": "B",
+                                    "title": "Second",
+                                    "song_id": second_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                            ],
+                        },
+                    },
                 ),
                 patch(
                     "musicround.services.automation._spotify_playlist_song_ids",
@@ -238,10 +261,84 @@ class TestRoundAutomation:
                 )
 
             assert result["round"]["song_ids"] == [first_song.id, second_song.id]
-            assert result["resolved_positions"] == [
-                {"position": 1, "song_id": first_song.id, "resolved": True},
-                {"position": 2, "song_id": second_song.id, "resolved": True},
-            ]
+            assert result["resolved_positions"][0] == {
+                "position": 1,
+                "song_id": first_song.id,
+                "resolved": True,
+                "status": "resolved",
+                "spotify_track_id": "spotify-first",
+                "artist": "A",
+                "title": "First",
+                "reason": None,
+            }
+            assert result["resolved_positions"][1]["spotify_track_id"] == "spotify-second"
+
+    def test_create_round_from_playlist_preserves_failed_source_positions(self, app):
+        with app.app_context():
+            first_song = _create_song(title="First", artist="A")
+            third_song = _create_song(title="Third", artist="C")
+
+            with (
+                patch(
+                    "musicround.services.automation.import_catalog_item",
+                    return_value={
+                        "item_id": "playlist123",
+                        "result": {
+                            "playlist_positions": [
+                                {
+                                    "position": 1,
+                                    "spotify_track_id": "spotify-first",
+                                    "artist": "A",
+                                    "title": "First",
+                                    "song_id": first_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                                {
+                                    "position": 2,
+                                    "spotify_track_id": None,
+                                    "artist": "B",
+                                    "title": "Broken",
+                                    "song_id": None,
+                                    "status": "failed",
+                                    "reason": "missing_spotify_track_id",
+                                },
+                                {
+                                    "position": 3,
+                                    "spotify_track_id": "spotify-third",
+                                    "artist": "C",
+                                    "title": "Third",
+                                    "song_id": third_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                            ],
+                        },
+                    },
+                ),
+                patch("musicround.services.automation._spotify_playlist_song_ids") as mock_song_ids,
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.create_round_from_playlist(
+                        "spotify",
+                        "playlist123",
+                        count=3,
+                    )
+
+            mock_song_ids.assert_not_called()
+            assert exc_info.value.details["resolved_song_count"] == 2
+            assert exc_info.value.details["missing_positions"] == [2]
+            assert exc_info.value.details["resolved_positions"][1] == {
+                "position": 2,
+                "song_id": None,
+                "resolved": False,
+                "status": "failed",
+                "spotify_track_id": None,
+                "artist": "B",
+                "title": "Broken",
+                "reason": "missing_spotify_track_id",
+            }
+            assert Round.query.count() == 0
 
     def test_replace_round_song_updates_position_and_invalidates_assets(self, app):
         with app.app_context():
