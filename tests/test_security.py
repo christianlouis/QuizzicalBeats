@@ -108,6 +108,25 @@ class TestSecurityConfiguration:
         security_md = os.path.join(project_root, 'SECURITY.md')
         assert os.path.exists(security_md), "SECURITY.md file should exist"
 
+    def test_no_standalone_debug_flask_apps_in_scripts(self):
+        """Debug Flask scripts should not bypass the app's auth and feature gates."""
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        scripts_dir = os.path.join(project_root, 'scripts')
+        offenders = []
+
+        for root, dirs, files in os.walk(scripts_dir):
+            dirs[:] = [d for d in dirs if d != '__pycache__']
+            for file in files:
+                if not file.endswith('.py'):
+                    continue
+                path = os.path.join(root, file)
+                with open(path, 'r', encoding='utf-8', errors='ignore') as handle:
+                    content = handle.read()
+                if 'Flask(' in content and 'debug=True' in content and 'app.run(' in content:
+                    offenders.append(os.path.relpath(path, project_root))
+
+        assert offenders == []
+
 
 class TestDependencySecurity:
     """Test dependency security."""
