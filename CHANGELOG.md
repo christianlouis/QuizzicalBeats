@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Dropbox export coverage to ensure unhealthy artifact storage blocks export before Dropbox refresh or upload calls.
 - Sanitized Dropbox helper error payloads so upload, shared-link, and unexpected refresh failures no longer return provider bodies or exception text to callers.
 - Sanitized Dropbox root-folder fallback errors so provider bodies and exception text stay out of JSON responses.
+- Sanitized round-delete failure responses so filesystem or database exception details are logged but not returned to users.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.

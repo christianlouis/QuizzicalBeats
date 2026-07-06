@@ -374,6 +374,25 @@ class TestRoundDelete:
         response = client.post('/rounds/99999/delete')
         assert response.status_code == 404
 
+    def test_delete_round_failure_hides_exception_details(self, app, client):
+        """Delete failures should not expose local exception text in JSON or flash."""
+        _login(app, client)
+        song_id = _create_song(app, title='Delete Failure Song')
+        round_id = _create_round(app, [song_id], name='Round Delete Failure')
+
+        with patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch('musicround.routes.rounds.os.remove') as mock_remove:
+            mock_remove.side_effect = RuntimeError('filesystem-secret /data/rounds')
+            response = client.post(f'/rounds/{round_id}/delete', follow_redirects=True)
+
+        assert response.status_code == 500
+        body = response.get_data(as_text=True)
+        assert 'filesystem-secret' not in body
+        assert '/data/rounds' not in body
+        assert response.get_json()['error'] == (
+            'Unable to delete the round. Please try again later or contact an administrator.'
+        )
+
 
 class TestRoundDownloadRoutes:
     """Tests for download routes."""

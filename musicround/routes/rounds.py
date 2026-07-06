@@ -907,9 +907,10 @@ def delete_round(round_id):
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error deleting round: {e}")
-        flash(f"Error deleting round: {e}", 'error')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error(f"Error deleting round {round_id}: {e}", exc_info=True)
+        error_msg = "Unable to delete the round. Please try again later or contact an administrator."
+        flash(error_msg, 'error')
+        return jsonify({'success': False, 'error': error_msg}), 500
 
 @rounds_bp.route('/<int:round_id>/export-to-dropbox', methods=['POST'])
 @login_required
