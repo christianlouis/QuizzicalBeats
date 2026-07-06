@@ -98,6 +98,27 @@ class TestUserRoutes:
         assert response.status_code == 200
 
 
+class TestSpotifyLoginCallbackSecurity:
+    """Tests for Spotify OAuth login callback error handling."""
+
+    def test_callback_failure_hides_oauth_exception_details(self, client):
+        """OAuth callback failures must not render provider or token details."""
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.authorize_access_token.side_effect = Exception(
+            'invalid_grant access_token=sp-secret refresh_token=sp-refresh'
+        )
+
+        with patch('musicround.routes.auth.oauth.spotify', new=mock_spotify_client, create=True):
+            response = client.get('/callback', follow_redirects=True)
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Spotify login failed. Please try again or reconnect Spotify.' in body
+        assert 'invalid_grant' not in body
+        assert 'sp-secret' not in body
+        assert 'sp-refresh' not in body
+
+
 class TestApiRoutes:
     """Tests for API blueprint routes."""
 
