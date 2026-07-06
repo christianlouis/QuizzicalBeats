@@ -18,6 +18,16 @@ from musicround.helpers.spotify_helper import get_spotify_token
 
 
 IMPORT_JOB_FAILURE_MESSAGE = "Import job failed. Check the server logs."
+IMPORT_JOB_RESULT_ERROR_MESSAGE = "Import completed with errors. Check the server logs."
+
+
+def _safe_result_error_summary(errors: list[Any]) -> str | None:
+    """Return a stable summary for import-result errors."""
+    if not errors:
+        return None
+    count = len(errors)
+    suffix = "error" if count == 1 else "errors"
+    return f"Import completed with {count} {suffix}. Check the server logs."
 
 
 @dataclass(order=True)
@@ -370,7 +380,7 @@ class ImportWorker(threading.Thread):
             return (
                 int(result.get("imported_count", 0) or 0),
                 int(skipped_count or 0),
-                "\n".join(str(error) for error in errors) or None,
+                _safe_result_error_summary(errors),
             )
 
         if isinstance(result, list):

@@ -578,6 +578,56 @@ class TestAssetInspection:
             assert "suggest_replacement_songs" in result["report"]["next_step"]
             assert "Replace position 1" in result["report"]["markdown"]
 
+    def test_preview_lookup_failure_hides_exception_details(self, app, tmp_path):
+        with app.app_context():
+            song = _create_song(title="Lookup Fail", artist="Artist", deezer_id="123")
+            app.config["deezer"] = type(
+                "FailingDeezer",
+                (),
+                {
+                    "get_track": lambda self, track_id: (
+                        (_ for _ in ()).throw(RuntimeError("deezer token=secret traceback"))
+                    )
+                },
+            )()
+
+            preview_url, audio, issue = automation._download_preview_audio(song, str(tmp_path))
+
+            assert preview_url is None
+            assert audio is None
+            assert issue["code"] == "deezer_lookup_failed"
+            assert "Check the server logs" in issue["message"]
+            assert "secret" not in issue["message"]
+            assert "traceback" not in issue["message"]
+
+    def test_preview_download_failure_hides_exception_details(self, app, tmp_path):
+        with app.app_context():
+            song = _create_song(title="Download Fail", artist="Artist", deezer_id="123")
+            app.config["deezer"] = type(
+                "PreviewDeezer",
+                (),
+                {
+                    "get_track": lambda self, track_id: {
+                        "preview": "https://example.test/preview.mp3?access_token=secret"
+                    }
+                },
+            )()
+
+            with patch(
+                "musicround.services.automation.requests.get",
+                side_effect=RuntimeError("http token=transport-secret traceback"),
+            ):
+                preview_url, audio, issue = automation._download_preview_audio(song, str(tmp_path))
+
+            assert preview_url == "https://example.test/preview.mp3?access_token=secret"
+            assert audio is None
+            assert issue["code"] == "preview_download_failed"
+            assert issue["details"] == {"preview_url_present": True}
+            body = str(issue)
+            assert "transport-secret" not in body
+            assert "access_token" not in body
+            assert "traceback" not in body
+
     def test_inspect_round_package_warns_for_short_preview(self, app):
         with app.app_context():
             user = _create_user()
@@ -658,6 +708,58 @@ class TestAssetInspection:
                 issue["code"] == "round_mp3_duration_mismatch"
                 for issue in result["issues"]
             )
+
+    def test_round_audio_component_failures_hide_exception_details(self, app):
+        with app.app_context():
+            user = _create_user()
+
+            with patch(
+                "musicround.services.automation.AudioSegment.from_mp3",
+                side_effect=RuntimeError("audio path=/srv/private token=secret"),
+            ):
+                components, issues = automation._round_audio_components(user, 1)
+
+            assert components["custom_audio_ms"] == {}
+            assert components["number_audio_ms"] == []
+            assert {issue["code"] for issue in issues} == {
+                "custom_audio_failed",
+                "number_audio_failed",
+            }
+            body = str(issues)
+            assert "secret" not in body
+            assert "/srv/private" not in body
+            assert "Check the server logs" in body
+
+    def test_generate_round_mp3_missing_file_hides_internal_path(self, app, tmp_path):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="No Output", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="No Output Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            private_dir = tmp_path / "private-token-secret-rounds"
+            private_dir.mkdir()
+            app.config["ROUND_MP3_DIR"] = str(private_dir)
+            expected_path = str(private_dir / f"round_{round_id}.mp3")
+            real_exists = os.path.exists
+
+            def fake_exists(path):
+                if path == expected_path:
+                    return False
+                return real_exists(path)
+
+            with (
+                patch("musicround.routes.rounds.round_mp3", return_value={"success": True}),
+                patch("musicround.services.automation.os.path.exists", side_effect=fake_exists),
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.generate_round_mp3(round_id, user_id=user.id)
+
+            message = str(exc_info.value)
+            assert message == automation.AUTOMATION_MP3_GENERATION_ERROR
+            assert "private-token-secret" not in message
 
     def test_email_round_blocks_when_package_quality_fails(self, app):
         with app.app_context():

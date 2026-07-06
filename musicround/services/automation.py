@@ -55,6 +55,7 @@ class AutomationError(ValueError):
 AUTOMATION_STORAGE_ERROR = "Round artifact storage is unhealthy."
 AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
 AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
+AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 
 
@@ -1268,7 +1269,8 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
 
     path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
     if not os.path.exists(path):
-        raise AutomationError(f"MP3 generation did not create {path}.")
+        current_app.logger.error("MP3 generation for round %s did not create %s", round_id, path)
+        raise AutomationError(AUTOMATION_MP3_GENERATION_ERROR)
     return {"round_id": round_id, "path": path, "bytes": os.path.getsize(path)}
 
 
@@ -1336,9 +1338,16 @@ def _download_preview_audio(
     try:
         track = deezer_client.get_track(song.deezer_id)
     except Exception as exc:
+        current_app.logger.error(
+            "Deezer metadata lookup failed for song %s (%s): %s",
+            song.id,
+            song.deezer_id,
+            exc,
+            exc_info=True,
+        )
         return None, None, _quality_issue(
             "deezer_lookup_failed",
-            f"Could not fetch Deezer metadata for {song.artist} - {song.title}: {exc}",
+            f"Could not fetch Deezer metadata for {song.artist} - {song.title}. Check the server logs.",
             song,
         )
 
@@ -1360,11 +1369,18 @@ def _download_preview_audio(
                     preview_file.write(chunk)
         return preview_url, AudioSegment.from_file(preview_path), None
     except Exception as exc:
+        current_app.logger.error(
+            "Preview download/decode failed for song %s (%s): %s",
+            song.id,
+            song.deezer_id,
+            exc,
+            exc_info=True,
+        )
         return preview_url, None, _quality_issue(
             "preview_download_failed",
-            f"Could not download or decode preview for {song.artist} - {song.title}: {exc}",
+            f"Could not download or decode preview for {song.artist} - {song.title}. Replace this song or retry later.",
             song,
-            {"preview_url": preview_url},
+            {"preview_url_present": bool(preview_url)},
         )
 
 
@@ -1397,10 +1413,16 @@ def _round_audio_components(
             segment = AudioSegment.from_mp3(get_mp3_path(user, mp3_type))
             components["custom_audio_ms"][mp3_type] = len(segment)
         except Exception as exc:
+            current_app.logger.error(
+                "Could not load %s audio for duration validation: %s",
+                mp3_type,
+                exc,
+                exc_info=True,
+            )
             issues.append(
                 _quality_issue(
                     "custom_audio_failed",
-                    f"Could not load {mp3_type} audio for duration validation: {exc}",
+                    f"Could not load {mp3_type} audio for duration validation. Check the server logs.",
                 )
             )
 
@@ -1409,10 +1431,16 @@ def _round_audio_components(
         try:
             components["number_audio_ms"].append(len(AudioSegment.from_mp3(path)))
         except Exception as exc:
+            current_app.logger.error(
+                "Could not load number announcement %s for duration validation: %s",
+                index + 1,
+                exc,
+                exc_info=True,
+            )
             issues.append(
                 _quality_issue(
                     "number_audio_failed",
-                    f"Could not load number announcement {index + 1}: {exc}",
+                    f"Could not load number announcement {index + 1}. Check the server logs.",
                 )
             )
 
@@ -1424,10 +1452,17 @@ def _round_audio_components(
             try:
                 components["hint_audio_ms"][script.cue_position] = len(AudioSegment.from_mp3(path))
             except Exception as exc:
+                current_app.logger.error(
+                    "Could not load hint audio for round %s position %s: %s",
+                    round_id,
+                    script.cue_position,
+                    exc,
+                    exc_info=True,
+                )
                 issues.append(
                     _quality_issue(
                         "track_hint_audio_failed",
-                        f"Could not load hint audio for position {script.cue_position}: {exc}",
+                        f"Could not load hint audio for position {script.cue_position}. Check the server logs.",
                     )
                 )
 
