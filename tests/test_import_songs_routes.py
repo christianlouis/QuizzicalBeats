@@ -121,6 +121,39 @@ class TestSpotifySongImportRoute:
         assert captured['item_id'] == 'spotify-track-1'
         assert captured['spotify_token'] == 'manual-token'
 
+    def test_spotify_track_import_error_hides_import_details(self, app, client, monkeypatch):
+        """Spotify track import failures must not render raw helper errors."""
+        from musicround.routes import import_songs
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        monkeypatch.setattr(import_songs, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setattr(import_songs.oauth, 'spotify', object(), raising=False)
+        monkeypatch.setattr(
+            import_songs.ImportHelper,
+            'import_item',
+            lambda **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 0,
+                'error_count': 1,
+                'errors': ['provider body token=spotify-track-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import/song',
+            data={'song_id': 'spotify-track-err'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error importing song from Spotify. Please check the Spotify ID and try again.' in body
+        assert 'spotify-track-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
     def test_spotify_playlist_queue_passes_resolved_manual_token(self, app, client, monkeypatch):
         """Queued playlist imports must retain the manual token accepted by the route gate."""
         from musicround.routes import import_songs
@@ -151,6 +184,72 @@ class TestSpotifySongImportRoute:
         assert captured['item_type'] == 'playlist'
         assert captured['item_id'] == 'playlist-123'
         assert captured['spotify_token'] == 'manual-token'
+
+    def test_spotify_album_import_error_hides_import_details(self, app, client, monkeypatch):
+        """Spotify album import failures must not render raw helper errors."""
+        from musicround.routes import import_songs
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        monkeypatch.setattr(import_songs, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setattr(import_songs.oauth, 'spotify', object(), raising=False)
+        monkeypatch.setattr(
+            import_songs.ImportHelper,
+            'import_item',
+            lambda **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': ['provider body token=spotify-album-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import/album',
+            data={'album_id': 'spotify-album-err'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error importing album from Spotify. Please check the Spotify ID and try again.' in body
+        assert 'spotify-album-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
+    def test_spotify_album_partial_error_hides_import_details(self, app, client, monkeypatch):
+        """Spotify album warning flashes must not render raw helper errors."""
+        from musicround.routes import import_songs
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        monkeypatch.setattr(import_songs, 'get_spotify_token', lambda: ('manual-token', 'manual'))
+        monkeypatch.setattr(import_songs.oauth, 'spotify', object(), raising=False)
+        monkeypatch.setattr(
+            import_songs.ImportHelper,
+            'import_item',
+            lambda **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 1,
+                'error_count': 2,
+                'errors': ['provider body token=spotify-album-warning-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import/album',
+            data={'album_id': 'spotify-album-warn'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Album import: 0 new, 1 skipped, 2 errors.' in body
+        assert 'spotify-album-warning-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
 
     def test_direct_playlist_browser_error_hides_provider_details(self, app, client, monkeypatch):
         """Direct playlist browser failures must not render provider or token details."""
