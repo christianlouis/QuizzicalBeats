@@ -21,6 +21,31 @@ DROPBOX_SHARED_LINK_ERROR_MESSAGE = 'Dropbox shared-link creation failed. Please
 DROPBOX_API_TIMEOUT_SECONDS = 10
 
 
+
+def format_dropbox_path(path):
+    """
+    Normalizes paths for the Dropbox API.
+    Dropbox API requires empty string for root, not "/".
+    Non-root paths must start with "/" and have no trailing slash.
+    """
+    if not path or path == '/':
+        return ""
+
+    # Deduplicate slashes before formatting
+    import re
+    path = re.sub(r'/+', '/', path)
+
+    if not path.startswith('/'):
+        path = '/' + path
+
+    if path.endswith('/') and len(path) > 1:
+        path = path.rstrip('/')
+
+    if path == '/':
+        return ""
+
+    return path
+
 def get_dropbox_auth_url():
     """Get the authorization URL for Dropbox OAuth flow"""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
@@ -169,9 +194,7 @@ def upload_and_share(file_path, dropbox_path):
         current_app.logger.error("No valid Dropbox token available")
         return None
     
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     # First, upload the file
     try:
@@ -338,9 +361,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
     Returns:
         dict: {'success': True/False, 'message': 'success or error message', 'metadata': file metadata if successful}
     """
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     try:
         # Convert string data to bytes if text mode
@@ -425,9 +446,7 @@ def create_shared_link(access_token, dropbox_path):
     Returns:
         dict: {'success': True/False, 'message': 'success or error message', 'url': shared link URL if successful}
     """
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     try:
         current_app.logger.debug(

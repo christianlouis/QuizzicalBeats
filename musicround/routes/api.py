@@ -1039,13 +1039,10 @@ def list_dropbox_folders():
     # Get the path from query params, default to empty string (root)
     path = request.args.get('path', '')
     
-    # Fix path format for Dropbox API
-    # Dropbox API requires empty string for root, not "/"
-    if path == '/' or not path:
-        path = ""
-        display_path = "/"
-    else:
-        display_path = path
+    from musicround.helpers.dropbox_helper import format_dropbox_path
+
+    display_path = path if path else "/"
+    path = format_dropbox_path(path)
         
     current_app.logger.info(f"Listing Dropbox folders for path: {display_path}")
         
@@ -1206,12 +1203,10 @@ def create_dropbox_folder():
     if any(char in folder_name for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']):
         return jsonify({'error': 'Folder name contains invalid characters'}), 400
     
+    from musicround.helpers.dropbox_helper import format_dropbox_path
+
     # Construct full path
-    # If parent is root, we need special handling
-    if parent_path == '/' or parent_path == '':
-        full_path = '/' + folder_name
-    else:
-        full_path = parent_path + '/' + folder_name
+    full_path = format_dropbox_path(parent_path + '/' + folder_name)
     
     current_app.logger.info(f"Creating Dropbox folder: {full_path}")
     
