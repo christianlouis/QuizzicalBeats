@@ -1,6 +1,5 @@
 import random
 import os
-import requests
 import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, flash
 from flask_login import login_required, current_user
