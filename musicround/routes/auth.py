@@ -5,6 +5,7 @@ import os
 from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, session
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.security import check_password_hash, generate_password_hash
+from musicround.helpers.utils import is_safe_url
 from musicround.models import User, db
 from datetime import datetime
 import requests
@@ -81,7 +82,7 @@ def callback():
             current_app.logger.info(f"User {user.username} logged in via Spotify ({spotify_info.get('name')})")
             
             next_page = request.args.get('next') or session.pop('next_url', None)
-            if not next_page or not next_page.startswith('/'):
+            if not is_safe_url(next_page):
                 next_page = url_for('core.index')
             return redirect(next_page)
         else:
