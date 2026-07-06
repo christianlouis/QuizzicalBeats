@@ -88,11 +88,15 @@ def get_least_used_genres():
     genre_usage = {g: 0 for g in all_genres_list}
 
     # Count how many times each genre appears in Rounds of type 'genre'
-    used_genre_rounds = Round.query.filter_by(round_type='genre').all()
-    for rnd in used_genre_rounds:
+    counts = db.session.query(
+        Round.round_criteria_used,
+        db.func.count(Round.id)
+    ).filter_by(round_type='genre').group_by(Round.round_criteria_used).all()
+
+    for genre, count in counts:
         # Ensure we only increment if it exists in genre_usage
-        if rnd.round_criteria_used in genre_usage:
-            genre_usage[rnd.round_criteria_used] += 1
+        if genre in genre_usage:
+            genre_usage[genre] += count
 
     # If we have no genres at all, return an empty list
     if not genre_usage:
