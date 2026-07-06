@@ -9,11 +9,22 @@ echo "Flask environment: $FLASK_ENV"
 mkdir -p "${ROUND_MP3_DIR:-/data/rounds}" "${ROUND_PDF_DIR:-/data/pdfs}"
 python - <<'PY'
 import os
-from musicround.helpers.database_config import database_summary
+import sys
+from musicround.helpers.database_config import (
+    bool_from_config,
+    database_summary,
+    managed_database_requirement_error,
+)
 
-summary = database_summary(os.environ.get("SQLALCHEMY_DATABASE_URI"))
+db_uri = os.environ.get("SQLALCHEMY_DATABASE_URI")
+require_managed = bool_from_config(os.environ.get("DATABASE_REQUIRE_MANAGED"))
+summary = database_summary(db_uri)
 print(f"Database backend: {summary['backend']}")
 print(f"Database target: {summary['redacted_uri']}")
+managed_error = managed_database_requirement_error(db_uri, require_managed)
+if managed_error:
+    print(f"Database configuration error: {managed_error}", file=sys.stderr)
+    sys.exit(78)
 PY
 
 if [ "${LOG_ENV:-0}" = "1" ]; then

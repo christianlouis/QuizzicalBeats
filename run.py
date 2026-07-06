@@ -68,7 +68,11 @@ def main():
 
         app = Flask(__name__)
         app.config.from_object(Config)
-        _configure_database_uri(app)
+        try:
+            _configure_database_uri(app)
+        except RuntimeError as exc:
+            print(f"Database configuration error: {exc}", file=sys.stderr)
+            return 78
         db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
         summary = database_summary(db_uri)
         print(f"Database backend: {summary['backend']}")

@@ -14,7 +14,7 @@ from musicround.helpers.database_config import (
     bool_from_config,
     database_backend,
     database_summary,
-    is_sqlite_database_uri,
+    managed_database_requirement_error,
 )
 from musicround.version import VERSION_INFO, get_version_str
 from datetime import datetime
@@ -40,20 +40,17 @@ def _configure_database_uri(app):
         'SQLALCHEMY_DATABASE_URI'
     )
     if configured_uri:
-        if require_managed and is_sqlite_database_uri(configured_uri):
-            raise RuntimeError(
-                "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
-                "points at SQLite. Configure a managed SQL URI via secrets."
-            )
+        managed_error = managed_database_requirement_error(configured_uri, require_managed)
+        if managed_error:
+            raise RuntimeError(managed_error)
         app.config['SQLALCHEMY_DATABASE_URI'] = configured_uri
         app.config['DATABASE_BACKEND'] = database_backend(configured_uri)
         app.config['DATABASE_URI_REDACTED'] = database_summary(configured_uri)['redacted_uri']
         return
 
-    if require_managed:
-        raise RuntimeError(
-            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI is not configured."
-        )
+    managed_error = managed_database_requirement_error(configured_uri, require_managed)
+    if managed_error:
+        raise RuntimeError(managed_error)
 
     if not os.path.exists(DEFAULT_DATABASE_DIR):
         os.makedirs(DEFAULT_DATABASE_DIR, exist_ok=True)

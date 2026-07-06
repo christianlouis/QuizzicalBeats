@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added playlist import position maps to MCP round-creation success and repair payloads.
 - Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
+- Hardened the managed-database guard so common truthy `DATABASE_REQUIRE_MANAGED` values fail fast before container startup can fall back to SQLite.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

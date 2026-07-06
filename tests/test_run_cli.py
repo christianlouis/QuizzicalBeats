@@ -39,3 +39,25 @@ def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     assert "Database backend: sqlite" in output
     assert "Managed database required: False" in output
     assert "legacy /data SQLite database is configured" in output
+
+
+def test_database_status_returns_safe_error_when_managed_guard_fails(monkeypatch, capsys):
+    """The database runbook command should fail without a Python traceback."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.setenv("DATABASE_REQUIRE_MANAGED", "true")
+    from musicround.config import Config
+    monkeypatch.setattr(Config, "DATABASE_REQUIRE_MANAGED", True)
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "status"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 78
+    assert "Database configuration error:" in captured.err
+    assert "points at SQLite" in captured.err
+    assert "Traceback" not in captured.err
+    assert "/data/song_data.db" not in captured.err
