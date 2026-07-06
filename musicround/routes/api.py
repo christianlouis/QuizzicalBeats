@@ -41,13 +41,15 @@ def _song_payload(song):
     }
 
 
-def _safe_dropbox_api_error(status_code, message='Dropbox API error'):
+def _safe_dropbox_api_error(status_code, message='Dropbox API error', **extra):
     """Return a stable Dropbox API error without provider raw bodies or tracebacks."""
-    return jsonify({
+    payload = {
         'error': message,
         'code': 'dropbox_api_error',
         'status_code': status_code,
-    })
+    }
+    payload.update(extra)
+    return jsonify(payload)
 
 
 def _safe_spotify_api_error(status_code, message='Spotify API error'):
@@ -1081,7 +1083,6 @@ def list_dropbox_folders():
             # Check for specific error types to provide better messages
             try:
                 error_data = response.json()
-                error_message = f"Dropbox API error: {response.status_code}"
                 
                 # Handle "not_found" error by trying to create the folder if it's not root
                 if (response.status_code == 409 and 
@@ -1090,10 +1091,7 @@ def list_dropbox_folders():
                     current_app.logger.info(f"Folder {display_path} doesn't exist, showing root folder instead")
                     # Return root folder with a note about the folder not existing
                     return list_root_folders(token, display_path)
-                
-                if 'error_summary' in error_data:
-                    error_message += f": {error_data['error_summary']}"
-                
+
                 # Handle common errors
                 if response.status_code == 401:
                     # Try to refresh the token and retry once
@@ -1116,22 +1114,20 @@ def list_dropbox_folders():
                                 current_app.logger.info("Successfully refreshed token and retrieved folders")
                             else:
                                 current_app.logger.error(f"Still failed after token refresh: {response.status_code}, {response.text}")
-                                return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                                return _safe_dropbox_api_error(response.status_code), response.status_code
                         else:
                             current_app.logger.error("Token refresh failed")
-                            payload = {
-                                'error': refresh_result.get(
+                            return _safe_dropbox_api_error(
+                                401,
+                                message=refresh_result.get(
                                     'message',
                                     'Dropbox token refresh failed.',
                                 ),
-                                'details': error_data,
-                            }
-                            if refresh_result.get('reconnect_required'):
-                                payload['reconnect_required'] = True
-                            return jsonify(payload), 401
+                                reconnect_required=bool(refresh_result.get('reconnect_required')),
+                            ), 401
                 
                 if response.status_code != 200:  # If we're still having an error
-                    return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                    return _safe_dropbox_api_error(response.status_code), response.status_code
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")
@@ -1242,20 +1238,17 @@ def create_dropbox_folder():
             current_app.logger.error(f"Dropbox API error: {response.status_code}, Response: {response.text}")
             
             try:
-                error_data = response.json()
-                error_message = f"Dropbox API error: {response.status_code}"
-                
-                if 'error_summary' in error_data:
-                    error_message += f": {error_data['error_summary']}"
+                response.json()
                 
                 # Special handling for conflict (folder already exists)
                 if response.status_code == 409 and 'conflict' in response.text:
                     return jsonify({
                         'error': 'A folder with this name already exists',
-                        'details': error_data
+                        'code': 'dropbox_folder_exists',
+                        'status_code': response.status_code,
                     }), 409
                 
-                return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                return _safe_dropbox_api_error(response.status_code), response.status_code
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")

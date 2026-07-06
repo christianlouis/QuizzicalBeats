@@ -1,13 +1,21 @@
 """Tests for Flask app factory configuration helpers."""
 import os
+import json
+from datetime import datetime, timedelta
 
 from flask import Flask
 
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
 os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 
-from musicround import _configure_database_uri, _import_workers_enabled
+from musicround import (
+    _configure_database_uri,
+    _import_workers_enabled,
+    _spotify_authlib_token_from_user,
+    _store_spotify_authlib_token,
+)
 from musicround.helpers.database_config import database_summary, redact_database_uri
+from musicround.models import User, db
 
 
 def test_configure_database_uri_preserves_explicit_env_uri(monkeypatch):
@@ -135,3 +143,44 @@ def test_create_app_does_not_start_import_workers_by_default(monkeypatch):
     with app.app_context():
         db.session.remove()
         db.drop_all()
+
+
+def test_spotify_authlib_token_from_legacy_json_user_token(app):
+    """The token bridge must keep old JSON token rows readable."""
+    expires_at = int((datetime.now() + timedelta(hours=1)).timestamp())
+    with app.app_context():
+        user = User(username='legacy_bridge', email='legacy-bridge@example.com')
+        user.spotify_token = json.dumps({
+            'access_token': 'legacy-access',
+            'refresh_token': 'legacy-refresh',
+            'expires_at': expires_at,
+        })
+
+        token = _spotify_authlib_token_from_user(user)
+
+    assert token == {
+        'access_token': 'legacy-access',
+        'token_type': 'Bearer',
+        'refresh_token': 'legacy-refresh',
+        'expires_at': expires_at,
+    }
+
+
+def test_store_spotify_authlib_token_uses_raw_columns(app):
+    """Authlib updates should not write JSON token objects back into spotify_token."""
+    expires_at = int((datetime.now() + timedelta(hours=1)).timestamp())
+    with app.app_context():
+        user = User(username='raw_bridge', email='raw-bridge@example.com')
+
+        _store_spotify_authlib_token(
+            user,
+            {
+                'access_token': 'new-access',
+                'refresh_token': 'new-refresh',
+                'expires_at': expires_at,
+            },
+        )
+
+    assert user.spotify_token == 'new-access'
+    assert user.spotify_refresh_token == 'new-refresh'
+    assert user.spotify_token_expiry == datetime.fromtimestamp(expires_at)

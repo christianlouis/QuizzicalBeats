@@ -4,6 +4,7 @@ Provides centralized token refresh functionality similar to Dropbox helper
 """
 import requests
 import time
+import json
 from datetime import datetime, timedelta
 from flask import current_app, flash, session
 from flask_login import current_user
@@ -108,6 +109,36 @@ def _clear_system_spotify_tokens():
     )
 
 
+def _normalize_legacy_user_spotify_token(user):
+    """Migrate legacy JSON Spotify tokens into the raw-token user columns."""
+    raw_token = getattr(user, 'spotify_token', None)
+    if not raw_token or not isinstance(raw_token, str) or not raw_token.strip().startswith('{'):
+        return False
+
+    try:
+        token_payload = json.loads(raw_token)
+    except (TypeError, ValueError):
+        current_app.logger.warning("User %s has an unreadable legacy Spotify token payload.", user.id)
+        return False
+
+    access_token = token_payload.get('access_token')
+    if not access_token:
+        current_app.logger.warning("User %s has a legacy Spotify token payload without access_token.", user.id)
+        return False
+
+    user.spotify_token = access_token
+    if token_payload.get('refresh_token') and not user.spotify_refresh_token:
+        user.spotify_refresh_token = token_payload['refresh_token']
+
+    expires_at = token_payload.get('expires_at')
+    if expires_at and not user.spotify_token_expiry:
+        try:
+            user.spotify_token_expiry = datetime.fromtimestamp(int(float(expires_at)))
+        except (TypeError, ValueError, OSError):
+            current_app.logger.warning("User %s has an invalid legacy Spotify expires_at value.", user.id)
+    return True
+
+
 def clear_manual_spotify_bearer_token():
     """Remove all browser-session state for a manually supplied Spotify token."""
     for key in MANUAL_BEARER_TOKEN_SESSION_KEYS:
@@ -119,6 +150,11 @@ def get_current_user_spotify_token():
     if not current_user or not current_user.is_authenticated:
         current_app.logger.error("No authenticated user")
         return None
+
+    normalized_legacy_token = _normalize_legacy_user_spotify_token(current_user)
+    if normalized_legacy_token:
+        db.session.commit()
+        current_app.logger.info("Normalized legacy Spotify token payload for user %s.", current_user.id)
     
     # Check if token exists and is valid
     if (current_user.spotify_token and 

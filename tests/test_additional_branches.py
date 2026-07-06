@@ -132,6 +132,23 @@ class TestSystemHealthRoute:
         assert data['status'] == 'degraded'
         assert data['services']['artifact_storage']['issues'][0]['code'] == 'artifact_storage_not_writable'
 
+    def test_healthz_database_error_hides_exception_details(self, app, client, monkeypatch):
+        """Database probe failures must not expose raw driver errors or credentials."""
+        def fail_probe(*args, **kwargs):
+            raise RuntimeError('postgres://qb:secret-password@db.example/qb token=health-secret traceback')
+
+        monkeypatch.setattr(db.session, 'execute', fail_probe)
+
+        response = client.get('/healthz')
+
+        body = response.get_data(as_text=True)
+        data = response.get_json()
+        assert response.status_code == 503
+        assert data['services']['database']['issues'][0]['code'] == 'database_unavailable'
+        assert 'secret-password' not in body
+        assert 'health-secret' not in body
+        assert 'traceback' not in body
+
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""
         _create_user(app, 'health_nonadmin', 'healthna@example.com')

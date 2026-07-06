@@ -553,6 +553,29 @@ class TestDropboxFolderApi:
         assert 'traceback' not in data
         assert 'provider-secret-body' not in response.get_data(as_text=True)
 
+    def test_list_folders_json_dropbox_error_hides_provider_details(self, app, client):
+        """JSON Dropbox errors should not be returned as raw details."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                403,
+                {
+                    'error_summary': 'provider-json-secret old-dropbox-access traceback',
+                    'error': {'reason': 'provider-json-secret'},
+                },
+            )
+
+            response = client.get('/api/dropbox/folders')
+
+        data = response.get_json()
+        assert response.status_code == 403
+        assert data['code'] == 'dropbox_api_error'
+        assert data['status_code'] == 403
+        assert 'details' not in data
+        assert 'provider-json-secret' not in response.get_data(as_text=True)
+        assert 'old-dropbox-access' not in response.get_data(as_text=True)
+
     def test_list_folders_unexpected_error_hides_traceback(self, app, client):
         """Unexpected Dropbox folder errors should stay generic client-side."""
         self._login_dropbox_user(app, client)
@@ -590,6 +613,60 @@ class TestDropboxFolderApi:
         assert 'raw_response' not in data
         assert 'traceback' not in data
         assert 'provider-create-secret' not in response.get_data(as_text=True)
+
+    def test_create_folder_json_dropbox_error_hides_provider_details(self, app, client):
+        """Create-folder JSON errors should not expose raw provider details."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                403,
+                {
+                    'error_summary': 'provider-create-json-secret old-dropbox-access traceback',
+                    'error': {'reason': 'provider-create-json-secret'},
+                },
+            )
+
+            response = client.post(
+                '/api/dropbox/create-folder',
+                data=json.dumps({'parent_path': '/', 'folder_name': 'Rounds'}),
+                content_type='application/json',
+            )
+
+        data = response.get_json()
+        assert response.status_code == 403
+        assert data['code'] == 'dropbox_api_error'
+        assert data['status_code'] == 403
+        assert 'details' not in data
+        assert 'provider-create-json-secret' not in response.get_data(as_text=True)
+        assert 'old-dropbox-access' not in response.get_data(as_text=True)
+
+    def test_create_folder_conflict_hides_provider_details(self, app, client):
+        """Folder-exists responses should be useful without leaking Dropbox bodies."""
+        self._login_dropbox_user(app, client)
+
+        with patch('musicround.routes.api.requests.post') as mock_post:
+            mock_post.return_value = _make_response(
+                409,
+                {
+                    'error_summary': 'path/conflict/folder/ provider-conflict-secret',
+                    'error': {'reason': 'provider-conflict-secret'},
+                },
+                text='path/conflict/folder/ provider-conflict-secret',
+            )
+
+            response = client.post(
+                '/api/dropbox/create-folder',
+                data=json.dumps({'parent_path': '/', 'folder_name': 'Rounds'}),
+                content_type='application/json',
+            )
+
+        data = response.get_json()
+        assert response.status_code == 409
+        assert data['code'] == 'dropbox_folder_exists'
+        assert data['status_code'] == 409
+        assert 'details' not in data
+        assert 'provider-conflict-secret' not in response.get_data(as_text=True)
 
     def test_root_folder_fallback_hides_raw_provider_body(self, app):
         """Root-folder fallback should not expose Dropbox provider bodies."""

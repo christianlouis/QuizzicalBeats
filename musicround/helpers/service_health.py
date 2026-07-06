@@ -46,12 +46,12 @@ def database_service_health() -> dict[str, Any]:
     try:
         db.session.execute(text("SELECT 1"))
     except Exception as exc:
+        current_app.logger.error("Database health probe failed: %s", exc, exc_info=True)
         issues.append(
             _issue(
                 "database_unavailable",
                 "Database health probe failed.",
                 hint="Check the configured SQL database and network path.",
-                details={"error": str(exc)},
             )
         )
 

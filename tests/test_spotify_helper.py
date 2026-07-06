@@ -6,6 +6,7 @@ being retried (see musicround/helpers/spotify_helper.py).
 """
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
+import json
 
 import pytest
 
@@ -150,6 +151,28 @@ class TestGetCurrentUserSpotifyToken:
 
                 assert result == 'new-token'
                 assert user.spotify_token == 'new-token'
+
+    def test_legacy_json_token_is_normalized_before_use(self, app):
+        """Old Authlib JSON payloads in spotify_token should be migrated once read."""
+        expires_at = int((datetime.now() + timedelta(hours=1)).timestamp())
+        with app.test_request_context('/'):
+            user = User(username='legacyjson', email='legacyjson@example.com')
+            user.spotify_id = 'spotify-user-legacy'
+            user.spotify_token = json.dumps({
+                'access_token': 'legacy-access',
+                'refresh_token': 'legacy-refresh',
+                'expires_at': expires_at,
+            })
+            db.session.add(user)
+            db.session.commit()
+
+            with patch('musicround.helpers.spotify_helper.current_user', user):
+                result = spotify_helper.get_current_user_spotify_token()
+
+            assert result == 'legacy-access'
+            assert user.spotify_token == 'legacy-access'
+            assert user.spotify_refresh_token == 'legacy-refresh'
+            assert user.spotify_token_expiry == datetime.fromtimestamp(expires_at)
 
 
 class TestGetSystemSpotifyToken:
