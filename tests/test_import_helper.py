@@ -159,6 +159,31 @@ class TestImportHelperDeezer:
         assert response['error_count'] == 1
         assert 'No songs found in Deezer playlist playlist-empty' in response['errors'][0]
 
+    def test_deezer_empty_playlist_error_sanitizes_url_item_id(self, app):
+        """Empty playlist errors should not echo access tokens from submitted URLs."""
+        deezer = DeezerPlaylistStub({
+            'imported_songs': [],
+            'skipped_songs': [],
+            'imported_count': 0,
+            'skipped_count': 0,
+        })
+
+        with app.app_context():
+            app.config['deezer'] = deezer
+
+            response = ImportHelper.import_item(
+                'deezer',
+                'playlist',
+                'https://www.deezer.com/playlist/playlist-url-id?access_token=secret',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'No songs found in Deezer playlist playlist-url-id or playlist import failed.'
+        ]
+        assert 'secret' not in response['errors'][0]
+        assert 'access_token' not in response['errors'][0]
+
     def test_deezer_track_exception_returns_structured_error(self, app):
         """Track imports should report Deezer client failures without raising."""
         with app.app_context():
@@ -175,6 +200,24 @@ class TestImportHelperDeezer:
         }
         assert 'deezer-secret' not in response['errors'][0]
         assert 'traceback' not in response['errors'][0]
+
+    def test_deezer_track_exception_sanitizes_url_item_id(self, app):
+        """Safe Deezer import errors should strip query secrets from item IDs."""
+        with app.app_context():
+            app.config['deezer'] = FailingDeezerTrackStub()
+
+            response = ImportHelper.import_item(
+                'deezer',
+                'track',
+                'https://www.deezer.com/track/track-url-id?api_key=secret',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Deezer track track-url-id. Check the server logs.'
+        ]
+        assert 'secret' not in response['errors'][0]
+        assert 'api_key' not in response['errors'][0]
 
     def test_deezer_album_exception_returns_sanitized_error(self, app):
         """Album import helper errors must not expose provider details."""
@@ -326,6 +369,24 @@ class TestImportHelperSpotifyTokens:
         assert 'spotify-secret' not in response['errors'][0]
         assert 'traceback' not in response['errors'][0]
 
+    def test_spotify_playlist_exception_sanitizes_url_item_id(self, app):
+        """Safe Spotify import errors should strip query secrets from playlist URLs."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'playlist',
+                'https://open.spotify.com/playlist/spotify-playlist-url?refresh_token=secret',
+                oauth_spotify=FailingSpotifyClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify playlist spotify-playlist-url. Check the server logs.'
+        ]
+        assert 'secret' not in response['errors'][0]
+        assert 'refresh_token' not in response['errors'][0]
+
     def test_spotify_track_http_status_returns_sanitized_error(self, app):
         """Spotify HTTP errors must not expose provider response details."""
         with app.test_request_context():
@@ -343,6 +404,34 @@ class TestImportHelperSpotifyTokens:
         ]
         assert 'spotify-status-secret' not in response['errors'][0]
         assert 'rate limited' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_spotify_track_db_flush_error_returns_sanitized_error(self, app, monkeypatch):
+        """DB flush errors should not expose driver details in import results."""
+        spotify = FakeSpotifyClient()
+
+        with app.test_request_context():
+            monkeypatch.setattr(
+                'musicround.helpers.import_helper.db.session.flush',
+                lambda: (_ for _ in ()).throw(
+                    RuntimeError('database password=secret connection string traceback')
+                ),
+            )
+
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-track-1',
+                oauth_spotify=spotify,
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify track spotify-track-1. Check the server logs.'
+        ]
+        assert 'secret' not in response['errors'][0]
+        assert 'connection string' not in response['errors'][0]
         assert 'traceback' not in response['errors'][0]
 
     def test_spotify_album_http_status_returns_sanitized_error(self, app):
