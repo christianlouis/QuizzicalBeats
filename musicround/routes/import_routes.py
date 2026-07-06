@@ -21,6 +21,14 @@ _DIRECT_SPOTIFY_SESSION_KEYS = (
     'direct_spotify_user',
     'direct_spotify_username',
 )
+SPOTIFY_OFFICIAL_ACCOUNTS = (
+    'spotify',
+    'spotifycharts',
+    'spotifymaps',
+    'spotifyuk',
+    'spotifyusa',
+    'spotify_germany',
+)
 
 
 def _clear_direct_spotify_session():
@@ -40,6 +48,31 @@ def _safe_return_url(value, fallback_endpoint='import.direct_official_playlists'
     if not value.startswith('/') or value.startswith('//') or '\n' in value or '\r' in value:
         return fallback
     return value
+
+
+def _bounded_query_int(name, default, minimum=None, maximum=None):
+    """Read a query integer without letting diagnostics 500 on bad input."""
+    raw_value = request.args.get(name)
+    try:
+        value = int(raw_value) if raw_value is not None else default
+    except (TypeError, ValueError):
+        current_app.logger.warning("Invalid %s query parameter for Spotify diagnostics.", name)
+        value = default
+
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _spotify_diagnostic_account(default='spotify'):
+    """Return an allowed official Spotify account for diagnostic routes."""
+    account = request.args.get('account', default)
+    if account in SPOTIFY_OFFICIAL_ACCOUNTS:
+        return account
+    current_app.logger.warning("Invalid Spotify diagnostics account requested.")
+    return default
 
 
 def _validate_direct_spotify_token(bearer_token):
@@ -240,14 +273,7 @@ def import_official_playlists():
     filter_keywords = [k.strip() for k in filter_keywords if k.strip()]
     
     # List of official Spotify user accounts to fetch playlists from
-    spotify_accounts = [
-        'spotify',
-        'spotifycharts',
-        'spotifymaps', 
-        'spotifyuk',
-        'spotifyusa', 
-        'spotify_germany'
-    ]
+    spotify_accounts = list(SPOTIFY_OFFICIAL_ACCOUNTS)
     
     # Get selected account from query string or default to all
     selected_account = request.args.get('account', 'all')
@@ -391,14 +417,7 @@ def direct_official_playlists():
     filter_keywords = [k.strip() for k in filter_keywords if k.strip()]
     
     # List of official Spotify user accounts to fetch playlists from
-    spotify_accounts = [
-        'spotify',
-        'spotifycharts',
-        'spotifymaps', 
-        'spotifyuk',
-        'spotifyusa', 
-        'spotify_germany'
-    ]
+    spotify_accounts = list(SPOTIFY_OFFICIAL_ACCOUNTS)
     
     # Get selected account from query string or default to all
     selected_account = request.args.get('account', 'all')
@@ -655,12 +674,9 @@ def get_raw_playlists():
     if admin_response:
         return admin_response
     
-    # Get Spotify account to check
-    account = request.args.get('account', 'spotify')
-    # Get limit parameter (max 50)
-    limit = min(int(request.args.get('limit', '50')), 50)
-    # Get offset parameter
-    offset = int(request.args.get('offset', '0'))
+    account = _spotify_diagnostic_account()
+    limit = _bounded_query_int('limit', default=50, minimum=1, maximum=50)
+    offset = _bounded_query_int('offset', default=0, minimum=0)
     
     results = {
         'spotipy': {

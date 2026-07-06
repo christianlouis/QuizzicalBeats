@@ -334,6 +334,86 @@ class TestImportRoutesAccess:
         assert 'provider body' not in body
         assert 'traceback' not in body
 
+    def test_raw_playlists_diagnostic_bounds_query_parameters(self, app, client, monkeypatch):
+        """Bad raw-playlist query params should be clamped instead of producing a 500."""
+        from musicround.routes import import_routes
+
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    'total': 0,
+                    'items': [],
+                    'next': None,
+                    'previous': None,
+                }
+
+        class FakeSpotify:
+            def get(self, endpoint, params=None, token=None):
+                captured['endpoint'] = endpoint
+                captured['params'] = params
+                captured['token'] = token
+                return FakeResponse()
+
+        _login(app, client, username='raw_bounds_admin', email='rawbounds@example.com', is_admin=True)
+
+        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('db-spotify-token', 'user'))
+        monkeypatch.setattr(
+            'musicround.routes.import_routes.oauth.spotify',
+            FakeSpotify(),
+            raising=False,
+        )
+
+        response = client.get('/import/raw-playlists?account=../me&limit=not-a-number&offset=-10')
+
+        assert response.status_code == 200
+        assert captured['endpoint'] == 'users/spotify/playlists'
+        assert captured['params'] == {'limit': 50, 'offset': 0}
+        assert captured['token']['access_token'] == 'db-spotify-token'
+
+    def test_raw_playlists_diagnostic_clamps_large_limit(self, app, client, monkeypatch):
+        """Raw playlist diagnostics should never request more than Spotify's page cap."""
+        from musicround.routes import import_routes
+
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    'total': 0,
+                    'items': [],
+                    'next': None,
+                    'previous': None,
+                }
+
+        class FakeSpotify:
+            def get(self, endpoint, params=None, token=None):
+                captured['endpoint'] = endpoint
+                captured['params'] = params
+                return FakeResponse()
+
+        _login(app, client, username='raw_limit_admin', email='rawlimit@example.com', is_admin=True)
+
+        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('db-spotify-token', 'user'))
+        monkeypatch.setattr(
+            'musicround.routes.import_routes.oauth.spotify',
+            FakeSpotify(),
+            raising=False,
+        )
+
+        response = client.get('/import/raw-playlists?account=spotifycharts&limit=500&offset=3')
+
+        assert response.status_code == 200
+        assert captured['endpoint'] == 'users/spotifycharts/playlists'
+        assert captured['params'] == {'limit': 50, 'offset': 3}
+
     def test_direct_auth_invalid_token_is_not_stored(self, app, client, monkeypatch):
         """Invalid direct bearer tokens must not remain in the session."""
         class FakeClient:
