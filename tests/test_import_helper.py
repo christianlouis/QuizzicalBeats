@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 
 from flask_login import login_user
+from httpx import HTTPStatusError, Request, Response
 
 from musicround.helpers.import_helper import ImportHelper
 from musicround.models import Song, SystemSetting, User, db
@@ -23,7 +24,21 @@ class FailingDeezerTrackStub:
     """Deezer client stub that fails during track import."""
 
     def import_track(self, track_id, lastfm_api_key=None):
-        raise RuntimeError(f'Deezer unavailable for {track_id}')
+        raise RuntimeError(f'Deezer unavailable for {track_id} token=deezer-secret traceback')
+
+
+class FailingDeezerAlbumStub:
+    """Deezer client stub that fails during album import."""
+
+    def import_album(self, album_id, lastfm_api_key=None):
+        raise RuntimeError(f'Deezer album unavailable token=deezer-album-secret traceback')
+
+
+class FailingDeezerPlaylistStub:
+    """Deezer client stub that fails during playlist import."""
+
+    def import_playlist(self, playlist_id, lastfm_api_key=None):
+        raise RuntimeError(f'Deezer playlist unavailable token=deezer-playlist-secret traceback')
 
 
 class FakeSpotifyResponse:
@@ -70,6 +85,30 @@ class FakeSpotifyClient:
                 'duration_ms': 240000,
             })
         raise AssertionError(f'Unexpected Spotify path: {path}')
+
+
+class FailingSpotifyClient:
+    """Spotify client stub that fails every request."""
+
+    token = None
+
+    def get(self, path, token=None):
+        raise RuntimeError(f'Spotify unavailable for {path} token=spotify-secret traceback')
+
+
+class FailingSpotifyHttpStatusClient:
+    """Spotify client stub that returns provider-detail HTTP failures."""
+
+    token = None
+
+    def get(self, path, token=None):
+        request = Request('GET', f'https://api.spotify.test/{path}')
+        response = Response(
+            429,
+            request=request,
+            json={'error': {'message': 'rate limited token=spotify-status-secret traceback'}},
+        )
+        raise HTTPStatusError('Provider status failure', request=request, response=response)
 
 
 class TestImportHelperDeezer:
@@ -132,8 +171,34 @@ class TestImportHelperDeezer:
             'imported_count': 0,
             'skipped_count': 0,
             'error_count': 1,
-            'errors': ['Failed to import Deezer track track-err: Deezer unavailable for track-err'],
+            'errors': ['Failed to import Deezer track track-err. Check the server logs.'],
         }
+        assert 'deezer-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_deezer_album_exception_returns_sanitized_error(self, app):
+        """Album import helper errors must not expose provider details."""
+        with app.app_context():
+            app.config['deezer'] = FailingDeezerAlbumStub()
+
+            response = ImportHelper.import_item('deezer', 'album', 'album-err')
+
+        assert response['error_count'] == 1
+        assert response['errors'] == ['Failed to import Deezer album album-err. Check the server logs.']
+        assert 'deezer-album-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_deezer_playlist_exception_returns_sanitized_error(self, app):
+        """Playlist import helper errors must not expose provider details."""
+        with app.app_context():
+            app.config['deezer'] = FailingDeezerPlaylistStub()
+
+            response = ImportHelper.import_item('deezer', 'playlist', 'playlist-err')
+
+        assert response['error_count'] == 1
+        assert response['errors'] == ['Failed to import Deezer playlist playlist-err. Check the server logs.']
+        assert 'deezer-playlist-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
 
 
 class TestImportHelperSpotifyTokens:
@@ -206,3 +271,95 @@ class TestImportHelperSpotifyTokens:
         assert token['access_token'] == 'user-access-token'
         assert token['refresh_token'] == 'user-refresh-token'
         assert token['expires_at'] == int(expiry.timestamp())
+
+    def test_spotify_track_exception_returns_sanitized_error(self, app):
+        """Track import helper errors must not expose provider details."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-track-err',
+                oauth_spotify=FailingSpotifyClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify track spotify-track-err. Check the server logs.'
+        ]
+        assert 'spotify-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_spotify_album_exception_returns_sanitized_error(self, app):
+        """Album import helper errors must not expose provider details."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'album',
+                'spotify-album-err',
+                oauth_spotify=FailingSpotifyClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify album spotify-album-err. Check the server logs.'
+        ]
+        assert 'spotify-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_spotify_playlist_exception_returns_sanitized_error(self, app):
+        """Playlist import helper errors must not expose provider details."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'playlist',
+                'spotify-playlist-err',
+                oauth_spotify=FailingSpotifyClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify playlist spotify-playlist-err. Check the server logs.'
+        ]
+        assert 'spotify-secret' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_spotify_track_http_status_returns_sanitized_error(self, app):
+        """Spotify HTTP errors must not expose provider response details."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-track-status',
+                oauth_spotify=FailingSpotifyHttpStatusClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify track spotify-track-status. Check the server logs.'
+        ]
+        assert 'spotify-status-secret' not in response['errors'][0]
+        assert 'rate limited' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]
+
+    def test_spotify_album_http_status_returns_sanitized_error(self, app):
+        """Spotify album HTTP errors must not expose provider response details."""
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'album',
+                'spotify-album-status',
+                oauth_spotify=FailingSpotifyHttpStatusClient(),
+                spotify_token='manual-token',
+            )
+
+        assert response['error_count'] == 1
+        assert response['errors'] == [
+            'Failed to import Spotify album spotify-album-status. Check the server logs.'
+        ]
+        assert 'spotify-status-secret' not in response['errors'][0]
+        assert 'rate limited' not in response['errors'][0]
+        assert 'traceback' not in response['errors'][0]

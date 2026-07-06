@@ -18,6 +18,11 @@ class ImportHelper:
     """Unified helper for importing music content from different services."""
 
     @staticmethod
+    def _safe_import_error(service_name, item_type, item_id):
+        """Return a browser-safe import error string."""
+        return f"Failed to import {service_name} {item_type} {item_id}. Check the server logs."
+
+    @staticmethod
     def _authenticated_current_user():
         """Return the active user when a request context has one."""
         try:
@@ -300,11 +305,13 @@ class ImportHelper:
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Spotify album {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Spotify', 'album', item_id)]
                     }
             elif item_type.lower() == 'playlist':
                 try:
                     imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id, token=auth_token)
+                    if imported_songs and imported_songs.get('error_count', 0) > 0:
+                        return imported_songs
                     if not imported_songs or imported_songs.get('imported_count', 0) == 0:
                         current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
                         return {
@@ -321,7 +328,7 @@ class ImportHelper:
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Spotify playlist {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Spotify', 'playlist', item_id)]
                     }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Spotify import.")
@@ -367,7 +374,7 @@ class ImportHelper:
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Deezer track {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'track', item_id)]
                     }
             elif item_type.lower() == 'album':
                 try:
@@ -396,7 +403,7 @@ class ImportHelper:
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Deezer album {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'album', item_id)]
                     }
             elif item_type.lower() == 'playlist':
                 try:
@@ -431,7 +438,7 @@ class ImportHelper:
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Deezer playlist {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'playlist', item_id)]
                     }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Deezer import.")
@@ -628,19 +635,12 @@ class ImportHelper:
             status_code = hse.response.status_code
             error_text = hse.response.text
             current_app.logger.error(f"HTTPStatusError ({status_code}) importing Spotify track {track_id}: {error_text}", exc_info=True)
-            error_detail = f"Spotify API error ({status_code}) for track {track_id}."
-            try:
-                error_json = hse.response.json()
-                if error_json.get('error', {}).get('message'):
-                    error_detail = f"Spotify error for track {track_id}: {error_json['error']['message']}"
-            except ValueError: 
-                pass 
-            result['errors'].append(error_detail)
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
             result['error_count'] += 1
             return result
         except Exception as e:
             current_app.logger.error(f"Generic error importing Spotify track {track_id}: {str(e)}", exc_info=True)
-            result['errors'].append(f"Unexpected error for track {track_id}: {str(e)}")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
             result['error_count'] += 1
             return result
 
@@ -735,18 +735,11 @@ class ImportHelper:
             status_code = hse.response.status_code
             error_text = hse.response.text
             current_app.logger.error(f"HTTPStatusError ({status_code}) importing Spotify album {album_id}: {error_text}", exc_info=True)
-            error_detail = f"Spotify API error ({status_code}) for album {album_id}."
-            try:
-                error_json = hse.response.json()
-                if error_json.get('error', {}).get('message'):
-                    error_detail = f"Spotify error for album {album_id}: {error_json['error']['message']}"
-            except ValueError: 
-                pass 
-            result['errors'].append(error_detail)
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'album', album_id))
             result['error_count'] += 1
         except Exception as e:
             current_app.logger.error(f"Unexpected error importing Spotify album {album_id}: {str(e)}", exc_info=True)
-            result['errors'].append(f"Failed to import album {album_id} due to unexpected error: {str(e)}")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'album', album_id))
             result['error_count'] += 1
         
         return result
@@ -844,6 +837,6 @@ class ImportHelper:
             db.session.commit() # Commit any changes made by track imports
         except Exception as e:
             current_app.logger.error(f"Error importing Spotify playlist {playlist_id}: {str(e)}")
-            result['errors'].append(str(e))
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'playlist', playlist_id))
             result['error_count'] += 1
             return result
