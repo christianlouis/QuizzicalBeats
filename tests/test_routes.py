@@ -643,6 +643,41 @@ class TestSpotifySearchInvalidGrant:
             assert user.spotify_token_expiry is None
             assert user.spotify_id == 'spotify-user-1'
 
+    def test_generic_search_error_hides_exception_details(self, app, client):
+        """Generic Spotify search errors must not render raw exception details."""
+        self._login_with_spotify(app, client)
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json.return_value = {
+            'tracks': {'items': []}, 'albums': {'items': []}, 'playlists': {'items': []}
+        }
+        mock_spotify_client = MagicMock()
+        mock_spotify_client.get.return_value = fake_response
+        mock_spotify_client.token = None
+        from flask import render_template as real_render_template
+
+        def flaky_render_template(template_name, **context):
+            if template_name == 'service_search_results.html':
+                raise RuntimeError('provider body search-secret traceback')
+            return real_render_template(template_name, **context)
+
+        with patch('musicround.routes.core.oauth.spotify', new=mock_spotify_client, create=True), \
+                patch('musicround.routes.core.render_template', side_effect=flaky_render_template):
+            response = client.post(
+                '/search-results',
+                data={'search_term': 'some song'},
+                follow_redirects=False,
+            )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'An error occurred while searching Spotify.' in body
+        assert 'Please try again or reconnect Spotify if the problem persists.' in body
+        assert 'search-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
 
 class TestSpotifySearchManualTokenPriority:
     """A manually-supplied session bearer token (e.g. extracted from a

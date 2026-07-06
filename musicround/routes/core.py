@@ -347,10 +347,14 @@ def search_results():
         if "token" in str(e).lower() or "auth" in str(e).lower() or "401" in str(e):
              flash("An authentication error occurred with Spotify. Please try reconnecting your account.", "danger")
              return redirect(url_for('users.spotify_link'))
-        return render_template('error.html', 
-                              error_message="An error occurred while searching Spotify.",
-                              error_details=str(e),
-                              back_url=url_for('core.search'))
+        return render_template(
+            'error.html',
+            message=(
+                "An error occurred while searching Spotify. "
+                "Please try again or reconnect Spotify if the problem persists."
+            ),
+            back_url=url_for('core.search'),
+        )
 
 @core_bp.route('/view-songs')
 @login_required

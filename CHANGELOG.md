@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sanitized system-health status failures so database, API, and memory exception details stay out of the admin status page.
 - Sanitized Deezer import failure flashes so provider and helper exception details stay out of browser messages.
 - Sanitized manual Spotify import failure flashes so provider and helper exception details stay out of browser messages.
+- Sanitized Spotify search error pages so provider exception details stay out of browser-rendered error details.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.
