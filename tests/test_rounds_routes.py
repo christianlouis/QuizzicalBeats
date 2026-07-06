@@ -4,7 +4,7 @@ from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
-from musicround.models import db, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
+from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -192,6 +192,44 @@ class TestRoundsListRoute:
         assert response.status_code == 200
         assert b'Calendar Round' in response.data
         assert b'2026-07-09 17:00' in response.data
+
+    def test_round_calendar_shows_visible_planned_quiz_dates(self, app, client):
+        """Round calendar should expose own and unassigned planned quiz dates."""
+        _login(app, client, username='planner', email='planner@example.test')
+        planner_id = _user_id(app, 'planner')
+        with app.app_context():
+            other = User(username='otherplanner', email='otherplanner@example.test')
+            other.password = 'RoundsPass123!'
+            db.session.add(other)
+            db.session.commit()
+            db.session.add_all([
+                PlannedQuizRound(
+                    quiz_date=datetime(2026, 7, 9, 17, 0),
+                    quizmaster_id=planner_id,
+                    theme='Festival repair night',
+                    status='planned',
+                ),
+                PlannedQuizRound(
+                    quiz_date=datetime(2026, 7, 16, 17, 0),
+                    theme='Unassigned Thursday',
+                    status='blocked',
+                ),
+                PlannedQuizRound(
+                    quiz_date=datetime(2026, 7, 23, 17, 0),
+                    quizmaster_id=other.id,
+                    theme='Hidden other quizmaster',
+                    status='planned',
+                ),
+            ])
+            db.session.commit()
+
+        response = client.get('/rounds/calendar')
+
+        assert response.status_code == 200
+        assert b'Planned Quiz Dates' in response.data
+        assert b'Festival repair night' in response.data
+        assert b'Unassigned Thursday' in response.data
+        assert b'Hidden other quizmaster' not in response.data
 
     def test_round_analytics_page_renders_summary(self, app, client):
         """Round analytics should render catalog health signals."""

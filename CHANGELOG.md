@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
 - Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
+- Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
 
 ### Fixed
 - Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.
