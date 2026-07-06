@@ -382,8 +382,8 @@ class TestImportWorker:
             assert updated.imported_count == 3
             assert updated.skipped_count == 1
 
-    def test_process_job_persists_failure_details(self, app):
-        """Test failed imports leave an actionable ImportJobRecord error."""
+    def test_process_job_persists_safe_failure_summary(self, app):
+        """Failed imports should not persist provider exception details."""
         with app.app_context():
             user = User(username='failworker', email='failworker@example.com')
             user.password = 'WorkerPass123!'
@@ -411,8 +411,9 @@ class TestImportWorker:
             assert updated.status == 'pending'
             assert updated.attempt_count == 1
             assert updated.completed_at is not None
-            assert 'Spotify exploded' in updated.error_message
+            assert 'Import job failed. Check the server logs.' in updated.error_message
             assert 'retry queued' in updated.error_message
+            assert 'Spotify exploded' not in updated.error_message
 
     def test_process_job_moves_to_dead_letter_after_max_attempts(self, app):
         """Exhausted import jobs should stop retrying and require manual review."""
@@ -444,6 +445,8 @@ class TestImportWorker:
             assert updated.status == 'dead_letter'
             assert updated.attempt_count == 1
             assert 'manual review required' in updated.error_message
+            assert 'Import job failed. Check the server logs.' in updated.error_message
+            assert 'Spotify exploded' not in updated.error_message
 
     def test_process_job_unknown_user_does_not_import(self, app):
         """Test that jobs for missing users are ignored."""

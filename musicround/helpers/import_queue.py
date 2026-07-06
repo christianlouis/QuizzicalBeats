@@ -17,6 +17,9 @@ from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.spotify_helper import get_spotify_token
 
 
+IMPORT_JOB_FAILURE_MESSAGE = "Import job failed. Check the server logs."
+
+
 @dataclass(order=True)
 class ImportJob:
     """Represents a single import job."""
@@ -266,7 +269,7 @@ class ImportWorker(threading.Thread):
             except Exception as exc:  # pylint: disable=broad-except
                 current_app.logger.error("Import job failed: %s", exc, exc_info=True)
                 db.session.rollback()
-                self._mark_failed(record, str(exc))
+                self._mark_failed(record, IMPORT_JOB_FAILURE_MESSAGE)
             finally:
                 if logged_in:
                     logout_user()
