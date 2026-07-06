@@ -77,6 +77,14 @@ class TestGetAllDecades:
             result = get_all_decades()
         assert result == []
 
+    def test_zero_year_excluded(self, app):
+        """Test that a zero year sentinel does not create a fake decade."""
+        from musicround.routes.generate import get_all_decades
+        _add_songs(app, [{'title': 'Zero Year', 'artist': 'A', 'genre': 'Rock', 'year': 0}])
+        with app.app_context():
+            result = get_all_decades()
+        assert result == []
+
 
 class TestGetAllGenres:
     """Tests for generate.get_all_genres helper."""

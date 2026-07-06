@@ -15,19 +15,18 @@ songs_per_round = 8
 # Helper functions
 def get_all_decades():
     """
-    Return a list of 'decade' strings (e.g. '1970', '1980')
-    based on the first 3 digits of the year + '0'.
+    Return unique decade strings for songs with real, positive years.
     """
     all_decades = []
     years = (
         Song.query.with_entities(Song.year)
-        .filter(Song.year.isnot(None))
+        .filter(Song.year.isnot(None), Song.year > 0)
         .order_by(Song.year.asc())
         .distinct()
         .all()
     )
     for (year,) in years:
-        decade = str(year)[:3] + '0'
+        decade = str((year // 10) * 10)
         if decade not in all_decades:
             all_decades.append(decade)
     return all_decades
