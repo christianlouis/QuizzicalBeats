@@ -496,7 +496,7 @@ def direct_official_playlists():
         current_app.logger.error(f"Error fetching official playlists with direct client: {e}")
         import traceback
         current_app.logger.error(traceback.format_exc())
-        flash(f'Error retrieving playlists from Spotify: {str(e)}', 'danger')
+        flash('Error retrieving playlists from Spotify. Please refresh your Spotify token and try again.', 'danger')
         all_playlists = []
     
     # Handle empty result

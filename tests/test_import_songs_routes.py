@@ -151,3 +151,36 @@ class TestSpotifySongImportRoute:
         assert captured['item_type'] == 'playlist'
         assert captured['item_id'] == 'playlist-123'
         assert captured['spotify_token'] == 'manual-token'
+
+    def test_direct_playlist_browser_error_hides_provider_details(self, app, client, monkeypatch):
+        """Direct playlist browser failures must not render provider or token details."""
+        from musicround.helpers import spotify_direct
+
+        class FailingDirectClient:
+            def __init__(self, bearer_token):
+                self.bearer_token = bearer_token
+
+            def fetch_all_user_playlists(self, account):
+                raise RuntimeError(
+                    'invalid_token bearer-token-fragment provider traceback'
+                )
+
+        with app.app_context():
+            _login_user_without_spotify_token(client)
+
+        with client.session_transaction() as sess:
+            sess['direct_bearer_token'] = 'bearer-token-fragment'
+
+        monkeypatch.setattr(spotify_direct, 'SpotifyDirectClient', FailingDirectClient)
+
+        response = client.get('/import/direct-official-playlists', follow_redirects=True)
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert (
+            'Error retrieving playlists from Spotify. '
+            'Please refresh your Spotify token and try again.'
+        ) in body
+        assert 'invalid_token' not in body
+        assert 'bearer-token-fragment' not in body
+        assert 'provider traceback' not in body
