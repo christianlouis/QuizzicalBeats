@@ -28,6 +28,14 @@ def _create_song(app, title='Round Test Song', artist='Band', genre='Pop'):
         return song.id
 
 
+def _create_songs(app, count, title_prefix='Round Test Song'):
+    """Helper: create several songs and return their ids."""
+    return [
+        _create_song(app, title=f'{title_prefix} {index}', artist='Band', genre='Pop')
+        for index in range(count)
+    ]
+
+
 def _create_round(app, songs_ids, name='Test Round'):
     """Helper: create a round and return its id."""
     with app.app_context():
@@ -75,9 +83,9 @@ class TestRoundsListRoute:
     def test_rounds_list_shows_readiness_and_schedule_status(self, app, client):
         """Round list should show asset readiness and scheduled delivery state."""
         _login(app, client)
-        song_id = _create_song(app)
-        ready_round_id = _create_round(app, [song_id], name='Ready Round')
-        partial_round_id = _create_round(app, [song_id], name='Partial Round')
+        song_ids = _create_songs(app, 8, title_prefix='Ready Song')
+        ready_round_id = _create_round(app, song_ids, name='Ready Round')
+        partial_round_id = _create_round(app, song_ids, name='Partial Round')
 
         with app.app_context():
             ready_round = db.session.get(Round, ready_round_id)
@@ -104,6 +112,45 @@ class TestRoundsListRoute:
         assert b'Partial assets' in response.data
         assert b'Scheduled' in response.data
         assert b'2026-07-09 17:00' in response.data
+
+    def test_rounds_list_flags_incomplete_and_unresolved_rounds(self, app, client):
+        """Round list should make non-eight-song and broken-ID rounds obvious."""
+        _login(app, client)
+        short_song_ids = _create_songs(app, 6, title_prefix='Short Song')
+        full_song_ids = _create_songs(app, 8, title_prefix='Full Song')
+        _create_round(app, short_song_ids, name='Short Round')
+        _create_round(app, full_song_ids, name='Too Full Round')
+        _create_round(app, full_song_ids[:7] + [999999], name='Broken Round')
+
+        response = client.get('/rounds/')
+
+        assert response.status_code == 200
+        assert b'Songs 6/8' in response.data
+        assert b'Resolves 7/8' in response.data
+        assert b'7/8 songs resolve' in response.data
+
+    def test_rounds_list_shows_latest_email_failure_when_not_scheduled(self, app, client):
+        """Round list should expose failed delivery attempts even without active schedule."""
+        _login(app, client)
+        song_ids = _create_songs(app, 8, title_prefix='Failed Email Song')
+        round_id = _create_round(app, song_ids, name='Failed Email Round')
+        with app.app_context():
+            export = RoundExport(
+                round_id=round_id,
+                export_type='email',
+                status='failed',
+                destination='quizmaster@example.test',
+                timestamp=datetime(2026, 7, 9, 18, 0),
+                processed_at=datetime(2026, 7, 9, 18, 1),
+            )
+            db.session.add(export)
+            db.session.commit()
+
+        response = client.get('/rounds/')
+
+        assert response.status_code == 200
+        assert b'Email failed' in response.data
+        assert b'2026-07-09 18:01' in response.data
 
     def test_rounds_list_is_paginated(self, app, client):
         """Round list should only render the requested page of rounds."""

@@ -207,6 +207,18 @@
                     </div>
                 </div>
                 
+                {% if dropbox_token_notice %}
+                <div class="mb-3 rounded-md border px-3 py-2 text-sm
+                    {% if dropbox_token_notice.level == 'danger' %}
+                        bg-red-50 border-red-200 text-red-800
+                    {% else %}
+                        bg-yellow-50 border-yellow-200 text-yellow-800
+                    {% endif %}">
+                    <div class="font-semibold">{{ dropbox_token_notice.title }}</div>
+                    <div>{{ dropbox_token_notice.message }}</div>
+                </div>
+                {% endif %}
+
                 {% if current_user.dropbox_id and current_user.dropbox_token and current_user.dropbox_refresh_token %}
                     <div class="grid grid-cols-1 gap-2">
                         <p class="text-xs text-gray-600">

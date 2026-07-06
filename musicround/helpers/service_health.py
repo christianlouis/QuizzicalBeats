@@ -8,6 +8,7 @@ from flask import current_app
 from sqlalchemy import text
 
 from musicround.helpers.database_config import database_summary
+from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status
 from musicround.helpers.storage_health import check_round_artifact_storage
 from musicround.version import VERSION_INFO
 
@@ -36,6 +37,15 @@ def _status_from_issues(issues: list[dict[str, Any]]) -> str:
     if issues:
         return "warning"
     return "ok"
+
+
+def _token_status_payload(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    if status is None:
+        return None
+    payload = dict(status)
+    if payload.get("expires_at"):
+        payload["expires_at"] = payload["expires_at"].isoformat()
+    return payload
 
 
 def database_service_health() -> dict[str, Any]:
@@ -108,6 +118,7 @@ def email_service_health(required: bool = False) -> dict[str, Any]:
 def spotify_service_health(user: Any | None = None) -> dict[str, Any]:
     """Return Spotify configuration and optional user-connection health."""
     issues: list[dict[str, Any]] = []
+    token_status = spotify_token_status(user) if user is not None else None
     if not current_app.config.get("SPOTIFY_CLIENT_ID") or not current_app.config.get("SPOTIFY_CLIENT_SECRET"):
         issues.append(
             _issue(
@@ -118,42 +129,70 @@ def spotify_service_health(user: Any | None = None) -> dict[str, Any]:
             )
         )
 
-    if user is not None and getattr(user, "spotify_id", None) and not getattr(user, "spotify_refresh_token", None):
+    if token_status and token_status.get("issue_code"):
+        severity = "warning"
         issues.append(
             _issue(
-                "spotify_reconnect_required",
-                "Spotify connection is linked but cannot refresh.",
-                severity="warning",
-                hint="Reconnect Spotify from the profile page.",
+                token_status["issue_code"],
+                token_status["message"],
+                severity=severity,
+                hint="Reconnect Spotify from the profile page."
+                if token_status.get("reconnect_required")
+                else "Refresh or reconnect Spotify before long imports.",
+                details={
+                    "status": token_status["status"],
+                    "expires_at": token_status["expires_at"].isoformat()
+                    if token_status.get("expires_at")
+                    else None,
+                    "expires_soon": token_status["expires_soon"],
+                    "reconnect_required": token_status["reconnect_required"],
+                },
             )
         )
 
-    return {
+    payload = {
         "status": _status_from_issues(issues),
         "ok": not any(issue.get("severity") == "error" for issue in issues),
-        "connected": bool(user is not None and getattr(user, "spotify_refresh_token", None)),
+        "connected": bool(token_status and token_status["connected"]),
         "issues": issues,
     }
+    if token_status is not None:
+        payload["token_status"] = _token_status_payload(token_status)
+    return payload
 
 
 def dropbox_service_health(user: Any | None = None) -> dict[str, Any]:
     """Return Dropbox optional connection health for a user."""
     issues: list[dict[str, Any]] = []
-    if user is not None and getattr(user, "dropbox_id", None) and not getattr(user, "dropbox_refresh_token", None):
+    token_status = dropbox_token_status(user) if user is not None else None
+    if token_status and token_status.get("issue_code"):
         issues.append(
             _issue(
-                "dropbox_reconnect_required",
-                "Dropbox connection is linked but cannot refresh.",
+                token_status["issue_code"],
+                token_status["message"],
                 severity="warning",
-                hint="Reconnect Dropbox from the profile page before exporting rounds.",
+                hint="Reconnect Dropbox from the profile page before exporting rounds."
+                if token_status.get("reconnect_required")
+                else "Refresh or reconnect Dropbox before exporting rounds.",
+                details={
+                    "status": token_status["status"],
+                    "expires_at": token_status["expires_at"].isoformat()
+                    if token_status.get("expires_at")
+                    else None,
+                    "expires_soon": token_status["expires_soon"],
+                    "reconnect_required": token_status["reconnect_required"],
+                },
             )
         )
-    return {
+    payload = {
         "status": _status_from_issues(issues),
         "ok": True,
-        "connected": bool(user is not None and getattr(user, "dropbox_refresh_token", None)),
+        "connected": bool(token_status and token_status["connected"]),
         "issues": issues,
     }
+    if token_status is not None:
+        payload["token_status"] = _token_status_payload(token_status)
+    return payload
 
 
 def application_health_payload(include_storage: bool = True) -> dict[str, Any]:

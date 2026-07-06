@@ -55,6 +55,7 @@ def _rounds_list_statuses(rounds):
     """Build compact readiness and schedule metadata for the rounds list."""
     round_ids = [round_.id for round_ in rounds]
     scheduled_by_round = {}
+    latest_email_by_round = {}
     if round_ids:
         scheduled_exports = (
             RoundExport.query
@@ -69,26 +70,61 @@ def _rounds_list_statuses(rounds):
         )
         for export in scheduled_exports:
             scheduled_by_round.setdefault(export.round_id, export)
+        latest_email_exports = (
+            RoundExport.query
+            .filter(
+                RoundExport.round_id.in_(round_ids),
+                RoundExport.export_type == 'email',
+            )
+            .order_by(RoundExport.timestamp.desc(), RoundExport.id.desc())
+            .all()
+        )
+        for export in latest_email_exports:
+            latest_email_by_round.setdefault(export.round_id, export)
 
     statuses = {}
     for round_ in rounds:
-        if round_.mp3_generated and round_.pdf_generated:
+        stored_song_count = len(round_.song_id_list)
+        resolved_song_count = len(round_.song_list)
+        if stored_song_count != 8:
+            readiness = {
+                'label': f'Songs {stored_song_count}/8',
+                'color': 'red',
+                'hint': 'Rounds should contain exactly eight stored songs before delivery.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        elif resolved_song_count != stored_song_count:
+            readiness = {
+                'label': f'Resolves {resolved_song_count}/8',
+                'color': 'red',
+                'hint': 'One or more stored song IDs no longer resolve to songs.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        elif round_.mp3_generated and round_.pdf_generated:
             readiness = {
                 'label': 'Assets ready',
                 'color': 'green',
                 'hint': 'MP3 and PDF have been generated.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
             }
         elif round_.mp3_generated or round_.pdf_generated:
             readiness = {
                 'label': 'Partial assets',
                 'color': 'yellow',
                 'hint': 'Only one of MP3 or PDF has been generated.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
             }
         else:
             readiness = {
                 'label': 'Needs assets',
                 'color': 'gray',
                 'hint': 'Generate MP3 and PDF before delivery.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
             }
 
         scheduled_export = scheduled_by_round.get(round_.id)
@@ -100,12 +136,35 @@ def _rounds_list_statuses(rounds):
                 'destination': scheduled_export.destination,
             }
         else:
-            schedule = {
-                'label': 'Not scheduled',
-                'color': 'gray',
-                'scheduled_for': None,
-                'destination': None,
-            }
+            latest_email_export = latest_email_by_round.get(round_.id)
+            if latest_email_export and latest_email_export.status == 'success':
+                schedule = {
+                    'label': 'Email sent',
+                    'color': 'green',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            elif latest_email_export and latest_email_export.status == 'failed':
+                schedule = {
+                    'label': 'Email failed',
+                    'color': 'red',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            elif latest_email_export and latest_email_export.status in {'processing', 'pending'}:
+                schedule = {
+                    'label': latest_email_export.status.capitalize(),
+                    'color': 'yellow',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            else:
+                schedule = {
+                    'label': 'Not scheduled',
+                    'color': 'gray',
+                    'scheduled_for': None,
+                    'destination': None,
+                }
 
         statuses[round_.id] = {'readiness': readiness, 'schedule': schedule}
     return statuses

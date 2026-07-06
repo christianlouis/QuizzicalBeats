@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
+from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
 from musicround.helpers.spotify_helper import (
     clear_manual_spotify_bearer_token,
     get_spotify_token,
@@ -686,32 +687,10 @@ def profile():
     elif token_source in ['client_credentials', 'client_credentials_manual'] and session_bearer:
         spotify_status = 'client_credentials'
 
-    spotify_token_notice = None
-    if current_user.spotify_id and not (current_user.spotify_token and current_user.spotify_refresh_token):
-        spotify_token_notice = {
-            'level': 'danger',
-            'title': 'Reconnect required',
-            'message': 'Your Spotify account is linked, but stored credentials are missing.',
-        }
-    elif current_user.spotify_token:
-        if not current_user.spotify_token_expiry:
-            spotify_token_notice = {
-                'level': 'warning',
-                'title': 'Expiry unknown',
-                'message': 'Reconnect Spotify if imports or playlist lookups fail.',
-            }
-        elif current_user.spotify_token_expiry <= now:
-            spotify_token_notice = {
-                'level': 'danger',
-                'title': 'Token expired',
-                'message': 'Reconnect Spotify before importing playlists or refreshing metadata.',
-            }
-        elif current_user.spotify_token_expiry <= now + timedelta(minutes=15):
-            spotify_token_notice = {
-                'level': 'warning',
-                'title': 'Token expires soon',
-                'message': 'Refresh or reconnect Spotify before starting a long import.',
-            }
+    spotify_status_payload = spotify_token_status(current_user, now=now)
+    dropbox_status_payload = dropbox_token_status(current_user, now=now)
+    spotify_token_notice = token_notice(spotify_status_payload)
+    dropbox_token_notice = token_notice(dropbox_status_payload)
     
     return render_template(
         'users/profile.html', 
@@ -728,7 +707,10 @@ def profile():
         active_user_id=active_user_id,
         active_user_image=active_user_image,
         active_token_expiry=active_token_expiry,
-        spotify_token_notice=spotify_token_notice
+        spotify_token_notice=spotify_token_notice,
+        dropbox_token_notice=dropbox_token_notice,
+        spotify_token_status=spotify_status_payload,
+        dropbox_token_status=dropbox_status_payload,
     )
 
 @users_bp.route('/edit-profile', methods=['GET', 'POST'])

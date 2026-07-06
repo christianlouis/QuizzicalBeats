@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
 - Added readiness and scheduled-delivery badges to the rounds list.
+- Added reusable Spotify/Dropbox OAuth token-status helpers for profile warnings, service health, automation, and future MCP checks.
 - Added reviewable per-track hint scripts for music rounds, MCP helpers to draft/save them, TTS generation for hint clips, and MP3 playback support that inserts selected hints before first-listen snippets.
 - Added lazy-loaded preview players in the song library so large libraries do not render one audio element per song.
-- Added visible Spotify reconnect and token-expiry warnings on the profile page.
+- Added visible Spotify and Dropbox reconnect/token-expiry warnings on the profile page.
 - Added import-job retry tracking, dead-letter status, attempt counts, and an idempotent migration for existing databases.
 - Added a JSON import queue status endpoint for polling clients and MCP workflows.
 - Added normalized, de-duplicated tag options for the music-round builder.
@@ -67,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Normalized OAuth token expiry storage for both `expires_in` and Authlib-style `expires_at` payloads.
 - Made Dropbox folder browsing force-refresh once after a 401 and return a reconnect-required payload when refresh credentials are revoked.
 - Made tag-based round generation match tag names after trimming and case folding.
+- Made the rounds list flag non-eight-song rounds, unresolved song IDs, and failed email deliveries before quiz rounds reach inbox workflows.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

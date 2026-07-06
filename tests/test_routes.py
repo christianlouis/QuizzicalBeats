@@ -516,6 +516,23 @@ class TestAuthenticatedRoutes:
         assert b'Token expires soon' in response.data
         assert b'long import' in response.data
 
+    def test_profile_warns_when_dropbox_token_expires_soon(self, app, client):
+        """Profile should surface a clear warning before Dropbox exports become fragile."""
+        self._login(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='authtest').one()
+            user.dropbox_id = 'dropbox-account-id'
+            user.dropbox_token = 'access-token'
+            user.dropbox_refresh_token = 'refresh-token'
+            user.dropbox_token_expiry = datetime.now() + timedelta(minutes=5)
+            db.session.commit()
+
+        response = client.get('/users/profile')
+
+        assert response.status_code == 200
+        assert b'Token expires soon' in response.data
+        assert b'before exporting a round package' in response.data
+
     def test_legacy_use_refresh_token_redirects_when_logged_in(self, app, client):
         """Legacy refresh-token endpoint must not return None/500."""
         self._login(app, client)
