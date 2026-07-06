@@ -187,7 +187,7 @@ class TestGetSongsByTag:
         assert result[0].title == 'Tagged Generate Song'
 
     def test_matches_normalized_tag_name(self, app):
-        """Test get_songs_by_tag matches tags after trimming and case folding."""
+        """Test get_songs_by_tag matches tags after trimming and lowercasing."""
         from musicround.routes.generate import get_songs_by_tag
         with app.app_context():
             tag1 = Tag(name=' rock ')

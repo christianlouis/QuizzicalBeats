@@ -66,7 +66,7 @@ def get_songs_by_tag(tag_name, limit=8):
     normalized_sql = db.func.lower(db.func.trim(Tag.name))
     return (
         Song.query.join(Song.tags)
-        .filter(normalized_sql == normalized_tag_name.casefold())
+        .filter(normalized_sql == normalized_tag_name.lower())
         .order_by(Song.id.asc())
         .distinct()
         .limit(limit)
