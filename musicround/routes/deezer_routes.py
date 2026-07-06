@@ -11,6 +11,15 @@ from musicround.helpers.import_helper import ImportHelper
 
 deezer_bp = Blueprint('deezer', __name__)
 
+
+def _safe_deezer_import_error(item_type):
+    """Return a browser-safe Deezer import error message."""
+    return (
+        f'Error importing {item_type} from Deezer. '
+        'Please check the Deezer ID and try again.'
+    )
+
+
 @deezer_bp.route('/deezer-search', methods=['GET'])
 def deezer_search():
     """Display Deezer search form"""
@@ -118,7 +127,7 @@ def import_deezer_track_result():
     elif result['skipped_count'] > 0:
         flash('Song was already in the database.', 'info')
     else:
-        flash(f'Error importing song: {", ".join(result["errors"])}', 'danger')
+        flash(_safe_deezer_import_error('song'), 'danger')
     
     return redirect(url_for('core.view_songs'))
 
@@ -144,7 +153,7 @@ def import_deezer_playlist():
             elif result['error_count'] > 0:
                 flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
             else:
-                flash(f'Error importing playlist: {", ".join(result["errors"])}', 'danger')
+                flash(_safe_deezer_import_error('playlist'), 'danger')
                 
             return redirect(url_for('core.view_songs'))
         else:
@@ -174,7 +183,7 @@ def import_deezer_playlist_result():
     elif result['error_count'] > 0:
         flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
     else:
-        flash(f'Error importing playlist: {", ".join(result["errors"])}', 'danger')
+        flash(_safe_deezer_import_error('playlist'), 'danger')
     
     return redirect(url_for('core.view_songs'))
 
@@ -205,7 +214,7 @@ def import_deezer_album_result():
     elif result['error_count'] > 0:
         flash(f'Encountered {result["error_count"]} errors during import.', 'warning')
     else:
-        flash(f'Error importing album: {", ".join(result["errors"])}', 'danger')
+        flash(_safe_deezer_import_error('album'), 'danger')
     
     return redirect(url_for('core.view_songs'))
 

@@ -136,6 +136,81 @@ class TestDeezerRoutes:
         response = client.get('/import-deezer-playlist')
         assert response.status_code in (200, 302)
 
+    def test_deezer_track_import_error_hides_import_details(self, client, monkeypatch):
+        """Deezer track import failures should not render raw helper errors."""
+        monkeypatch.setattr(
+            'musicround.routes.deezer_routes.ImportHelper.import_item',
+            lambda *args, **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 0,
+                'error_count': 1,
+                'errors': ['provider body token=deezer-track-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import-deezer-track-result',
+            data={'track_id': 'track-err'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error importing song from Deezer. Please check the Deezer ID and try again.' in body
+        assert 'deezer-track-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
+    def test_deezer_playlist_import_error_hides_import_details(self, client, monkeypatch):
+        """Deezer playlist import failures should not render raw helper errors."""
+        monkeypatch.setattr(
+            'musicround.routes.deezer_routes.ImportHelper.import_item',
+            lambda *args, **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': ['provider body token=deezer-playlist-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import-deezer-playlist-result',
+            data={'playlist_id': 'playlist-err'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error importing playlist from Deezer. Please check the Deezer ID and try again.' in body
+        assert 'deezer-playlist-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
+    def test_deezer_album_import_error_hides_import_details(self, client, monkeypatch):
+        """Deezer album import failures should not render raw helper errors."""
+        monkeypatch.setattr(
+            'musicround.routes.deezer_routes.ImportHelper.import_item',
+            lambda *args, **kwargs: {
+                'imported_count': 0,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': ['provider body token=deezer-album-secret traceback'],
+            },
+        )
+
+        response = client.post(
+            '/import-deezer-album-result',
+            data={'album_id': 'album-err'},
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error importing album from Deezer. Please check the Deezer ID and try again.' in body
+        assert 'deezer-album-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
 
 class TestImportRoutesAccess:
     """Tests for basic import route access."""
