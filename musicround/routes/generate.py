@@ -35,11 +35,10 @@ def get_all_genres():
     """
     Return a list of all genres in the Song table.
     """
-    all_genres = []
-    for song in Song.query.all():
-        if song.genre and song.genre not in all_genres:
-            all_genres.append(song.genre)
-    return all_genres
+    results = Song.query.with_entities(Song.genre).distinct().all()
+    # Query returns tuples like [('Rock',), ('Pop',)], so we extract the first element
+    # and filter out any falsy values (None, empty string).
+    return [r[0] for r in results if r[0]]
 
 def get_all_tags():
     """
