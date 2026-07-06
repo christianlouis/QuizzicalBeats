@@ -354,7 +354,7 @@ def search_results():
                 "Please try again or reconnect Spotify if the problem persists."
             ),
             back_url=url_for('core.search'),
-        )
+        ), 500
 
 @core_bp.route('/view-songs')
 @login_required

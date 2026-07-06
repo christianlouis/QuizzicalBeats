@@ -18,7 +18,6 @@ from musicround.helpers.spotify_helper import get_spotify_token
 
 
 IMPORT_JOB_FAILURE_MESSAGE = "Import job failed. Check the server logs."
-IMPORT_JOB_RESULT_ERROR_MESSAGE = "Import completed with errors. Check the server logs."
 
 
 def _safe_result_error_summary(errors: list[Any]) -> str | None:
