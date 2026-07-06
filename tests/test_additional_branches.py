@@ -69,6 +69,25 @@ class TestSetupRoute:
         response = client.get('/users/setup', follow_redirects=True)
         assert response.status_code == 200
 
+    def test_setup_failure_hides_exception_details(self, app, client, monkeypatch):
+        """Setup failure flashes should not expose database or token-like details."""
+        _create_user(app, 'setup_error_user', 'setuperror@example.com')
+        _login(app, client, 'setup_error_user')
+
+        def fail_commit():
+            raise RuntimeError('database down token=setup-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+
+        response = client.get('/users/setup', follow_redirects=True)
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error setting up admin privileges. Please try again or check the server logs.' in body
+        assert 'database down' not in body
+        assert 'setup-secret' not in body
+        assert 'traceback' not in body
+
 
 class TestSystemHealthRoute:
     """Tests for /users/system-health route."""

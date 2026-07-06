@@ -1110,7 +1110,7 @@ def setup():
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error promoting user to admin: {str(e)}")
-        flash(f'Error setting up admin privileges: {str(e)}', 'danger')
+        flash('Error setting up admin privileges. Please try again or check the server logs.', 'danger')
         return redirect(url_for('users.profile'))
 
 @users_bp.route('/audio-settings', methods=['GET', 'POST'])
