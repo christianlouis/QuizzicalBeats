@@ -177,9 +177,12 @@ class TestDeleteBackup:
 
         with patch('os.path.exists', return_value=True), \
              patch('os.path.join', return_value='/data/backups/bad.zip'), \
-             patch('os.remove', side_effect=OSError('Permission denied')):
+             patch('os.remove', side_effect=OSError('Permission denied token=delete-secret traceback')):
             result = delete_backup('bad.zip')
         assert result['status'] == 'error'
+        assert result['message'] == 'Backup deletion failed. Check the server logs.'
+        assert 'delete-secret' not in result['message']
+        assert 'Permission denied' not in result['message']
 
 
 class TestVerifyBackup:
@@ -207,6 +210,22 @@ class TestVerifyBackup:
             result = verify_backup('bad.zip')
         assert result['status'] == 'error'
         assert result['is_valid'] is False
+        assert 'not a valid ZIP archive' in result['message']
+
+    def test_verify_backup_exception_hides_details(self, app):
+        """Unexpected verify errors should not expose filesystem details."""
+        from musicround.helpers.backup_helper import verify_backup
+
+        with patch('os.path.exists', return_value=True), \
+             patch('os.path.join', return_value='/data/backups/bad.zip'), \
+             patch('zipfile.is_zipfile', side_effect=OSError('permission token=verify-secret traceback')):
+            result = verify_backup('bad.zip')
+
+        assert result['status'] == 'error'
+        assert result['is_valid'] is False
+        assert result['message'] == 'Backup verification failed. Check the server logs.'
+        assert 'verify-secret' not in result['message']
+        assert 'permission' not in result['message']
 
     def test_verify_backup_missing_db(self, app, tmp_path):
         """Test verify_backup returns error when ZIP lacks the database file."""
@@ -419,6 +438,21 @@ class TestScheduleBackup:
         assert SystemSetting.get('backup_schedule_time') == '08:30'
         assert SystemSetting.get('backup_schedule_frequency') == 'weekly'
         assert SystemSetting.get('backup_schedule_enabled') == 'true'
+
+    def test_schedule_backup_exception_hides_details(self, app):
+        """Unexpected schedule errors should not expose storage details."""
+        from musicround.helpers.backup_helper import schedule_backup
+
+        with patch(
+            'musicround.models.SystemSetting.set',
+            side_effect=RuntimeError('settings write token=schedule-secret traceback'),
+        ):
+            result = schedule_backup(schedule_time='08:30', frequency='weekly', retention_days=7)
+
+        assert result['status'] == 'error'
+        assert result['message'] == 'Backup scheduling failed. Check the server logs.'
+        assert 'schedule-secret' not in result['message']
+        assert 'settings write' not in result['message']
 
 
 class TestGetBackupSummary:

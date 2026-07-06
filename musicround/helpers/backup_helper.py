@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 BACKUP_DATABASE_FILENAMES = ('song_data.db', 'database.db')
 
 
+def _safe_backup_error_message(action):
+    """Return a browser-safe backup operation error message."""
+    return f"{action} failed. Check the server logs."
+
+
 def _find_database_member(file_list):
     for filename in BACKUP_DATABASE_FILENAMES:
         if filename in file_list:
@@ -201,7 +206,7 @@ def create_backup(backup_name=None, include_mp3s=True, include_config=True):
         logger.error(f"Error during backup creation: {str(e)}")
         return {
             "status": "error",
-            "message": f"Backup failed: {str(e)}",
+            "message": _safe_backup_error_message("Backup creation"),
             "path": None
         }
 
@@ -288,7 +293,7 @@ def delete_backup(backup_filename):
         logger.error(f"Error deleting backup {backup_filename}: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error deleting backup: {str(e)}"
+            "message": _safe_backup_error_message("Backup deletion")
         }
 
 def restore_backup(backup_filename):
@@ -442,7 +447,7 @@ def restore_backup(backup_filename):
         logger.error(f"Error restoring backup {backup_filename}: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error restoring backup: {str(e)}"
+            "message": _safe_backup_error_message("Backup restore")
         }
 
 def verify_backup(backup_filename):
@@ -513,7 +518,7 @@ def verify_backup(backup_filename):
         logger.error(f"Error verifying backup {backup_filename}: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error verifying backup: {str(e)}",
+            "message": _safe_backup_error_message("Backup verification"),
             "is_valid": False
         }
 
@@ -559,7 +564,7 @@ def schedule_backup(schedule_time=None, frequency='daily', retention_days=30):
         logger.error(f"Error scheduling backup: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error scheduling backup: {str(e)}"
+            "message": _safe_backup_error_message("Backup scheduling")
         }
 
 def get_backup_summary():
@@ -786,7 +791,7 @@ def apply_retention_policy(retention_days=30):
         logger.error(f"Error applying retention policy: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error applying retention policy: {str(e)}",
+            "message": _safe_backup_error_message("Retention policy"),
             "deleted_count": 0,
             "deleted_backups": []
         }
@@ -859,7 +864,7 @@ def upload_backup(file):
         logger.error(f"Error uploading backup: {str(e)}")
         return {
             "status": "error",
-            "message": f"Error uploading backup: {str(e)}"
+            "message": _safe_backup_error_message("Backup upload")
         }
 
 def update_ofelia_config(retention_days=30):
@@ -967,7 +972,7 @@ docker-compose up -d
         logger.error(f"Error updating Ofelia configuration: {str(e)}")
         return {
             "status": "error",
-            "message": f"Failed to update Ofelia configuration: {str(e)}",
+            "message": _safe_backup_error_message("Ofelia configuration update"),
             "config_path": None,
             "config_content": None
         }
