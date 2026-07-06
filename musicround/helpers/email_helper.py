@@ -8,6 +8,10 @@ from email.mime.base import MIMEBase
 from email import encoders
 from flask import current_app
 
+EMAIL_CONFIGURATION_ERROR = "Email server configuration is incomplete. Check the server logs."
+EMAIL_DELIVERY_ERROR = "Email delivery failed. Check the server logs."
+
+
 def send_email(recipient, subject, body_text, attachments=None):
     """
     Sends an email with optional attachments.
@@ -56,7 +60,7 @@ def send_email(recipient, subject, body_text, attachments=None):
                                f"MAIL_USERNAME: {'set' if mail_username else 'missing'}, "
                                f"MAIL_PASSWORD: {'set' if mail_password else 'missing'}, "
                                f"MAIL_SENDER: {'set' if mail_sender else 'missing'}")
-        return False, error_msg
+        return False, EMAIL_CONFIGURATION_ERROR
 
     # Create message object
     msg = MIMEMultipart()
@@ -101,11 +105,15 @@ def send_email(recipient, subject, body_text, attachments=None):
         return True, f'Email sent successfully to {recipient}!'
             
     except smtplib.SMTPException as e:
-        error_msg = str(e)
-        current_app.logger.error(f"SMTP Error: {error_msg}")
-        current_app.logger.error(f"Failed to send email from {mail_sender} to {recipient} via {mail_host}:{mail_port}")
-        return False, error_msg
+        current_app.logger.error("SMTP Error: %s", e, exc_info=True)
+        current_app.logger.error(
+            "Failed to send email from %s to %s via %s:%s",
+            mail_sender,
+            recipient,
+            mail_host,
+            mail_port,
+        )
+        return False, EMAIL_DELIVERY_ERROR
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        current_app.logger.error(error_msg)
-        return False, error_msg
+        current_app.logger.error("Unexpected email delivery error: %s", e, exc_info=True)
+        return False, EMAIL_DELIVERY_ERROR

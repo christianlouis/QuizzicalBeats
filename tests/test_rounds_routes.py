@@ -441,6 +441,52 @@ class TestLegacyEmptyRoundRoutes:
         assert response.get_json()['success'] is False
         assert 'no songs' in response.get_json()['error']
 
+    def test_round_mp3_hides_base_audio_exception_details(self, app, client):
+        """MP3 base-audio failures should not expose filesystem or token details."""
+        _login(app, client)
+        song_id = _create_song(app, title='Unsafe MP3 Error Song')
+        round_id = _create_round(app, [song_id], name='Unsafe MP3 Error Round')
+
+        with patch(
+            'musicround.routes.rounds.AudioSegment.from_mp3',
+            side_effect=RuntimeError('base audio token=secret path=/srv/private.mp3'),
+        ):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        payload = response.get_json()
+        assert response.status_code == 500
+        assert payload['success'] is False
+        assert payload['error'] == 'Required round audio could not be loaded. Check the server logs.'
+        body = response.get_data(as_text=True)
+        assert 'secret' not in body
+        assert '/srv/private.mp3' not in body
+
+    def test_round_pdf_hides_generation_exception_details(self, app, client):
+        """PDF generation failures should return a stable safe message."""
+        _login(app, client)
+        song_id = _create_song(app, title='Unsafe PDF Error Song')
+        round_id = _create_round(app, [song_id], name='Unsafe PDF Error Round')
+
+        with patch(
+            'musicround.routes.rounds.generate_pdf',
+            side_effect=RuntimeError('pdf token=secret template=/srv/private.html'),
+        ):
+            response = client.post(
+                f'/rounds/{round_id}/pdf',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        payload = response.get_json()
+        assert response.status_code == 500
+        assert payload['success'] is False
+        assert payload['error'] == 'PDF generation failed. Check the server logs.'
+        body = response.get_data(as_text=True)
+        assert 'secret' not in body
+        assert '/srv/private.html' not in body
+
     def test_empty_round_dropbox_export_returns_clear_error(self, app, client):
         """Test Dropbox export does not crash for empty legacy rounds."""
         _login(app, client)

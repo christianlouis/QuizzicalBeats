@@ -28,6 +28,13 @@ from musicround.helpers.storage_health import (
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
+ROUND_MP3_BASE_AUDIO_ERROR = "Required round audio could not be loaded. Check the server logs."
+ROUND_MP3_NUMBER_AUDIO_ERROR = "Round number audio could not be loaded. Check the server logs."
+ROUND_MP3_PREVIEW_DOWNLOAD_ERROR = "Song preview audio could not be downloaded. Check the server logs."
+ROUND_MP3_PREVIEW_PROCESSING_ERROR = "Song preview audio could not be processed. Check the server logs."
+ROUND_MP3_EXPORT_ERROR = "MP3 generation failed. Check the server logs."
+ROUND_PDF_GENERATION_ERROR = "PDF generation failed. Check the server logs."
+
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
     raw_value = request.args.get(name)
@@ -170,6 +177,15 @@ def _storage_failure_response(round_id, storage_health, status_code=503):
             'storage': storage_health,
         }), status_code
     flash(error_msg, 'error')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+def _round_generation_failure_response(round_id, log_message, user_message, status_code=500):
+    """Return safe render-generation errors while preserving details in logs."""
+    current_app.logger.error(log_message)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'success': False, 'error': user_message}), status_code
+    flash(user_message, 'error')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 
@@ -351,13 +367,11 @@ def round_mp3(round_id):
         
         current_app.logger.info(f"Using MP3 files - Intro: {intro_path}, Outro: {outro_path}, Replay: {replay_path}")
     except Exception as e:
-        error_msg = f"Error loading intro/outro/replay audio: {e}"
-        current_app.logger.error(error_msg)
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'success': False, 'error': error_msg})
-        else:
-            flash(error_msg, 'error')
-            return redirect(url_for('rounds.round_detail', round_id=round_id))
+        return _round_generation_failure_response(
+            round_id,
+            f"Error loading intro/outro/replay audio: {e}",
+            ROUND_MP3_BASE_AUDIO_ERROR,
+        )
 
     # Create an empty audio segment
     combined_audio = AudioSegment.empty()
@@ -377,13 +391,11 @@ def round_mp3(round_id):
                 number_audio = AudioSegment.from_mp3(number_audio_path)
                 number_segments.append(number_audio)
             except Exception as e:
-                error_msg = f"Error loading number audio {i+1}: {e}"
-                current_app.logger.error(error_msg)
-                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                    return jsonify({'success': False, 'error': error_msg})
-                else:
-                    flash(error_msg, 'error')
-                    return redirect(url_for('rounds.round_detail', round_id=round_id))
+                return _round_generation_failure_response(
+                    round_id,
+                    f"Error loading number audio {i+1}: {e}",
+                    ROUND_MP3_NUMBER_AUDIO_ERROR,
+                )
 
             if song.deezer_id:
                 try:
@@ -415,21 +427,17 @@ def round_mp3(round_id):
                         combined_audio += hint_segments[i + 1]
                     combined_audio += song_audio
                 except requests.exceptions.RequestException as e:
-                    error_msg = f"Error downloading {song.title} (Deezer ID: {song.deezer_id}): {e}"
-                    current_app.logger.error(error_msg)
-                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                        return jsonify({'success': False, 'error': error_msg})
-                    else:
-                        flash(error_msg, 'error')
-                        return redirect(url_for('rounds.round_detail', round_id=round_id))
+                    return _round_generation_failure_response(
+                        round_id,
+                        f"Error downloading {song.title} (Deezer ID: {song.deezer_id}): {e}",
+                        ROUND_MP3_PREVIEW_DOWNLOAD_ERROR,
+                    )
                 except Exception as e:
-                    error_msg = f"Error processing {song.title} (Deezer ID: {song.deezer_id}): {e}"
-                    current_app.logger.error(error_msg)
-                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                        return jsonify({'success': False, 'error': error_msg})
-                    else:
-                        flash(error_msg, 'error')
-                        return redirect(url_for('rounds.round_detail', round_id=round_id))
+                    return _round_generation_failure_response(
+                        round_id,
+                        f"Error processing {song.title} (Deezer ID: {song.deezer_id}): {e}",
+                        ROUND_MP3_PREVIEW_PROCESSING_ERROR,
+                    )
             else:
                 current_app.logger.warning(f"No Deezer ID available for {song.title}")
                 song_segments.append(None)
@@ -469,13 +477,11 @@ def round_mp3(round_id):
                 return send_file(mp3_file_path, as_attachment=True)
             
         except Exception as e:
-            error_msg = f"Error generating MP3 file: {e}"
-            current_app.logger.error(error_msg)
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({'success': False, 'error': error_msg})
-            else:
-                flash(error_msg, 'error')
-                return redirect(url_for('rounds.round_detail', round_id=round_id))
+            return _round_generation_failure_response(
+                round_id,
+                f"Error generating MP3 file: {e}",
+                ROUND_MP3_EXPORT_ERROR,
+            )
 
 @rounds_bp.route('/download/mp3/round_<int:round_id>', methods=['GET'])
 @login_required
@@ -753,9 +759,11 @@ def round_pdf(round_id):
             return send_file(pdf_file_path, as_attachment=True)
             
     except Exception as e:
-        error_msg = f"Error generating PDF file: {e}"
-        current_app.logger.error(error_msg)
-        return jsonify({'success': False, 'error': error_msg})
+        return _round_generation_failure_response(
+            round_id,
+            f"Error generating PDF file: {e}",
+            ROUND_PDF_GENERATION_ERROR,
+        )
 
 @rounds_bp.route('/<int:round_id>/mail', methods=['POST'])
 @login_required

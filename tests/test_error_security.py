@@ -84,6 +84,50 @@ def test_error_page_redacts_sensitive_form_fields_for_admins(app, client):
     assert '[redacted]' in body
 
 
+def test_error_page_redacts_sensitive_json_query_and_headers_for_admins(app, client):
+    app.config['PROPAGATE_EXCEPTIONS'] = False
+    _register_crashing_route(app)
+    _create_user(app, 'error_admin_json', 'error_admin_json@example.com', is_admin=True)
+    _login(client, 'error_admin_json')
+
+    response = client.post(
+        '/test/error-security-crash?access_token=query-token-value&comment=visible-query-comment',
+        json={
+            'client_secret': 'json-secret-value',
+            'nested': {
+                'refreshToken': 'json-refresh-token-value',
+                'comment': 'visible-json-comment',
+            },
+            'items': [
+                {'api-key': 'json-api-key-value'},
+                {'label': 'visible-list-comment'},
+            ],
+        },
+        headers={
+            'Authorization': 'Bearer header-token-value',
+            'X-Api-Key': 'header-api-key-value',
+            'X-Debug-Comment': 'visible-header-comment',
+        },
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 500
+    assert 'request_json' in body
+    assert 'request_args' in body
+    assert 'request_headers' in body
+    assert 'visible-query-comment' in body
+    assert 'visible-json-comment' in body
+    assert 'visible-list-comment' in body
+    assert 'visible-header-comment' in body
+    assert 'query-token-value' not in body
+    assert 'json-secret-value' not in body
+    assert 'json-refresh-token-value' not in body
+    assert 'json-api-key-value' not in body
+    assert 'header-token-value' not in body
+    assert 'header-api-key-value' not in body
+    assert '[redacted]' in body
+
+
 def test_friendly_error_api_hides_internal_exception_details(app, client, monkeypatch):
     def fail_friendly_message(error_info, app_obj):
         raise RuntimeError('llm provider token=friendly-secret traceback')
