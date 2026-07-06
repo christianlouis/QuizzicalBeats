@@ -211,6 +211,21 @@ class TestSystemHealthRoute:
         assert 'health-secret' not in body
         assert 'traceback' not in body
 
+    def test_database_health_warns_for_legacy_data_sqlite(self, app):
+        """Legacy production SQLite config should be visible without failing uptime checks."""
+        from musicround.helpers.service_health import database_service_health
+
+        with app.app_context():
+            app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/song_data.db'
+            app.config['DATABASE_BACKEND'] = 'sqlite'
+
+            health = database_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['issues'][0]['code'] == 'legacy_sqlite_data_store'
+        assert 'managed database secret' in health['issues'][0]['details']['hint']
+
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""
         _create_user(app, 'health_nonadmin', 'healthna@example.com')

@@ -14,7 +14,11 @@ from musicround import (
     _spotify_authlib_token_from_user,
     _store_spotify_authlib_token,
 )
-from musicround.helpers.database_config import database_summary, redact_database_uri
+from musicround.helpers.database_config import (
+    database_summary,
+    is_legacy_data_sqlite_uri,
+    redact_database_uri,
+)
 from musicround.models import User, db
 
 
@@ -93,6 +97,14 @@ def test_database_uri_redaction_hides_credentials():
     assert summary['backend'] == 'postgresql'
     assert summary['host'] == 'postgres.example'
     assert summary['database'] == 'quizzicalbeats'
+
+
+def test_legacy_sqlite_uri_detection_is_specific_to_data_file():
+    """Only the old production SQLite file should trigger managed-DB warnings."""
+    assert is_legacy_data_sqlite_uri('sqlite:////data/song_data.db') is True
+    assert is_legacy_data_sqlite_uri('sqlite:///:memory:') is False
+    assert is_legacy_data_sqlite_uri('sqlite:////tmp/test.db') is False
+    assert is_legacy_data_sqlite_uri('postgresql://db.example/qb') is False
 
 
 def test_create_app_honors_env_database_uri(monkeypatch):

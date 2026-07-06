@@ -25,6 +25,15 @@ def is_sqlite_database_uri(uri: str | None) -> bool:
     return database_backend(uri) == "sqlite"
 
 
+def is_legacy_data_sqlite_uri(uri: str | None) -> bool:
+    """Return whether the URI points at the legacy production SQLite file."""
+    if not is_sqlite_database_uri(uri):
+        return False
+    parts = urlsplit(uri or "")
+    normalized_path = "/" + parts.path.lstrip("/")
+    return normalized_path == "/data/song_data.db"
+
+
 def redact_database_uri(uri: str | None) -> str:
     """Redact credentials from a database URI without hiding the backend."""
     if not uri:

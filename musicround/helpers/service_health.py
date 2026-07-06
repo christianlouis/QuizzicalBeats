@@ -7,7 +7,7 @@ from typing import Any
 from flask import current_app
 from sqlalchemy import func, text
 
-from musicround.helpers.database_config import database_summary
+from musicround.helpers.database_config import database_summary, is_legacy_data_sqlite_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status
 from musicround.helpers.storage_health import check_round_artifact_storage
 from musicround.version import VERSION_INFO
@@ -39,6 +39,10 @@ def _status_from_issues(issues: list[dict[str, Any]]) -> str:
     return "ok"
 
 
+def _ok_from_issues(issues: list[dict[str, Any]]) -> bool:
+    return not any(issue.get("severity") == "error" for issue in issues)
+
+
 def _token_status_payload(status: dict[str, Any] | None) -> dict[str, Any] | None:
     if status is None:
         return None
@@ -65,10 +69,24 @@ def database_service_health() -> dict[str, Any]:
             )
         )
 
-    summary = database_summary(current_app.config.get("SQLALCHEMY_DATABASE_URI", ""))
+    db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    if is_legacy_data_sqlite_uri(db_uri):
+        issues.append(
+            _issue(
+                "legacy_sqlite_data_store",
+                "Database is still configured to use the legacy /data SQLite file.",
+                severity="warning",
+                hint=(
+                    "Move SQLALCHEMY_DATABASE_URI to the managed database secret "
+                    "and enable DATABASE_REQUIRE_MANAGED=True for production."
+                ),
+            )
+        )
+
+    summary = database_summary(db_uri)
     return {
         "status": _status_from_issues(issues),
-        "ok": not issues,
+        "ok": _ok_from_issues(issues),
         "backend": current_app.config.get("DATABASE_BACKEND") or summary["backend"],
         "database": summary["database"],
         "host": summary["host"],

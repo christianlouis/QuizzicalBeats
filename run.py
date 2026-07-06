@@ -64,14 +64,21 @@ def main():
         from flask import Flask
         from musicround import _configure_database_uri
         from musicround.config import Config
-        from musicround.helpers.database_config import database_summary
+        from musicround.helpers.database_config import database_summary, is_legacy_data_sqlite_uri
 
         app = Flask(__name__)
         app.config.from_object(Config)
         _configure_database_uri(app)
-        summary = database_summary(app.config.get('SQLALCHEMY_DATABASE_URI'))
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
+        summary = database_summary(db_uri)
         print(f"Database backend: {summary['backend']}")
         print(f"Database target: {summary['redacted_uri']}")
+        print(f"Managed database required: {bool(app.config.get('DATABASE_REQUIRE_MANAGED'))}")
+        if is_legacy_data_sqlite_uri(db_uri):
+            print(
+                "Warning: legacy /data SQLite database is configured; "
+                "move SQLALCHEMY_DATABASE_URI to the managed database secret for production."
+            )
         return 0
     elif args.command == 'health':
         with contextlib.redirect_stdout(sys.stderr):
