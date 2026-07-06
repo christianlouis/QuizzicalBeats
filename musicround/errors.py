@@ -148,8 +148,11 @@ def register_error_handlers(app):
             else:
                 return jsonify({'success': False, 'message': 'Could not generate a friendly message'}), 500
         except Exception as e:
-            app.logger.error(f"Error in friendly error API: {e}")
-            return jsonify({'success': False, 'message': str(e)}), 500
+            app.logger.error("Error in friendly error API: %s", e, exc_info=True)
+            return jsonify({
+                'success': False,
+                'message': 'Could not generate a friendly message',
+            }), 500
     
     @app.errorhandler(400)
     def bad_request_error(error):

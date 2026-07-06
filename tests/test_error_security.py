@@ -82,3 +82,29 @@ def test_error_page_redacts_sensitive_form_fields_for_admins(app, client):
     assert 'plain-token-value' not in body
     assert 'plain-secret-value' not in body
     assert '[redacted]' in body
+
+
+def test_friendly_error_api_hides_internal_exception_details(app, client, monkeypatch):
+    def fail_friendly_message(error_info, app_obj):
+        raise RuntimeError('llm provider token=friendly-secret traceback')
+
+    monkeypatch.setattr('musicround.errors.generate_friendly_error_message', fail_friendly_message)
+
+    response = client.post(
+        '/api/friendly-error',
+        json={
+            'error_type': 'RuntimeError',
+            'error_message': 'boom',
+            'code': 500,
+        },
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 500
+    assert response.get_json() == {
+        'success': False,
+        'message': 'Could not generate a friendly message',
+    }
+    assert 'friendly-secret' not in body
+    assert 'provider token' not in body
+    assert 'traceback' not in body
