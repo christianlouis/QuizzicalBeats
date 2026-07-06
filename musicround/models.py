@@ -1,6 +1,7 @@
 from datetime import datetime
 from musicround import db
 from flask_login import UserMixin
+from sqlalchemy.orm import validates
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 
@@ -289,6 +290,13 @@ class Round(db.Model):
             f"Round('{self.name or self.id}', '{self.round_type}', '{self.round_criteria_used}', "
             f"'{self.songs}', '{self.created_at}')"
         )
+
+    @validates('review_status')
+    def _validate_review_status(self, key, value):
+        allowed_statuses = {'draft', 'reviewed', 'approved', 'rejected'}
+        if value not in allowed_statuses:
+            raise ValueError(f"Invalid review_status: {value!r}")
+        return value
 
     @property
     def song_id_list(self):

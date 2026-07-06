@@ -404,6 +404,20 @@ class TestRoundDetailRoute:
             assert round_.review_status == 'approved'
             assert round_.review_notes == 'Ready for Thursday'
             assert round_.approved_at is not None
+            assert round_.approved_by_id is not None
+
+        response = client.post(
+            f'/rounds/{round_id}/review',
+            data={'review_status': 'reviewed', 'review_notes': 'Needs another pass'},
+        )
+
+        assert response.status_code == 302
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            assert round_.review_status == 'reviewed'
+            assert round_.review_notes == 'Needs another pass'
+            assert round_.approved_at is None
+            assert round_.approved_by_id is None
 
     def test_round_quality_endpoint_returns_repair_report(self, app, client):
         """Quality endpoint should expose automation repair feedback."""
