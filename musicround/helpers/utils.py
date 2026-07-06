@@ -8,6 +8,37 @@ from flask import current_app
 from werkzeug.utils import secure_filename
 import requests
 import json
+from urllib.parse import urlparse
+
+def is_safe_url(target):
+    """
+    Validate a URL to ensure it is a safe local redirect.
+    Prevents Open Redirect vulnerabilities by requiring a relative path
+    and blocking bypass patterns like '//', '\\', etc.
+    """
+    if not target:
+        return False
+
+    # Must start with a single slash, but not double slash or slash-backslash
+    if not target.startswith('/'):
+        return False
+    if target.startswith('//') or target.startswith('/\\') or target.startswith('\\'):
+        return False
+
+    # Additional checks for common bypass patterns
+    if '\\' in target:
+        return False
+
+    # Must not have a scheme or netloc
+    try:
+        parsed = urlparse(target)
+        if parsed.scheme or parsed.netloc:
+            return False
+    except ValueError:
+        # If it can't be parsed, it's not safe
+        return False
+
+    return True
 
 def generate_token(length=32):
     """
