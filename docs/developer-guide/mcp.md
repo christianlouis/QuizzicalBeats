@@ -44,13 +44,31 @@ The MCP server exposes these tools:
 | `update_datastore_object` | Update scalar column fields on one persisted object. |
 | `delete_datastore_object` | Delete one persisted object by primary key. |
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
+| `import_progress_events` | Return queue and job progress for polling clients. |
+| `retry_import_job` | Requeue a failed or dead-letter import job for manual recovery. |
+| `parse_text_playlist` | Parse pasted text or CSV-like playlists into reviewable song candidates. |
+| `resolve_text_playlist` | Match parsed text rows against existing catalog songs. |
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
+| `set_round_owner` | Assign or clear the quizmaster owner for a round. |
+| `share_round` | Share a round with another quizmaster as viewer or editor. |
+| `list_round_shares` | List explicit share grants for a round. |
+| `revoke_round_share` | Remove a user's share grant from a round. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |
 | `add_round_song` | Add one song to a round and invalidate generated assets. |
+| `recent_usage_summary` | Summarize recent rounds, frequently used songs, and selected-song warnings. |
+| `quizmaster_context` | Return quizmaster preferences and recent usage for personalized planning. |
+| `round_planning_brief` | Build an agent-readable brief for a robust themed round. |
+| `draft_round_audio_scripts` | Draft intro, replay, and outro text before TTS generation. |
+| `save_round_audio_scripts` | Persist reviewable intro, replay, and outro script drafts. |
+| `list_round_audio_scripts` | List stored script drafts by round, user, or review status. |
+| `update_round_audio_script` | Edit, review, approve, reject, or select one stored script. |
+| `generate_tts_from_script` | Generate and assign custom audio from an approved stored script. |
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
+| `create_round_from_text_playlist` | Create a complete round from text rows after every row resolves. |
+| `round_analytics_summary` | Summarize catalog health, usage frequency, and unused candidates. |
 | `generate_round_assets` | Generate the round PDF and/or MP3. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
@@ -62,26 +80,36 @@ The MCP server exposes these tools:
 | `process_due_scheduled_round_emails` | Send scheduled round emails that are due. |
 | `generate_tts_snippet` | Generate and assign custom intro, replay, or outro TTS MP3s. |
 
-`find_songs` includes `used_count`, `usage_frequency`, and `last_used` for each
-result so agents can see how often songs have already appeared in rounds.
+`find_songs` supports `query`, `title`, `artist`, `genre`, `year`,
+`year_min`, `year_max`, `has_preview`, `unused_only`, platform IDs,
+`limit`, `offset`, and `order_by`. It includes `used_count`,
+`usage_frequency`, and `last_used` for each result so agents can see how often
+songs have already appeared in rounds and avoid tracks without playable
+previews.
 
 The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
-`song`, `round`, `tag`, `song_tag`, `user`, `role`, `user_preferences`,
-`round_export`, `system_setting`, and `import_job_record`. Read results redact
-fields whose names contain `password`, `token`, or `secret` unless
-`include_sensitive` is explicitly set.
+`song`, `round`, `round_share`, `round_audio_script`, `tag`, `song_tag`, `user`,
+`role`, `user_preferences`, `round_export`, `system_setting`, and
+`import_job_record`. Read results redact fields whose names contain `password`,
+`token`, or `secret` unless `include_sensitive` is explicitly set.
 
 ## Intended Workflow
 
-1. Search with `find_songs` to avoid duplicates.
-2. Add missing tracks with `add_song` or import platform content with
+1. Start with `quizmaster_context`, `recent_usage_summary`, or
+   `round_planning_brief` so repeated songs and personalization constraints are
+   visible before selecting tracks.
+2. Search with `find_songs` to avoid duplicates.
+3. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
-3. Create the round with `compile_round` or `create_round_from_playlist`.
+   For pasted lists, run `parse_text_playlist` first, then
+   `resolve_text_playlist`; use `create_round_from_text_playlist` only after
+   every row resolves.
+4. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
    round when fewer than the requested eight tracks resolve.
-4. Generate PDF and MP3 files with `generate_round_assets`.
-5. Inspect the generated files and previews with `inspect_round_package`.
-6. Send the completed bundle with `send_round_email`; it reruns the package
+5. Generate PDF and MP3 files with `generate_round_assets`.
+6. Inspect the generated files and previews with `inspect_round_package`.
+7. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
    `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package
@@ -104,7 +132,11 @@ email address.
 
 ## Custom Audio
 
-Use `generate_tts_snippet` to update the reusable audio segments:
+Use `draft_round_audio_scripts` with `persist=true` or
+`save_round_audio_scripts` to store reviewable text before audio generation.
+After review, use `update_round_audio_script` to mark a script `approved`, then
+`generate_tts_from_script` to update the reusable audio segment. Direct
+generation with `generate_tts_snippet` remains available for trusted text.
 
 - `intro`: lead-in before the first song.
 - `replay`: announcement before the repeat section.

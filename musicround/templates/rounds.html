@@ -11,8 +11,24 @@
 
     <div class="bg-white shadow-md rounded-lg overflow-hidden">
         <div class="p-4 bg-navy-50 border-b">
-            <div class="flex justify-between items-center">
-                <h2 class="text-xl font-semibold text-navy-800">Saved Quizzes</h2>
+            <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                <div>
+                    <h2 class="text-xl font-semibold text-navy-800">Saved Quizzes</h2>
+                    <p class="text-sm text-gray-600 mt-1">{{ pagination.total }} quizzes stored</p>
+                </div>
+                <form method="get" action="{{ url_for('rounds.rounds_list') }}" class="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div>
+                        <label for="roundPageSize" class="block text-sm font-medium text-gray-700 mb-1">Records per page</label>
+                        <select id="roundPageSize" name="per_page" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                            {% for size in [10, 25, 50, 100] %}
+                            <option value="{{ size }}" {% if filters.per_page == size %}selected{% endif %}>{{ size }} quizzes</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-md transition-colors text-sm font-semibold">
+                        <i class="fas fa-filter mr-1"></i> Apply
+                    </button>
+                </form>
                 <a href="{{ url_for('generate.build_music_round') }}" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md transition-colors text-sm font-semibold">
                     <i class="fas fa-plus mr-1"></i> Create New Quiz
                 </a>
@@ -25,8 +41,11 @@
                     <tr>
                         <th class="px-4 py-3 text-left font-semibold">ID</th>
                         <th class="px-4 py-3 text-left font-semibold">Name</th>
+                        <th class="px-4 py-3 text-left font-semibold">Owner</th>
                         <th class="px-4 py-3 text-left font-semibold">Type</th>
                         <th class="px-4 py-3 text-left font-semibold">Criteria</th>
+                        <th class="px-4 py-3 text-left font-semibold">Readiness</th>
+                        <th class="px-4 py-3 text-left font-semibold">Schedule</th>
                         <th class="px-4 py-3 text-left font-semibold">Created</th>
                         <th class="px-4 py-3 text-left font-semibold">Actions</th>
                     </tr>
@@ -36,6 +55,21 @@
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3">{{ round.id }}</td>
                         <td class="px-4 py-3 font-medium">{{ round.name or 'Quiz #' + round.id|string }}</td>
+                        <td class="px-4 py-3">
+                            <div class="text-sm text-gray-700">
+                                {% if round.owner %}
+                                    {{ round.owner.username }}
+                                {% else %}
+                                    Legacy
+                                {% endif %}
+                            </div>
+                            <span class="mt-1 inline-block px-2 py-0.5 text-xs font-semibold rounded-full
+                                {% if round.visibility == 'public' %}bg-green-100 text-green-800
+                                {% elif round.visibility == 'shared' %}bg-blue-100 text-blue-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ round.visibility|capitalize }}
+                            </span>
+                        </td>
                         <td class="px-4 py-3">
                             <span class="px-2 py-1 text-xs font-semibold rounded-full 
                                 {% if round.round_type == 'Random' %}bg-navy-100 text-navy-800
@@ -47,6 +81,34 @@
                             </span>
                         </td>
                         <td class="px-4 py-3">{{ round.round_criteria_used }}</td>
+                        {% set status = round_statuses.get(round.id) %}
+                        <td class="px-4 py-3">
+                            <span title="{{ status.readiness.hint }}" class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if status.readiness.color == 'green' %}bg-green-100 text-green-800
+                                {% elif status.readiness.color == 'yellow' %}bg-yellow-100 text-yellow-800
+                                {% elif status.readiness.color == 'red' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ status.readiness.label }}
+                            </span>
+                            <div class="mt-1 text-xs text-gray-500">
+                                {{ status.readiness.resolved_song_count }}/{{ status.readiness.stored_song_count }} songs resolve
+                            </div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span title="{{ status.schedule.destination or '' }}" class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if status.schedule.color == 'blue' %}bg-blue-100 text-blue-800
+                                {% elif status.schedule.color == 'green' %}bg-green-100 text-green-800
+                                {% elif status.schedule.color == 'yellow' %}bg-yellow-100 text-yellow-800
+                                {% elif status.schedule.color == 'red' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ status.schedule.label }}
+                            </span>
+                            {% if status.schedule.scheduled_for %}
+                                <div class="mt-1 text-xs text-gray-500">
+                                    {{ status.schedule.scheduled_for.strftime('%Y-%m-%d %H:%M') }}
+                                </div>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 text-gray-600 text-sm">{{ round.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td class="px-4 py-3">
                             <a href="{{ url_for('rounds.round_detail', round_id=round.id) }}" 
@@ -57,7 +119,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                        <td colspan="9" class="px-4 py-8 text-center text-gray-500">
                             <p class="mb-3">You haven't created any music quizzes yet.</p>
                             <a href="{{ url_for('generate.build_music_round') }}" class="inline-block bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors text-sm">
                                 <i class="fas fa-plus-circle mr-1"></i> Create Your First Quiz
@@ -68,6 +130,32 @@
                 </tbody>
             </table>
         </div>
+        {% if pagination.pages > 1 %}
+        <div class="px-4 py-4 bg-gray-50 border-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div class="text-sm text-gray-600">
+                Page {{ pagination.page }} of {{ pagination.pages }}
+            </div>
+            <div class="flex gap-2">
+                {% if pagination.has_prev %}
+                <a href="{{ url_for('rounds.rounds_list', page=pagination.prev_num, per_page=filters.per_page) }}"
+                   class="bg-white hover:bg-gray-100 text-gray-700 border border-gray-300 py-2 px-3 rounded-md text-sm transition-colors">
+                    Previous
+                </a>
+                {% else %}
+                <span class="bg-gray-100 text-gray-400 border border-gray-200 py-2 px-3 rounded-md text-sm">Previous</span>
+                {% endif %}
+
+                {% if pagination.has_next %}
+                <a href="{{ url_for('rounds.rounds_list', page=pagination.next_num, per_page=filters.per_page) }}"
+                   class="bg-white hover:bg-gray-100 text-gray-700 border border-gray-300 py-2 px-3 rounded-md text-sm transition-colors">
+                    Next
+                </a>
+                {% else %}
+                <span class="bg-gray-100 text-gray-400 border border-gray-200 py-2 px-3 rounded-md text-sm">Next</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
     
     <div class="mt-8 bg-navy-50 rounded-lg p-6 border border-navy-100">

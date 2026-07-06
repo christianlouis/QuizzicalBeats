@@ -72,12 +72,19 @@
                 <div class="flex">
                     <input type="password" name="fallback_spotify_refresh_token" id="fallback_spotify_refresh_token" 
                            class="border rounded-l px-3 py-2 flex-grow"
-                           value="{{ settings.get('fallback_spotify_refresh_token', '') }}">
+                           placeholder="{% if settings.get('fallback_spotify_refresh_token') %}Refresh token stored - paste a new token to replace it{% else %}Paste fallback refresh token{% endif %}">
                     <button type="button" onclick="toggleTokenVisibility()" 
                             class="bg-gray-200 px-3 py-2 rounded-r border-t border-r border-b">
                         <i class="fas fa-eye"></i>
                     </button>
                 </div>
+                {% if settings.get('fallback_spotify_refresh_token') %}
+                <p class="text-sm text-amber-700 mt-1">A fallback refresh token is stored and hidden for security.</p>
+                <label class="inline-flex items-center mt-2 text-sm text-red-700">
+                    <input type="checkbox" name="clear_fallback_spotify_refresh_token" value="true" class="mr-2">
+                    Clear stored fallback token
+                </label>
+                {% endif %}
                 <p class="text-sm text-gray-500 mt-1">Service account refresh token used when users don't have Spotify access</p>
                 <div class="mt-2">
                     <a href="{{ url_for('users.spotify_link') }}" class="bg-navy-600 text-white px-4 py-2 rounded inline-flex items-center">

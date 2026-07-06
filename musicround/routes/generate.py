@@ -38,18 +38,46 @@ def get_all_genres():
 
 def get_all_tags():
     """
-    Return a list of all tag names in the Tag table.
+    Return normalized, de-duplicated tag names for picker UIs.
     """
-    return [tag.name for tag in Tag.query.all()]
+    normalized_tags = {}
+    for tag in Tag.query.order_by(Tag.name.asc()).all():
+        tag_name = _normalize_tag_name(tag.name)
+        if not tag_name:
+            continue
+        key = tag_name.casefold()
+        normalized_tags.setdefault(key, tag_name)
+    return sorted(normalized_tags.values(), key=str.casefold)
+
+
+def _normalize_tag_name(tag_name):
+    """Trim tag names before matching or showing them in builder controls."""
+    return (tag_name or '').strip()
+
 
 def get_songs_by_tag(tag_name, limit=8):
     """
     Return songs that have the specified tag.
     """
-    tag = Tag.query.filter_by(name=tag_name).first()
-    if tag:
-        return tag.songs[:limit]
-    return []
+    normalized_tag_name = _normalize_tag_name(tag_name)
+    if not normalized_tag_name:
+        return []
+
+    songs = []
+    seen_song_ids = set()
+    for tag in Tag.query.all():
+        if _normalize_tag_name(tag.name).casefold() != normalized_tag_name.casefold():
+            continue
+
+        for song in tag.songs:
+            song_key = song.id or (song.title, song.artist)
+            if song_key in seen_song_ids:
+                continue
+            seen_song_ids.add(song_key)
+            songs.append(song)
+            if len(songs) >= limit:
+                return songs
+    return songs
 
 def get_least_used_genres():
     """
@@ -372,9 +400,28 @@ def get_songs_from_spotify_playlist(playlist_id):
 
         # If we have imported_song_ids, use them (these are DB IDs)
         if import_result.get('imported_song_ids'):
-            song_db_ids = import_result['imported_song_ids']
-            imported_songs = Song.query.filter(Song.id.in_(song_db_ids)).all()
-            return imported_songs[:songs_per_round]
+            song_db_ids = []
+            seen_song_ids = set()
+            for raw_song_id in import_result['imported_song_ids']:
+                try:
+                    song_id = int(raw_song_id)
+                except (TypeError, ValueError):
+                    continue
+                if song_id in seen_song_ids:
+                    continue
+                song_db_ids.append(song_id)
+                seen_song_ids.add(song_id)
+
+            if not song_db_ids:
+                current_app.logger.warning(f"No song IDs returned after importing Spotify playlist {playlist_id}")
+                return []
+
+            songs_by_id = {
+                song.id: song
+                for song in Song.query.filter(Song.id.in_(song_db_ids)).all()
+            }
+            ordered_songs = [songs_by_id[song_id] for song_id in song_db_ids if song_id in songs_by_id]
+            return ordered_songs[:songs_per_round]
 
         # If no imported_song_ids, fetch all Spotify IDs from the playlist and get those songs from DB
         # Use the Spotify API directly to get the playlist track IDs
@@ -451,9 +498,9 @@ def build_music_round():
                 round_criteria=round_criteria,
                 genre=genre_used
             )
-            
+
         elif round_type == 'Tag':
-            tag_name = request.form.get('tag_name')
+            tag_name = _normalize_tag_name(request.form.get('tag_name'))
             if tag_name:
                 round_criteria = f'Tag: {tag_name}'
                 songs = get_songs_by_tag(tag_name, songs_per_round)
@@ -476,6 +523,7 @@ def import_playlist():
         playlist_url = request.form.get('playlist_url', '')
         platform = request.form.get('platform', '').lower()
         round_name = request.form.get('round_name', '')
+        expected_song_count = current_app.config.get('SONGS_PER_ROUND', songs_per_round)
         
         if not playlist_url:
             flash('Please enter a playlist URL or ID', 'error')
@@ -497,6 +545,13 @@ def import_playlist():
             if not songs:
                 flash('No songs found or error fetching playlist from Deezer', 'error')
                 return redirect(url_for('generate.import_playlist'))
+            if len(songs) != expected_song_count:
+                flash(
+                    f'Deezer playlist resolved {len(songs)} songs; expected exactly {expected_song_count}. '
+                    'Replace unavailable tracks before saving the round.',
+                    'error',
+                )
+                return redirect(url_for('generate.import_playlist'))
                 
             round_criteria = f'Deezer Playlist: {playlist_id}'
             
@@ -513,6 +568,13 @@ def import_playlist():
             if not songs:
                 flash('No songs found or error fetching playlist from Spotify', 'error')
                 return redirect(url_for('generate.import_playlist'))
+            if len(songs) != expected_song_count:
+                flash(
+                    f'Spotify playlist resolved {len(songs)} songs; expected exactly {expected_song_count}. '
+                    'Replace unavailable tracks before saving the round.',
+                    'error',
+                )
+                return redirect(url_for('generate.import_playlist'))
                 
             round_criteria = f'Spotify Playlist: {playlist_id}'
             
@@ -524,7 +586,8 @@ def import_playlist():
                                songs=songs, 
                                round_criteria=round_criteria, 
                                round_name=round_name,
-                               playlist_import=True)
+                               playlist_import=True,
+                               expected_song_count=expected_song_count)
     
     return render_template('import_playlist.html')
 
@@ -549,6 +612,25 @@ def save_round():
     if not raw_song_ids:
         flash('Please select at least one song before saving a round.', 'error')
         return redirect(url_for('generate.build_music_round'))
+
+    playlist_import = request.form.get('playlist_import') == '1' or (
+        round_criteria or ''
+    ).lower().startswith(('spotify playlist:', 'deezer playlist:'))
+    if playlist_import:
+        try:
+            expected_song_count = int(
+                request.form.get('expected_song_count')
+                or current_app.config.get('SONGS_PER_ROUND', songs_per_round)
+            )
+        except (TypeError, ValueError):
+            expected_song_count = songs_per_round
+        if len(raw_song_ids) != expected_song_count:
+            flash(
+                f'Playlist round resolved {len(raw_song_ids)} songs; expected exactly {expected_song_count}. '
+                'Replace unavailable tracks before saving the round.',
+                'error',
+            )
+            return redirect(url_for('generate.import_playlist'))
 
     try:
         song_ids = [int(song_id) for song_id in raw_song_ids]
@@ -586,6 +668,8 @@ def save_round():
     # create new Round object and add to database
     new_round = Round(
         name=round_name,
+        user_id=current_user.id,
+        visibility='private',
         round_type=round_type,
         round_criteria_used=round_criteria_used,
         songs=song_ids_str,

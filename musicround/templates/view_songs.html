@@ -148,39 +148,59 @@
             <p class="text-gray-600 mb-6">Browse, search and manage all your imported songs to use in music quizzes.</p>
         </div>
         
-        {% if songs %}
+        {% if total_songs|default(0) > 0 %}
             <div class="mb-6 bg-white shadow-md rounded-lg p-5">
-                <div class="flex flex-col md:flex-row gap-4">
+                <form id="songLibraryFilters" method="get" action="{{ url_for('core.view_songs') }}" class="flex flex-col md:flex-row gap-4">
                     <div class="w-full md:w-1/3">
                         <label for="globalSearch" class="block text-sm font-medium text-gray-700 mb-1">Search Songs</label>
                         <div class="relative">
                             <span class="absolute inset-y-0 left-0 flex items-center pl-3">
                                 <i class="fas fa-search text-gray-400"></i>
                             </span>
-                            <input type="text" id="globalSearch" placeholder="Search titles, artists, genres..." 
+                            <input type="text" id="globalSearch" name="q" value="{{ filters.q }}" placeholder="Search titles or artists..."
                                 class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
                         </div>
                     </div>
                     
-                    <div class="w-full md:w-1/3">
+                    <div class="w-full md:w-1/5">
+                        <label for="genreFilter" class="block text-sm font-medium text-gray-700 mb-1">Genre</label>
+                        <input type="text" id="genreFilter" name="genre" value="{{ filters.genre }}" placeholder="Rock, Pop..."
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                    </div>
+
+                    <div class="w-full md:w-1/6">
+                        <label for="yearFilter" class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                        <input type="number" id="yearFilter" name="year" value="{{ filters.year or '' }}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                    </div>
+
+                    <div class="w-full md:w-1/6">
                         <label for="pageSizeSelect" class="block text-sm font-medium text-gray-700 mb-1">Records per page</label>
-                        <select id="pageSizeSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
-                            <option value="25">25 songs</option>
-                            <option value="50">50 songs</option>
-                            <option value="100">100 songs</option>
-                            <option value="all">All songs</option>
+                        <select id="pageSizeSelect" name="per_page" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                            {% for size in [25, 50, 100, 200] %}
+                            <option value="{{ size }}" {% if filters.per_page == size %}selected{% endif %}>{{ size }} songs</option>
+                            {% endfor %}
                         </select>
                     </div>
                     
-                    <div class="w-full md:w-1/3 flex items-end">
+                    <div class="w-full md:w-1/6 flex items-end gap-2">
+                        <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-md transition-colors">
+                            <i class="fas fa-search mr-2"></i>Apply
+                        </button>
+                        <a href="{{ url_for('core.view_songs') }}" class="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-md transition-colors">
+                            Clear
+                        </a>
+                    </div>
+
+                    <div class="w-full md:w-1/6 flex items-end">
                         <div class="w-full text-right">
-                            <p class="text-sm text-gray-600 mb-1">Total songs in your collection</p>
+                            <p class="text-sm text-gray-600 mb-1">Matching songs</p>
                             <p class="text-navy-800 font-semibold text-lg">
-                                <span id="visibleCount">{{ songs|length }}</span> / <span id="totalCount">{{ songs|length }}</span>
+                                <span id="visibleCount">{{ pagination.total }}</span> / <span id="totalCount">{{ total_songs }}</span>
                             </p>
                         </div>
                     </div>
-                </div>
+                </form>
             </div>
 
             <div class="overflow-x-auto bg-white shadow-md rounded-lg mb-8">
@@ -197,14 +217,9 @@
                             <th class="px-4 py-3 text-left">Actions</th>
                         </tr>
                         <tr class="filter-row bg-gray-50">
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter ID" data-col="id"></td>
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter title" data-col="title"></td>
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter artist" data-col="artist"></td>
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter genre" data-col="genre"></td>
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter year" data-col="year"></td>
-                            <td class="px-4 py-2"><input type="text" placeholder="Filter used" data-col="used_count"></td>
-                            <td class="px-4 py-2"></td>
-                            <td class="px-4 py-2"></td>
+                            <td class="px-4 py-2 text-xs text-gray-500" colspan="8">
+                                Filters are applied server-side so large libraries stay responsive.
+                            </td>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
@@ -227,8 +242,15 @@
                                     </span>
                                 </td>
                                 <td class="px-4 py-3">
-                                    {% if song.preview_url %}
-                                    <audio controls class="preview-audio w-full max-w-[180px]" src="{{ song.preview_url }}" preload="none">Your browser does not support the audio element.</audio>
+                                    {% set preview_url = song.preview_url or song.spotify_preview_url or song.deezer_preview_url or song.apple_preview_url or song.youtube_preview_url %}
+                                    {% if preview_url %}
+                                    <button type="button"
+                                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                                            data-preview-url="{{ preview_url|e }}"
+                                            title="Load preview"
+                                            aria-label="Load preview">
+                                        <i class="fas fa-play"></i>
+                                    </button>
                                     {% else %}
                                     <span class="text-gray-400">No preview</span>
                                     {% endif %}
@@ -250,6 +272,12 @@
                                     </div>
                                 </td>
                             </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="8" class="px-4 py-8 text-center text-gray-500">
+                                    No songs match the current filters.
+                                </td>
+                            </tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -257,16 +285,18 @@
                 <div class="bg-gray-50 px-4 py-3 flex items-center justify-between border-t border-gray-200">
                     <div class="flex items-center">
                         <span class="text-sm text-gray-700">
-                            Page <span id="currentPage">1</span> of <span id="totalPages">1</span>
+                            Page <span id="currentPage">{{ pagination.page }}</span> of <span id="totalPages">{{ pagination.pages or 1 }}</span>
                         </span>
                     </div>
                     <div class="flex space-x-2">
-                        <button id="prevPageBtn" class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <a {% if pagination.has_prev %}href="{{ url_for('core.view_songs', page=pagination.prev_num, **query_args) }}"{% endif %}
+                           class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 {% if not pagination.has_prev %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}">
                             <i class="fas fa-angle-left mr-1"></i> Previous
-                        </button>
-                        <button id="nextPageBtn" class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                        </a>
+                        <a {% if pagination.has_next %}href="{{ url_for('core.view_songs', page=pagination.next_num, **query_args) }}"{% endif %}
+                           class="flex items-center px-3 py-1 bg-navy-100 text-navy-800 rounded-md hover:bg-navy-200 {% if not pagination.has_next %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}">
                             Next <i class="fas fa-angle-right ml-1"></i>
-                        </button>
+                        </a>
                     </div>
                 </div>
             </div>
@@ -276,7 +306,7 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div class="bg-white rounded-md p-4 shadow-sm">
                         <h4 class="text-sm text-gray-600 mb-1">Total Songs</h4>
-                        <p class="text-2xl font-semibold text-navy-800">{{ songs|length }}</p>
+                        <p class="text-2xl font-semibold text-navy-800">{{ total_songs }}</p>
                     </div>
                     <div class="bg-white rounded-md p-4 shadow-sm">
                         <h4 class="text-sm text-gray-600 mb-1">Unique Artists</h4>
@@ -400,14 +430,13 @@
             
             // Basic table variables
             let allRows = $('.song-row').toArray();
-            let currentPage = 1;
-            let pageSize = 25;
+            let currentPage = {{ pagination.page }};
+            let pageSize = 'all';
             let sortColumn = 'title';
             let sortDirection = 'asc';
             let filteredRows = [...allRows];
-            
-            // Initial sorting by title
-            sortTable('title', 'asc');
+            let displayedTotal = {{ pagination.total }};
+            let libraryTotal = {{ total_songs }};
             
             // Toast notification system
             function showToast(message, type = 'success') {
@@ -494,6 +523,8 @@
                         // Remove from our arrays
                         allRows = allRows.filter(r => $(r).data('song-id') != songId);
                         filteredRows = filteredRows.filter(r => $(r).data('song-id') != songId);
+                        displayedTotal = Math.max(0, displayedTotal - 1);
+                        libraryTotal = Math.max(0, libraryTotal - 1);
                         
                         // Animate the row's removal
                         row.css('background-color', '#ffcccc')
@@ -648,55 +679,64 @@
             }
             
             // Set up filter input handlers
-            $('.filter-row input').on('input', filterTable);
-            $('#globalSearch').on('input', filterTable);
+            $('#globalSearch, #genreFilter, #yearFilter').on('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    $('#songLibraryFilters').trigger('submit');
+                }
+            });
             
             // Render table with current page and filters
             function renderTable() {
-                // Hide all rows first
-                $('.song-row').hide();
-                
-                // Calculate page bounds
-                const start = pageSize === 'all' ? 0 : (currentPage - 1) * pageSize;
-                const end = pageSize === 'all' ? filteredRows.length : start + parseInt(pageSize);
-                
-                // Show rows for current page
-                for (let i = start; i < end && i < filteredRows.length; i++) {
-                    $(filteredRows[i]).show();
-                }
-                
-                // Update pagination controls
-                const totalPages = pageSize === 'all' ? 1 : Math.ceil(filteredRows.length / pageSize);
+                $('.song-row').show();
+                const totalPages = {{ pagination.pages or 1 }};
                 $('#currentPage').text(currentPage);
                 $('#totalPages').text(totalPages);
-                $('#prevPageBtn').prop('disabled', currentPage <= 1);
-                $('#nextPageBtn').prop('disabled', currentPage >= totalPages);
                 
                 // Update total count
-                $('#totalCount').text(allRows.length);
-                $('#visibleCount').text(filteredRows.length);
+                $('#totalCount').text(libraryTotal);
+                $('#visibleCount').text(displayedTotal);
             }
             
             // Page size change handler
             $('#pageSizeSelect').on('change', function() {
-                pageSize = $(this).val();
-                currentPage = 1;
-                renderTable();
+                $('#songLibraryFilters').trigger('submit');
             });
-            
-            // Pagination buttons
-            $('#prevPageBtn').on('click', function() {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderTable();
+
+            function escapeHtml(value) {
+                return $('<div>').text(value || '').html();
+            }
+
+            function renderPreviewCell(previewUrl) {
+                if (!previewUrl) {
+                    return '<span class="text-gray-400">No preview</span>';
                 }
-            });
-            
-            $('#nextPageBtn').on('click', function() {
-                const totalPages = pageSize === 'all' ? 1 : Math.ceil(filteredRows.length / pageSize);
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderTable();
+                const escapedUrl = escapeHtml(previewUrl);
+                return `
+                    <button type="button"
+                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                            data-preview-url="${escapedUrl}"
+                            title="Load preview"
+                            aria-label="Load preview">
+                        <i class="fas fa-play"></i>
+                    </button>
+                `;
+            }
+
+            $(document).on('click', '.preview-load-btn', function(e) {
+                e.stopPropagation();
+                const previewUrl = $(this).data('preview-url');
+                if (!previewUrl) {
+                    return;
+                }
+
+                const audio = $('<audio controls class="preview-audio w-full max-w-[180px]" preload="none">Your browser does not support audio.</audio>');
+                audio.attr('src', previewUrl);
+                $(this).replaceWith(audio);
+                const player = audio[0];
+                if (player) {
+                    player.load();
+                    player.play().catch(function() {});
                 }
             });
             
@@ -1235,16 +1275,9 @@
                     
                     row.find('td:nth-child(5)').text(data.year || '');
                     
-                    // Update audio preview
-                    if (data.preview_url) {
-                        const audioCell = row.find('td:nth-child(7)');
-                        if (audioCell.find('audio').length) {
-                            audioCell.find('audio').attr('src', data.preview_url);
-                            audioCell.find('audio')[0].load();
-                        } else {
-                            audioCell.html(`<audio controls class="preview-audio w-full max-w-[180px]" src="${data.preview_url}" preload="none">Your browser does not support audio.</audio>`);
-                        }
-                    }
+                    // Update audio preview without eagerly creating table audio players.
+                    const audioCell = row.find('td:nth-child(7)');
+                    audioCell.html(renderPreviewCell(data.preview_url));
                     
                     // Update delete button song title attribute
                     row.find('.delete-song-btn').data('song-title', data.title);
@@ -1475,4 +1508,3 @@
         });
     </script>
 {% endblock %}
-

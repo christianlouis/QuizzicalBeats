@@ -98,27 +98,35 @@
 * [x] Add background worker process for playlist imports
 * [x] Support multiple concurrent import jobs
 * [x] Implement priority handling for import jobs
+* [x] Add retry tracking and dead-letter handling for failed import jobs
 
 ### 🎯 Milestone 11: **"Progress Pulse" Release** – Import Status Tracking
 
+* [x] JSON polling endpoint for import queue and job status
+* [x] MCP polling payload for active and recent import jobs
 * [ ] Real-time progress indicators for active imports
-* [ ] Detailed error reporting with recovery options
+* [x] Detailed error reporting with retry/dead-letter state
+* [x] Manual recovery actions for failed imports
 * [ ] Email notifications when imports complete
 
 ### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
 
 * [ ] Improve search algorithm and relevance scoring
-* [ ] Add advanced filtering options (year, genre, etc.)
+* [x] Normalize and de-duplicate tag choices in the round builder
+* [x] Add advanced song catalog filtering options (year, genre, preview, usage)
 * [ ] Implement caching for frequent searches
-* [ ] Ensure proper pagination and performance
+* [x] Add server-side song catalog pagination for API and agent workflows
+* [ ] Ensure proper pagination and performance across all large views
 
 ### 🎯 Milestone 13: **"Textual Transport" Release** – Text-Based Playlist Import
 
-* [ ] Support for pasting plain text playlists
-* [ ] Line-by-line parsing with artist/song detection
-* [ ] Confidence scoring for matches
+* [x] Support for pasting plain text playlists
+* [x] Line-by-line parsing with artist/song detection
+* [x] Confidence scoring for matches
+* [x] MCP review payload for low-confidence matches
 * [ ] Manual review interface for low-confidence matches
-* [ ] Support for various text formats (CSV, plain text, etc.)
+* [x] Support for various text formats (CSV, plain text, etc.)
+* [x] Create complete rounds from fully resolved text playlists
 
 ### 🎯 Milestone 14: **"Curated Collector" Release** – Playlist Scraper
 
@@ -139,7 +147,8 @@
 ### 🎯 Milestone 16: **"Database Durability" Release** – Concurrent Operations
 
 * [ ] Implement connection pooling
-* [ ] Add database query optimizations and indexing
+* [x] Add database indexes for catalog, import queue, and scheduled export queries
+* [ ] Add broader database query optimizations after profiling production traffic
 * [ ] Configure database for concurrent write operations
 * [ ] Set up monitoring for database performance
 * [ ] Implement read/write splitting if necessary
@@ -158,7 +167,8 @@
 
 * [ ] Email verification for new accounts
 * [ ] Notify users when round generation completes
-* [ ] Notify users of expiring OAuth tokens (Spotify, Dropbox)
+* [x] Notify users of expiring OAuth tokens in the profile UI
+* [ ] Send proactive email notifications for expiring OAuth tokens
 * [ ] Optional weekly usage summary for admins
 * [ ] Push notification support via browser or Telegram
 
@@ -167,8 +177,11 @@
 * [ ] Develop AI module to generate full quiz rounds
   * [ ] Use existing song metadata (genre, year, tempo, artist)
   * [ ] Support different quiz formats: multiple-choice, guess-the-clip, open-ended
-  * [ ] Create quiz rounds from a playlist
-  * [ ] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
+  * [x] Create quiz rounds from fully resolved text playlists
+  * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
+  * [x] Provide recent usage/fatigue context for agentic song selection
+  * [x] Draft intro/replay/outro scripts for later TTS generation
+  * [x] Store and review generated intro/replay/outro scripts before assigning TTS audio
   * [ ] Include fallback logic when metadata is sparse
 * [ ] Let users review/edit AI-generated questions before saving
 * [ ] Log prompt/response pairs for model improvement
@@ -192,8 +205,10 @@
 ### 🎯 Milestone 21: **"Collaboration Core" Release** – Multi-User Round Sharing
 
 * [ ] Allow shared editing of rounds
-* [ ] Add collaboration roles (view, comment, edit)
-* [ ] Invite others to rounds via username/email
+* [x] Add persisted round ownership and explicit viewer/editor share grants
+* [x] Add owner/visibility indicators and route-level edit checks for browser rounds
+* [ ] Add collaboration roles beyond viewer/editor (comment, admin)
+* [ ] Invite others to rounds via username/email UI
 * [ ] Show who is currently editing (presence indicator)
 * [ ] Track revision history and changes
 * [ ] Allow public view-only sharing links with optional expiration
@@ -203,6 +218,7 @@
 
 * [x] User-specific intro/outro/replay MP3 fallback system
 * [x] Persistent custom user settings
+* [x] Expose quizmaster preference context to MCP agents
 * [ ] Let users define default round format
 * [ ] Implement personal tags for rounds (e.g., "pub night", "2020s", "pop")
 * [ ] Add filtering and sorting by tag
@@ -211,7 +227,9 @@
 ### 🎯 Milestone 23: **"Performance Pulse" Release** – Scaling & Speed
 
 * [ ] Index high-traffic database fields (tags, dates, users)
-* [ ] Paginate round/song lists
+* [x] Paginate song and round browser lists server-side
+* [x] Paginate song catalog API responses
+* [x] Paginate and filter the browser song library server-side
 * [ ] Lazy load MP3 previews and large content
 * [ ] Add Redis/memory cache layer for read-heavy endpoints
 * [ ] Load test with simulated users and large playlists
@@ -222,7 +240,7 @@
 * [ ] Nightly backup job with status alert
 * [ ] Add Sentry or similar for exception tracking
 * [ ] Updater script for pulling latest Git commits safely
-* [ ] Add status endpoint (`/healthz`) for uptime monitors
+* [x] Add status endpoint (`/healthz`) for uptime monitors
 
 ---
 
@@ -234,10 +252,10 @@
 * [ ] REST API for third-party integration (e.g., with trivia bots)
 * [ ] Audio fingerprint validation for user-uploaded MP3s
 * [ ] Round analytics: usage frequency, popularity, ratings
+* [x] MCP catalog analytics summary for usage frequency and preview coverage
 * [ ] Documentation enhancements:
   * [ ] Create video tutorials for complex workflows
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: May 27, 2025*
-
+*Last updated: July 5, 2026*

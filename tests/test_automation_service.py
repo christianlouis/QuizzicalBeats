@@ -3,6 +3,7 @@
 import os
 import shutil
 import tempfile
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,20 @@ from pydub import AudioSegment
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 
-from musicround.models import Round, RoundExport, Song, SongTag, Tag, User, db
+from musicround.helpers.import_queue import ImportQueue
+from musicround.models import (
+    ImportJobRecord,
+    Round,
+    RoundAudioScript,
+    RoundExport,
+    RoundShare,
+    Song,
+    SongTag,
+    Tag,
+    User,
+    UserPreferences,
+    db,
+)
 from musicround.services import automation
 
 
@@ -30,6 +44,16 @@ def _create_song(title="Song", artist="Artist", **kwargs):
     return song
 
 
+def _configure_mail(app):
+    app.config.update(
+        MAIL_HOST="smtp.example.test",
+        MAIL_PORT=587,
+        MAIL_USERNAME="mailer",
+        MAIL_PASSWORD="secret",
+        MAIL_SENDER="sender@example.test",
+    )
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -39,6 +63,7 @@ class TestSongAutomation:
                 title="Blue Monday",
                 artist="New Order",
                 genre="Synthpop",
+                deezer_preview_url="https://example.test/blue.mp3",
                 used_count=3,
             )
 
@@ -46,9 +71,62 @@ class TestSongAutomation:
 
             assert result["count"] == 1
             assert result["songs"][0]["title"] == "Blue Monday"
+            assert result["songs"][0]["preview_url"] == "https://example.test/blue.mp3"
             assert result["songs"][0]["used_count"] == 3
             assert result["songs"][0]["usage_frequency"] == 3
             assert "last_used" in result["songs"][0]
+
+    def test_find_songs_filters_catalog_for_agent_selection(self, app):
+        with app.app_context():
+            _create_song(
+                title="Filtered Rock 1999",
+                artist="Alpha",
+                genre="Rock",
+                year=1999,
+                preview_url="https://example.test/alpha.mp3",
+                used_count=0,
+            )
+            _create_song(
+                title="Filtered Rock 2001",
+                artist="Beta",
+                genre="Rock",
+                year=2001,
+                preview_url="https://example.test/beta.mp3",
+                used_count=0,
+            )
+            _create_song(
+                title="Filtered Pop 1998",
+                artist="Gamma",
+                genre="Pop",
+                year=1998,
+                used_count=2,
+            )
+
+            result = automation.find_songs(
+                query="Filtered",
+                genre="Rock",
+                year_min=1990,
+                year_max=2000,
+                has_preview=True,
+                unused_only=True,
+                order_by="-year",
+                limit=10,
+            )
+
+            assert result["count"] == 1
+            assert result["total"] == 1
+            assert result["filters"]["genre"] == "Rock"
+            assert result["filters"]["has_preview"] is True
+            assert result["filters"]["unused_only"] is True
+            assert result["songs"][0]["title"] == "Filtered Rock 1999"
+
+    def test_find_songs_rejects_invalid_pagination_and_sort(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="offset"):
+                automation.find_songs(offset=-1)
+
+            with pytest.raises(automation.AutomationError, match="order_by"):
+                automation.find_songs(order_by="popularity")
 
     def test_add_song_reuses_existing_by_isrc_and_adds_tags(self, app):
         with app.app_context():
@@ -70,6 +148,25 @@ class TestSongAutomation:
 
 class TestRoundAutomation:
     """Tests for round creation and naming."""
+
+    def test_create_round_assigns_owner_and_visibility(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Owned", artist="A")
+
+            created = automation.create_round(
+                name="Owned Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+                visibility="private",
+            )
+
+            round_obj = db.session.get(Round, created["round"]["id"])
+            assert created["round"]["owner_user_id"] == user.id
+            assert created["round"]["owner"]["username"] == user.username
+            assert round_obj.owner.id == user.id
+            assert round_obj.visibility == "private"
 
     def test_create_and_rename_manual_round(self, app):
         with app.app_context():
@@ -111,6 +208,39 @@ class TestRoundAutomation:
             assert exc_info.value.details["status"] == "needs_more_songs"
             assert exc_info.value.details["expected_song_count"] == 8
             assert exc_info.value.details["resolved_song_count"] == 1
+            assert exc_info.value.details["resolved_positions"][0] == {
+                "position": 1,
+                "song_id": song.id,
+                "resolved": True,
+            }
+            assert exc_info.value.details["missing_positions"] == [2, 3, 4, 5, 6, 7, 8]
+
+    def test_create_round_from_playlist_returns_resolved_position_map(self, app):
+        with app.app_context():
+            first_song = _create_song(title="First", artist="A")
+            second_song = _create_song(title="Second", artist="B")
+
+            with (
+                patch(
+                    "musicround.services.automation.import_catalog_item",
+                    return_value={"item_id": "playlist123", "result": {}},
+                ),
+                patch(
+                    "musicround.services.automation._spotify_playlist_song_ids",
+                    return_value=[first_song.id, second_song.id],
+                ),
+            ):
+                result = automation.create_round_from_playlist(
+                    "spotify",
+                    "playlist123",
+                    count=2,
+                )
+
+            assert result["round"]["song_ids"] == [first_song.id, second_song.id]
+            assert result["resolved_positions"] == [
+                {"position": 1, "song_id": first_song.id, "resolved": True},
+                {"position": 2, "song_id": second_song.id, "resolved": True},
+            ]
 
     def test_replace_round_song_updates_position_and_invalidates_assets(self, app):
         with app.app_context():
@@ -244,6 +374,30 @@ class TestRoundAutomation:
             assert addition.id in suggestion_ids
             assert in_round.id not in suggestion_ids
 
+    def test_share_round_lifecycle(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            shared = automation.share_round(round_id, viewer.id, role="editor")
+            listed = automation.list_round_shares(round_id)
+            revoked = automation.revoke_round_share(round_id, viewer.id)
+
+            assert shared["created"] is True
+            assert shared["share"]["role"] == "editor"
+            assert listed["count"] == 1
+            assert listed["owner"]["id"] == owner.id
+            assert revoked["revoked"] is True
+            assert RoundShare.query.count() == 0
+            assert db.session.get(Round, round_id).visibility == "private"
+
 
 class TestAssetInspection:
     """Tests for generated asset quality checks."""
@@ -319,6 +473,50 @@ class TestAssetInspection:
                 for issue in result["issues"]
             )
 
+    def test_inspect_round_package_reports_unhealthy_artifact_storage(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Storage", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Storage Bad",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            missing_dir = os.path.join(app.instance_path, "missing-artifacts")
+            app.config["ROUND_MP3_DIR"] = missing_dir
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=("https://example.test/preview.mp3", AudioSegment.silent(duration=30000), None),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 65},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id, user_id=user.id, expected_song_count=1
+                )
+
+            assert result["ok"] is False
+            assert result["status"] == "storage_unhealthy"
+            assert result["storage"]["ok"] is False
+            assert result["service_health"]["artifact_storage"]["ok"] is False
+            assert result["service_health"]["spotify"]["status"] in {"ok", "warning", "error"}
+            assert any(issue["code"] == "artifact_storage_missing" for issue in result["issues"])
+
     def test_inspect_round_package_requires_resolved_songs(self, app):
         with app.app_context():
             user = _create_user()
@@ -365,6 +563,76 @@ class TestAssetInspection:
                 issue["code"] == "resolved_song_count_mismatch"
                 for issue in result["issues"]
             )
+            assert result["song_slots"][0]["position"] == 1
+            assert result["song_slots"][0]["resolved"] is True
+            assert result["song_slots"][1] == {
+                "position": 2,
+                "stored_song_id": 999999,
+                "resolved": False,
+                "song": None,
+            }
+            assert result["remediation"][0]["positions"] == [2]
+
+    def test_inspect_round_package_keeps_preview_failures_on_stored_positions(self, app):
+        with app.app_context():
+            user = _create_user()
+            first_song = _create_song(title="First", artist="Artist", deezer_id="101")
+            third_song = _create_song(title="Third", artist="Artist", deezer_id="303")
+            round_id = automation.create_round(
+                name="Gap Then Preview Failure",
+                round_type="manual",
+                song_ids=[first_song.id, third_song.id],
+            )["round"]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.songs = f"{first_song.id},999999,{third_song.id}"
+            db.session.commit()
+
+            def fake_download(song, _temp_dir):
+                duration = 10000 if song.id == third_song.id else 30000
+                return (
+                    f"https://example.test/{song.id}.mp3",
+                    AudioSegment.silent(duration=duration),
+                    None,
+                )
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    side_effect=fake_download,
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000, 1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 85},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id,
+                    user_id=user.id,
+                    expected_song_count=3,
+                    min_preview_seconds=20,
+                )
+
+            failed_checks = [
+                check for check in result["preview_checks"] if check["issue_code"] == "preview_too_short"
+            ]
+            replace_actions = [
+                action for action in result["remediation"] if action["action"] == "replace_position"
+            ]
+            assert failed_checks[0]["position"] == 3
+            assert failed_checks[0]["stored_song_id"] == third_song.id
+            assert replace_actions[0]["position"] == 3
+            assert result["report"]["failed_positions"][0]["position"] == 3
 
     def test_inspect_round_package_warns_for_missing_preview(self, app):
         with app.app_context():
@@ -412,6 +680,56 @@ class TestAssetInspection:
             assert result["report"]["failed_positions"][0]["position"] == 1
             assert "suggest_replacement_songs" in result["report"]["next_step"]
             assert "Replace position 1" in result["report"]["markdown"]
+
+    def test_preview_lookup_failure_hides_exception_details(self, app, tmp_path):
+        with app.app_context():
+            song = _create_song(title="Lookup Fail", artist="Artist", deezer_id="123")
+            app.config["deezer"] = type(
+                "FailingDeezer",
+                (),
+                {
+                    "get_track": lambda self, track_id: (
+                        (_ for _ in ()).throw(RuntimeError("deezer token=secret traceback"))
+                    )
+                },
+            )()
+
+            preview_url, audio, issue = automation._download_preview_audio(song, str(tmp_path))
+
+            assert preview_url is None
+            assert audio is None
+            assert issue["code"] == "deezer_lookup_failed"
+            assert "Check the server logs" in issue["message"]
+            assert "secret" not in issue["message"]
+            assert "traceback" not in issue["message"]
+
+    def test_preview_download_failure_hides_exception_details(self, app, tmp_path):
+        with app.app_context():
+            song = _create_song(title="Download Fail", artist="Artist", deezer_id="123")
+            app.config["deezer"] = type(
+                "PreviewDeezer",
+                (),
+                {
+                    "get_track": lambda self, track_id: {
+                        "preview": "https://example.test/preview.mp3?access_token=secret"
+                    }
+                },
+            )()
+
+            with patch(
+                "musicround.services.automation.requests.get",
+                side_effect=RuntimeError("http token=transport-secret traceback"),
+            ):
+                preview_url, audio, issue = automation._download_preview_audio(song, str(tmp_path))
+
+            assert preview_url == "https://example.test/preview.mp3?access_token=secret"
+            assert audio is None
+            assert issue["code"] == "preview_download_failed"
+            assert issue["details"] == {"preview_url_present": True}
+            body = str(issue)
+            assert "transport-secret" not in body
+            assert "access_token" not in body
+            assert "traceback" not in body
 
     def test_inspect_round_package_warns_for_short_preview(self, app):
         with app.app_context():
@@ -494,6 +812,58 @@ class TestAssetInspection:
                 for issue in result["issues"]
             )
 
+    def test_round_audio_component_failures_hide_exception_details(self, app):
+        with app.app_context():
+            user = _create_user()
+
+            with patch(
+                "musicround.services.automation.AudioSegment.from_mp3",
+                side_effect=RuntimeError("audio path=/srv/private token=secret"),
+            ):
+                components, issues = automation._round_audio_components(user, 1)
+
+            assert components["custom_audio_ms"] == {}
+            assert components["number_audio_ms"] == []
+            assert {issue["code"] for issue in issues} == {
+                "custom_audio_failed",
+                "number_audio_failed",
+            }
+            body = str(issues)
+            assert "secret" not in body
+            assert "/srv/private" not in body
+            assert "Check the server logs" in body
+
+    def test_generate_round_mp3_missing_file_hides_internal_path(self, app, tmp_path):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="No Output", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="No Output Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            private_dir = tmp_path / "private-token-secret-rounds"
+            private_dir.mkdir()
+            app.config["ROUND_MP3_DIR"] = str(private_dir)
+            expected_path = str(private_dir / f"round_{round_id}.mp3")
+            real_exists = os.path.exists
+
+            def fake_exists(path):
+                if path == expected_path:
+                    return False
+                return real_exists(path)
+
+            with (
+                patch("musicround.routes.rounds.round_mp3", return_value={"success": True}),
+                patch("musicround.services.automation.os.path.exists", side_effect=fake_exists),
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.generate_round_mp3(round_id, user_id=user.id)
+
+            message = str(exc_info.value)
+            assert message == automation.AUTOMATION_MP3_GENERATION_ERROR
+            assert "private-token-secret" not in message
+
     def test_email_round_blocks_when_package_quality_fails(self, app):
         with app.app_context():
             user = _create_user()
@@ -530,6 +900,7 @@ class TestAssetInspection:
 
     def test_schedule_round_email_stores_pending_export(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Scheduled", artist="Artist")
             round_id = automation.create_round(
@@ -563,8 +934,33 @@ class TestAssetInspection:
             assert export.subject == "Scheduled subject"
             assert result["export"]["scheduled_for"] == "2026-07-09T17:00:00Z"
 
+    def test_schedule_round_email_blocks_missing_email_config_before_generation(self, app):
+        with app.app_context():
+            app.config["MAIL_HOST"] = None
+            user = _create_user()
+            song = _create_song(title="No Mail", artist="Artist")
+            round_id = automation.create_round(
+                name="No Mail Config",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError, match="Email configuration") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        user_id=user.id,
+                    )
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "email_unhealthy"
+            assert "email" in exc_info.value.details["service_health"]
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
     def test_schedule_round_email_blocks_when_quality_fails(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Scheduled Bad", artist="Artist")
             round_id = automation.create_round(
@@ -598,8 +994,56 @@ class TestAssetInspection:
             assert exc_info.value.details["scheduled"] is False
             assert RoundExport.query.filter_by(round_id=round_id).count() == 0
 
+    def test_schedule_round_email_blocks_when_storage_unhealthy_before_generation(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Storage Bad", artist="Artist")
+            round_id = automation.create_round(
+                name="Unwritable Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            app.config["ROUND_MP3_DIR"] = os.path.join(app.instance_path, "missing-rounds")
+
+            with patch("musicround.services.automation.generate_round_pdf") as mock_pdf:
+                with pytest.raises(automation.AutomationError, match="storage") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        user_id=user.id,
+                    )
+
+            mock_pdf.assert_not_called()
+            assert exc_info.value.details["ok"] is False
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
+    def test_generate_assets_storage_error_hides_exception_text(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Unsafe Storage", artist="Artist")
+            round_id = automation.create_round(
+                name="Unsafe Storage Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with patch(
+                "musicround.services.automation.require_round_artifact_storage",
+                side_effect=RuntimeError("filesystem secret token=storage-secret traceback"),
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.generate_round_assets(round_id, user_id=user.id)
+
+            message = str(exc_info.value)
+            assert message == automation.AUTOMATION_STORAGE_ERROR
+            assert exc_info.value.details
+            assert "storage-secret" not in message
+            assert "traceback" not in message
+
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Listed", artist="Artist")
             round_id = automation.create_round(
@@ -631,6 +1075,7 @@ class TestAssetInspection:
 
     def test_process_due_scheduled_round_emails_sends_due_exports(self, app):
         with app.app_context():
+            _configure_mail(app)
             user = _create_user()
             song = _create_song(title="Due", artist="Artist")
             round_id = automation.create_round(
@@ -667,6 +1112,50 @@ class TestAssetInspection:
             export = RoundExport.query.get(scheduled["export"]["id"])
             assert export.status == "success"
             assert export.processed_at is not None
+
+    def test_process_due_scheduled_round_email_hides_exception_text(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Due Failure", artist="Artist")
+            round_id = automation.create_round(
+                name="Due Failure Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                scheduled = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
+
+            with patch(
+                "musicround.services.automation.email_round",
+                side_effect=RuntimeError("smtp-secret token=mail-secret traceback"),
+            ):
+                result = automation.process_due_scheduled_round_emails(
+                    now="2026-07-09T19:01:00+02:00"
+                )
+
+            body = str(result)
+            assert result["processed_count"] == 1
+            assert result["results"][0]["error"] == automation.AUTOMATION_SCHEDULED_EMAIL_ERROR
+            assert "smtp-secret" not in body
+            assert "mail-secret" not in body
+            assert "traceback" not in body
+            export = RoundExport.query.get(scheduled["export"]["id"])
+            assert export.status == "failed"
+            assert export.error_message == automation.AUTOMATION_SCHEDULED_EMAIL_ERROR
 
 
 class TestTTSAutomation:
@@ -758,3 +1247,346 @@ class TestDatastoreCrudAutomation:
 
             assert result["object"]["spotify_token"] == "[redacted]"
             assert result["object"]["password_hash"] == "[redacted]"
+
+
+class TestAgentPlanningAutomation:
+    """Tests for agent-facing planning and review helpers."""
+
+    def test_import_progress_events_returns_queue_and_job_payload(self, app):
+        with app.app_context():
+            user = _create_user()
+            queue = ImportQueue()
+            app.config["IMPORT_QUEUE"] = queue
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist123",
+                priority=5,
+                user_id=user.id,
+                status="pending",
+            )
+            db.session.add(record)
+            db.session.commit()
+            queue.enqueue_record(record)
+
+            result = automation.import_progress_events(user_id=user.id)
+
+            assert result["queue_initialized"] is True
+            assert result["queue_size"] == 1
+            assert result["stats"]["pending"] == 1
+            assert result["active_jobs"][0]["id"] == record.id
+            assert result["queue_snapshot"][0]["record_id"] == record.id
+
+    def test_parse_text_playlist_marks_rows_that_need_review(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "1. Shania Twain - Man! I Feel Like A Woman!\n"
+                "Harry Styles - As It Was\n"
+                "Mystery Song Without Artist\n"
+            )
+
+            assert result["count"] == 3
+            assert result["candidates"][0]["artist"] == "Shania Twain"
+            assert result["candidates"][0]["title"] == "Man! I Feel Like A Woman!"
+            assert result["low_confidence_count"] == 1
+            assert result["low_confidence"][0]["issues"] == ["missing_artist"]
+            assert result["ready_for_import"] is False
+
+    def test_retry_import_job_requeues_dead_letter_job(self, app):
+        with app.app_context():
+            user = _create_user()
+            queue = ImportQueue()
+            app.config["IMPORT_QUEUE"] = queue
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist123",
+                priority=5,
+                user_id=user.id,
+                status="dead_letter",
+                attempt_count=3,
+                max_attempts=3,
+                error_message="manual review required",
+                completed_at=datetime.utcnow(),
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            result = automation.retry_import_job(record.id, reset_attempts=True)
+
+            assert result["retried"] is True
+            assert result["enqueued"] is True
+            assert result["job"]["status"] == "pending"
+            assert result["job"]["attempt_count"] == 0
+            assert queue.snapshot()[0]["record_id"] == record.id
+
+    def test_resolve_text_playlist_matches_catalog_songs(self, app):
+        with app.app_context():
+            song = _create_song(title="As It Was", artist="Harry Styles")
+
+            result = automation.resolve_text_playlist("Harry Styles - As It Was")
+
+            assert result["resolved_count"] == 1
+            assert result["unresolved_count"] == 0
+            assert result["resolved"][0]["song_id"] == song.id
+            assert result["ready_for_round"] is True
+
+    def test_create_round_from_text_playlist_requires_exact_count(self, app):
+        with app.app_context():
+            _create_song(title="One", artist="A")
+            _create_song(title="Two", artist="B")
+
+            result = automation.create_round_from_text_playlist(
+                "A - One\nB - Two",
+                name="Text Round",
+                count=2,
+            )
+
+            assert result["created"] is True
+            assert result["round"]["name"] == "Text Round"
+            assert result["round"]["song_ids"]
+
+    def test_create_round_from_text_playlist_returns_review_payload(self, app):
+        with app.app_context():
+            _create_song(title="One", artist="A")
+
+            with pytest.raises(automation.AutomationError) as exc_info:
+                automation.create_round_from_text_playlist(
+                    "A - One\nUnknown - Missing",
+                    count=2,
+                )
+
+            assert exc_info.value.details["status"] == "needs_review"
+            assert exc_info.value.details["resolution"]["unresolved_count"] == 1
+
+    def test_round_analytics_summary_reports_catalog_health(self, app):
+        with app.app_context():
+            _create_song(title="Used", artist="A", genre="Rock", used_count=4)
+            _create_song(title="Unused", artist="B", genre="Pop", used_count=0)
+            _create_song(title="No Preview", artist="C", genre="Rock")
+
+            result = automation.round_analytics_summary(months=6, limit=5)
+
+            assert result["song_count"] == 3
+            assert result["missing_preview_count"] == 3
+            assert result["genre_counts"]["Rock"] == 2
+            assert result["most_used_songs"][0]["title"] == "Used"
+            assert any(song["title"] == "Unused" for song in result["unused_candidates"])
+
+    def test_recent_usage_summary_warns_for_recently_used_selected_songs(self, app):
+        with app.app_context():
+            user = _create_user()
+            recent_song = _create_song(
+                title="Repeated",
+                artist="Artist",
+                used_count=4,
+            )
+            old_song = _create_song(title="Old", artist="Artist", used_count=1)
+            recent_song.last_used = datetime.utcnow() - timedelta(days=10)
+            old_song.last_used = datetime.utcnow() - timedelta(days=200)
+            db.session.commit()
+
+            result = automation.recent_usage_summary(
+                user_id=user.id,
+                months=3,
+                song_ids=[recent_song.id, old_song.id],
+            )
+
+            assert result["selected_song_warnings"][0]["song"]["id"] == recent_song.id
+            assert "Repeated" in result["selected_song_warnings"][0]["warning"]
+            assert all(
+                warning["song"]["id"] != old_song.id
+                for warning in result["selected_song_warnings"]
+            )
+
+    def test_quizmaster_context_includes_preferences_and_recent_usage(self, app):
+        with app.app_context():
+            user = _create_user(username="christian", email="christian@example.test")
+            user.first_name = "Christian"
+            preferences = UserPreferences(
+                user=user,
+                default_tts_service="elevenlabs",
+                enable_intro=True,
+                theme="dark",
+            )
+            db.session.add(preferences)
+            db.session.commit()
+
+            result = automation.quizmaster_context(user.id)
+
+            assert result["quizmaster"]["username"] == "christian"
+            assert result["quizmaster"]["name"] == "Christian"
+            assert result["preferences"]["default_tts_service"] == "elevenlabs"
+            assert result["preferences"]["theme"] == "dark"
+            assert result["recent_usage"]["window_months"] == 3
+
+    def test_round_planning_brief_returns_constraints_and_seasonal_notes(self, app):
+        with app.app_context():
+            user = _create_user()
+
+            result = automation.round_planning_brief(
+                user_id=user.id,
+                quiz_date="2026-07-09T19:00:00+02:00",
+                theme="festival headliners",
+            )
+
+            assert result["theme"] == "festival headliners"
+            assert result["desired_song_count"] == 8
+            assert any("exactly 8 songs" in item for item in result["constraints"])
+            assert any("summer" in item for item in result["date_notes"])
+            assert "agent_prompt" in result
+
+    def test_draft_round_audio_scripts_uses_round_context(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="As It Was", artist="Harry Styles")
+            round_id = automation.create_round(
+                name="Pop Night",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            result = automation.draft_round_audio_scripts(
+                round_id=round_id,
+                user_id=user.id,
+                quiz_date="2026-07-09T19:00:00+02:00",
+            )
+
+            assert result["round_name"] == "Pop Night"
+            assert "Harry Styles" in result["scripts"]["intro"]
+            assert "second listen" in result["scripts"]["replay"]
+            assert result["next_step"].startswith("Review the text")
+
+    def test_draft_round_audio_scripts_can_persist_review_records(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Wildflowers", artist="Tom Petty")
+            round_id = automation.create_round(
+                name="Warm Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            result = automation.draft_round_audio_scripts(
+                round_id=round_id,
+                user_id=user.id,
+                theme="comfort songs",
+                persist=True,
+            )
+
+            assert len(result["script_records"]) == 3
+            assert RoundAudioScript.query.filter_by(round_id=round_id).count() == 3
+            assert result["script_records"][0]["status"] == "draft"
+            assert "generate_tts_from_script" in result["next_step"]
+
+    def test_draft_round_track_hints_can_persist_positioned_records(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(
+                title="Secret Song",
+                artist="Known Artist",
+                genre="Rock",
+                year=1994,
+            )
+            round_id = automation.create_round(
+                name="Hinted",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            result = automation.draft_round_track_hints(
+                round_id=round_id,
+                user_id=user.id,
+                persist=True,
+            )
+
+            assert len(result["hints"]) == 1
+            assert result["hints"][0]["position"] == 1
+            assert "1994" in result["hints"][0]["text"]
+            assert "Secret Song" not in result["hints"][0]["text"]
+            assert result["script_records"][0]["script_type"] == "track_hint"
+            assert result["script_records"][0]["cue_position"] == 1
+
+    def test_save_round_track_hints_validates_positions(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="One", artist="Artist")
+            round_id = automation.create_round(
+                name="Hint Positions",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="outside this round"):
+                automation.save_round_track_hints(
+                    round_id=round_id,
+                    user_id=user.id,
+                    hints=[{"position": 2, "text": "Too far"}],
+                )
+
+    def test_round_audio_script_review_and_tts_generation(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Intro", artist="Artist")
+            round_id = automation.create_round(
+                name="Scripted",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            saved = automation.save_round_audio_scripts(
+                round_id,
+                user_id=user.id,
+                scripts={"intro": "Welcome to the scripted round"},
+                status="draft",
+            )
+            script_id = saved["scripts"][0]["id"]
+
+            updated = automation.update_round_audio_script(
+                script_id,
+                text="Welcome to the approved scripted round",
+                status="approved",
+                selected=True,
+            )
+            listed = automation.list_round_audio_scripts(round_id=round_id, status="approved")
+
+            with patch("musicround.services.automation.generate_tts_mp3") as mock_tts:
+                mock_tts.return_value = "custommp3/agentuser/intro.mp3"
+                generated = automation.generate_tts_from_script(script_id, service="openai")
+
+            assert updated["script"]["status"] == "approved"
+            assert listed["count"] == 1
+            assert generated["script"]["status"] == "used"
+            assert generated["generated"]["path"] == "custommp3/agentuser/intro.mp3"
+            assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/intro.mp3"
+
+    def test_track_hint_tts_generation_stores_script_path_without_overwriting_intro(self, app):
+        with app.app_context():
+            user = _create_user()
+            user.intro_mp3 = "custommp3/agentuser/existing-intro.mp3"
+            song = _create_song(title="Hint", artist="Artist")
+            round_id = automation.create_round(
+                name="Hinted TTS",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            saved = automation.save_round_track_hints(
+                round_id=round_id,
+                user_id=user.id,
+                hints=[{"position": 1, "text": "This is the hint."}],
+                status="approved",
+            )
+            script_id = saved["scripts"][0]["id"]
+
+            with patch("musicround.services.automation.generate_tts_mp3") as mock_tts:
+                mock_tts.return_value = "custommp3/agentuser/round_1_hint_1.mp3"
+                generated = automation.generate_tts_from_script(script_id, service="openai")
+
+            assert generated["script"]["status"] == "used"
+            assert generated["generated"]["mp3_type"] == "track_hint"
+            assert generated["generated"]["path"].endswith("round_1_hint_1.mp3")
+            assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/existing-intro.mp3"

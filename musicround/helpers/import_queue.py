@@ -17,6 +17,19 @@ from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.spotify_helper import get_spotify_token
 
 
+IMPORT_JOB_FAILURE_MESSAGE = "Import job failed. Check the server logs."
+IMPORT_JOB_RESULT_ERROR_MESSAGE = "Import completed with errors. Check the server logs."
+
+
+def _safe_result_error_summary(errors: list[Any]) -> str | None:
+    """Return a stable summary for import-result errors."""
+    if not errors:
+        return None
+    count = len(errors)
+    suffix = "error" if count == 1 else "errors"
+    return f"Import completed with {count} {suffix}. Check the server logs."
+
+
 @dataclass(order=True)
 class ImportJob:
     """Represents a single import job."""
@@ -28,6 +41,7 @@ class ImportJob:
     user_id: int = field(compare=False)
     spotify_token: Optional[str] = field(default=None, compare=False)
     record_id: Optional[int] = field(default=None, compare=False)
+    max_attempts: int = field(default=3, compare=False)
 
 
 class ImportQueue:
@@ -62,6 +76,7 @@ class ImportQueue:
         user_id: int,
         priority: Any = 10,
         spotify_token: Optional[str] = None,
+        max_attempts: int = 3,
     ) -> ImportJobRecord:
         """Create a persistent job record and enqueue it for local workers."""
         normalized_priority = self.normalize_priority(priority)
@@ -72,6 +87,7 @@ class ImportQueue:
             user_id=user_id,
             priority=normalized_priority,
             status="pending",
+            max_attempts=max(1, int(max_attempts or 3)),
         )
         db.session.add(record)
         db.session.commit()
@@ -89,6 +105,7 @@ class ImportQueue:
                 user_id=record.user_id,
                 spotify_token=spotify_token,
                 record_id=record.id,
+                max_attempts=record.max_attempts or 3,
             )
         )
 
@@ -151,6 +168,8 @@ class ImportQueue:
                 "item_id": job.item_id,
                 "user_id": job.user_id,
                 "record_id": job.record_id,
+                "attempt_count": 0,
+                "max_attempts": job.max_attempts,
             }
             for priority, counter, job in sorted(queue_items)
         ]
@@ -212,6 +231,7 @@ class ImportWorker(threading.Thread):
             item_id=record.item_id,
             user_id=record.user_id,
             record_id=record.id,
+            max_attempts=record.max_attempts or 3,
         )
 
     def _process_job(self, job: ImportJob) -> None:
@@ -226,7 +246,7 @@ class ImportWorker(threading.Thread):
                 user = User.query.get(job.user_id)
                 if not user:
                     current_app.logger.error("Import job for unknown user %s", job.user_id)
-                    self._mark_failed(record, f"Unknown user id {job.user_id}")
+                    self._mark_failed(record, f"Unknown user id {job.user_id}", retryable=False)
                     return
 
                 login_user(user)
@@ -259,7 +279,7 @@ class ImportWorker(threading.Thread):
             except Exception as exc:  # pylint: disable=broad-except
                 current_app.logger.error("Import job failed: %s", exc, exc_info=True)
                 db.session.rollback()
-                self._mark_failed(record, str(exc))
+                self._mark_failed(record, IMPORT_JOB_FAILURE_MESSAGE)
             finally:
                 if logged_in:
                     logout_user()
@@ -293,7 +313,12 @@ class ImportWorker(threading.Thread):
                 )
                 return None
 
-        return ImportJobRecord.query.get(job.record_id)
+        record = ImportJobRecord.query.get(job.record_id)
+        if record:
+            record.attempt_count = (record.attempt_count or 0) + 1
+            db.session.add(record)
+            db.session.commit()
+        return record
 
     def _mark_completed(
         self,
@@ -310,12 +335,29 @@ class ImportWorker(threading.Thread):
         record.skipped_count = skipped_count
         record.error_message = error_message
 
-    def _mark_failed(self, record: Optional[ImportJobRecord], error_message: str) -> None:
+    def _mark_failed(
+        self,
+        record: Optional[ImportJobRecord],
+        error_message: str,
+        *,
+        retryable: bool = True,
+    ) -> None:
         if not record:
             return
-        record.status = "failed"
+        attempts = record.attempt_count or 0
+        max_attempts = max(1, record.max_attempts or 1)
+        if retryable and attempts < max_attempts:
+            record.status = "pending"
+            record.error_message = (
+                f"Attempt {attempts} of {max_attempts} failed; retry queued. {error_message}"
+            )
+        else:
+            record.status = "dead_letter"
+            record.error_message = (
+                f"Attempt {attempts} of {max_attempts} failed; manual review required. "
+                f"{error_message}"
+            )
         record.completed_at = datetime.utcnow()
-        record.error_message = error_message
         db.session.add(record)
         db.session.commit()
 
@@ -338,7 +380,7 @@ class ImportWorker(threading.Thread):
             return (
                 int(result.get("imported_count", 0) or 0),
                 int(skipped_count or 0),
-                "\n".join(str(error) for error in errors) or None,
+                _safe_result_error_summary(errors),
             )
 
         if isinstance(result, list):
@@ -355,6 +397,7 @@ def enqueue_import_job(
     user_id: int,
     priority: Any = 10,
     spotify_token: Optional[str] = None,
+    max_attempts: int = 3,
 ) -> ImportJobRecord:
     """Create and enqueue an import job using the app-wide queue."""
     return queue.enqueue(
@@ -364,4 +407,5 @@ def enqueue_import_job(
         user_id,
         priority,
         spotify_token=spotify_token,
+        max_attempts=max_attempts,
     )

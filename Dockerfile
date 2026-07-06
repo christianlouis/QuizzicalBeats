@@ -24,11 +24,14 @@ COPY run_migration.py run.py wsgi.py docker-entrypoint.sh LICENSE favicon.ico .
 RUN chmod +x docker-entrypoint.sh
 
 # Create necessary directories and ensure proper permissions
-RUN mkdir -p /data && chmod 777 /data
+RUN mkdir -p /data/rounds /data/pdfs && chmod -R 777 /data
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV FLASK_APP=run.py
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3); payload = json.load(response); raise SystemExit(0 if payload.get('ok') else 1)"
 
 # Use the entrypoint script
 CMD ["./docker-entrypoint.sh"]

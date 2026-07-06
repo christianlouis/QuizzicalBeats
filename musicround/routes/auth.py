@@ -91,5 +91,5 @@ def callback():
 
     except Exception as e:
         current_app.logger.error(f"Error in Spotify login callback: {str(e)}")
-        flash(f'An error occurred during Spotify login: {str(e)}.', 'danger')
+        flash('Spotify login failed. Please try again or reconnect Spotify.', 'danger')
         return redirect(url_for('users.login'))

@@ -5,6 +5,76 @@ All notable changes to Quizzical Beats will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
+- Added import queue and worker health to service-health payloads, including pending/dead-letter job warnings.
+- Added readiness and scheduled-delivery badges to the rounds list.
+- Added reusable Spotify/Dropbox OAuth token-status helpers for profile warnings, service health, automation, and future MCP checks.
+- Added reviewable per-track hint scripts for music rounds, MCP helpers to draft/save them, TTS generation for hint clips, and MP3 playback support that inserts selected hints before first-listen snippets.
+- Added lazy-loaded preview players in the song library so large libraries do not render one audio element per song.
+- Added visible Spotify and Dropbox reconnect/token-expiry warnings on the profile page.
+- Added import-job retry tracking, dead-letter status, attempt counts, and an idempotent migration for existing databases.
+- Added a JSON import queue status endpoint for polling clients and MCP workflows.
+- Added normalized, de-duplicated tag options for the music-round builder.
+- Added MCP automation helpers for import progress polling, text playlist parsing, recent usage warnings, quizmaster planning context, and draft intro/replay/outro scripts.
+- Added manual import-job retry recovery, text-playlist catalog resolution, text-to-round creation, and catalog analytics MCP helpers.
+- Added server-side song catalog pagination and filter APIs for UI and agent workflows.
+- Added idempotent query-performance indexes for catalog search, import queues, and scheduled round emails.
+- Added server-side pagination and filters to the browser song library.
+- Added server-side pagination to the browser rounds list.
+- Added round owner/share models and MCP helpers for quizmaster collaboration handoff.
+- Added persisted round-audio script drafts, review status, and MCP helpers to approve script text before TTS audio generation.
+- Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
+
+### Fixed
+- Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
+- Normalized Spotify profile display names on the connection-management page and removed the obsolete admin token-wizard template.
+- Required login for Spotify playlist import, direct-token, and diagnostic routes before resolving user, manual, or system fallback tokens.
+- Hardened Spotify direct-token handling with admin-only diagnostics, safe local return URLs, validation-before-store behavior, invalid-token cleanup, and a non-empty client diagnostic page.
+- Hardened manual Spotify bearer-token handling on the profile page so invalid tokens are rejected before storage and old session tokens are cleared on validation failure.
+- Cleared all manual Spotify session metadata when a browser-supplied token expires or is rejected during profile validation.
+- Stopped rendering Spotify, Dropbox, and manual bearer token fragments in profile/import HTML, fixed direct Spotify import form targets, and removed raw Dropbox provider bodies and tracebacks from browser-facing API errors.
+- Stopped the profile Dropbox folder-picker UI from rendering raw provider response or traceback fields if an error payload includes them.
+- Added Dropbox export coverage to ensure unhealthy artifact storage blocks export before Dropbox refresh or upload calls.
+- Sanitized Dropbox helper error payloads so upload, shared-link, and unexpected refresh failures no longer return provider bodies or exception text to callers.
+- Sanitized Dropbox root-folder fallback errors so provider bodies and exception text stay out of JSON responses.
+- Sanitized round-delete failure responses so filesystem or database exception details are logged but not returned to users.
+- Sanitized song metadata refresh failures so provider and database exception details stay out of API responses.
+- Sanitized Spotify album, playlist, and search API proxy errors so provider bodies stay out of JSON responses.
+- Sanitized Dropbox round-export failure responses and export records so provider or filesystem exception details stay out of user-visible surfaces.
+- Sanitized Spotify login callback failures so OAuth exception details stay out of browser flash messages.
+- Sanitized direct Spotify playlist-browser failures so provider and bearer-token details stay out of browser flash messages.
+- Sanitized one-time admin setup failures so database exception details stay out of browser flash messages.
+- Sanitized Flask-Admin bulk-action failures so database exception details stay out of browser flash messages.
+- Sanitized system-health status failures so database, API, and memory exception details stay out of the admin status page.
+- Sanitized Deezer import failure flashes so provider and helper exception details stay out of browser messages.
+- Sanitized manual Spotify import failure flashes so provider and helper exception details stay out of browser messages.
+- Sanitized Spotify search error pages so provider exception details stay out of browser-rendered error details.
+- Sanitized Spotify diagnostic error fields so provider exception details stay out of admin diagnostic pages.
+- Sanitized backup helper error responses so filesystem and scheduler exception details stay out of browser messages.
+- Sanitized ImportHelper error lists so provider exception details stay out of UI, job, and MCP-facing import results.
+- Normalized legacy JSON Spotify token payloads into raw user token columns and kept the Authlib token bridge compatible with old rows.
+- Sanitized Dropbox folder-list/create error responses and `/healthz` database probe failures so provider bodies, driver errors, and credentials stay out of JSON responses.
+- Sanitized automation storage, inspection, and scheduled-email failure payloads so MCP and export records keep repair context without exposing raw exception text.
+- Sanitized Spotify direct-client initialization and import-job retry error responses so bearer tokens and stored provider details stay out of browser JSON.
+- Sanitized import worker failure records so retry and dead-letter status stays actionable without persisting provider exception text.
+- Sanitized friendly-error API failures so provider or model exception details stay out of browser JSON.
+- Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
+- Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
+- Made token generation reject invalid lengths instead of returning weak or empty tokens.
+- Moved verbose metadata-refresh diagnostics from info logs to debug logs.
+- Made Deezer track import failures return structured import errors instead of escaping from `ImportHelper.import_item`.
+- Normalized OAuth token expiry storage for both `expires_in` and Authlib-style `expires_at` payloads.
+- Made Dropbox folder browsing force-refresh once after a 401 and return a reconnect-required payload when refresh credentials are revoked.
+- Made tag-based round generation match tag names after trimming and case folding.
+- Made the rounds list flag non-eight-song rounds, unresolved song IDs, and failed email deliveries before quiz rounds reach inbox workflows.
+- Preserved Spotify playlist import order when the importer returns database song IDs directly.
+- Kept round package preview failures aligned to stored round positions even when unresolved song IDs create gaps.
+- Added playlist import position maps to MCP round-creation success and repair payloads.
+- Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
+
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 
 ### 🔒 Security

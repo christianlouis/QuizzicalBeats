@@ -1,12 +1,53 @@
 """
 Debug route for OAuth URL generation
 """
-from flask import Blueprint, render_template, jsonify, current_app, request, url_for
-from flask_login import login_required
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from flask import Blueprint, abort, render_template, jsonify, current_app, request, url_for
+from flask_login import current_user, login_required
 from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 
 # Create blueprint
 oauth_debug_bp = Blueprint('oauth_debug', __name__)
+REDACTED_VALUE = '[redacted]'
+SENSITIVE_QUERY_PARTS = (
+    'password',
+    'passwd',
+    'token',
+    'secret',
+    'api_key',
+    'apikey',
+    'access_key',
+)
+
+
+def _is_sensitive_name(name):
+    normalized = str(name).lower().replace('-', '_')
+    return any(part in normalized for part in SENSITIVE_QUERY_PARTS)
+
+
+def _redact_url(value):
+    if not value:
+        return value
+    parsed = urlsplit(value)
+    if not parsed.query:
+        return value
+    redacted_query = urlencode(
+        [
+            (key, REDACTED_VALUE if _is_sensitive_name(key) else val)
+            for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+        ],
+        doseq=True,
+    )
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, redacted_query, parsed.fragment))
+
+
+def _redact_header_value(key, value):
+    if _is_sensitive_name(key):
+        return REDACTED_VALUE
+    if str(key).lower() in {'referer', 'origin'}:
+        return _redact_url(value)
+    return value
 
 @oauth_debug_bp.route('/debug/oauth-urls')
 @login_required
@@ -18,7 +59,13 @@ def debug_oauth_urls():
     Formats:
     - HTML: Default view with pretty UI
     - JSON: Add ?format=json or use Accept: application/json header
-    """    # Get config settings
+    """
+    if not current_app.config.get('ENABLE_OAUTH_DEBUG'):
+        abort(404)
+    if not current_user.is_admin:
+        abort(403)
+
+    # Get config settings
     use_https = current_app.config.get('USE_HTTPS', False)
     preferred_scheme = current_app.config.get('PREFERRED_URL_SCHEME', 'http')
     static_oauth_urls = current_app.config.get('STATIC_OAUTH_URLS', False)
@@ -52,11 +99,11 @@ def debug_oauth_urls():
     
     # Get request info
     request_info = {
-        'url': request.url,
+        'url': _redact_url(request.url),
         'host': request.host,
         'scheme': request.scheme,
         'headers': {
-            key: value for key, value in request.headers.items()
+            key: _redact_header_value(key, value) for key, value in request.headers.items()
             if key.lower() in ('x-forwarded-for', 'x-forwarded-proto', 
                               'x-forwarded-host', 'host', 'origin', 'referer')
         }
@@ -66,7 +113,8 @@ def debug_oauth_urls():
     result = {
         'config': {
             'USE_HTTPS': use_https,
-            'PREFERRED_URL_SCHEME': preferred_scheme
+            'PREFERRED_URL_SCHEME': preferred_scheme,
+            'STATIC_OAUTH_URLS': static_oauth_urls,
         },
         'helper_generated_urls': oauth_urls,
         'direct_url_for_urls': direct_urls,

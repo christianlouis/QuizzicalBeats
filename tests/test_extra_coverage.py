@@ -216,6 +216,26 @@ class TestSaveRoundRoute:
         with app.app_context():
             assert Round.query.filter_by(name='Empty Round').first() is None
 
+    def test_save_round_rejects_partial_playlist_round(self, app, client):
+        """Playlist review posts must still require the full requested song count."""
+        _login(app, client)
+        ids = _add_songs(app, [
+            {'title': 'Partial Playlist Song', 'artist': 'A', 'genre': 'Rock', 'year': 2000},
+        ])
+
+        response = client.post('/save_round', data={
+            'round_criteria': 'Spotify Playlist: partial',
+            'round_name': 'Partial Playlist Round',
+            'playlist_import': '1',
+            'expected_song_count': '2',
+            'song_id': [str(ids[0])],
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'expected exactly 2' in response.data
+        with app.app_context():
+            assert Round.query.filter_by(name='Partial Playlist Round').first() is None
+
     def test_save_round_increments_used_count(self, app, client):
         """Test that save_round increments used_count for songs."""
         _login(app, client)
@@ -242,8 +262,11 @@ class TestSaveRoundRoute:
         assert response.status_code == 200
         with app.app_context():
             round_ = Round.query.filter_by(round_type='Genre').order_by(Round.id.desc()).first()
+            user = User.query.filter_by(username='extra_user').one()
             assert round_ is not None
             assert round_.round_criteria_used == 'Jazz'
+            assert round_.user_id == user.id
+            assert round_.visibility == 'private'
 
 
 class TestImportQueueStatusRoute:
@@ -293,6 +316,32 @@ class TestImportQueueStatusRoute:
         assert b'broken-playlist' in response.data
         assert b'Preview import failed loudly' in response.data
 
+    def test_queue_status_shows_dead_letter_attempts_for_admin(self, app, client):
+        """Test queue-status renders dead-letter jobs and attempt counts."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='dead-letter-playlist',
+                    user_id=user.id,
+                    status='dead_letter',
+                    error_message='Manual review required',
+                    attempt_count=3,
+                    max_attempts=3,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status')
+
+        assert response.status_code == 200
+        assert b'dead-letter-playlist' in response.data
+        assert b'dead_letter' in response.data
+        assert b'3 / 3' in response.data
+
     def test_queue_status_shows_pending_database_job_for_admin(self, app, client):
         """Test queue-status uses pending ImportJobRecord rows as source of truth."""
         _login_admin(app, client)
@@ -306,6 +355,8 @@ class TestImportQueueStatusRoute:
                     user_id=user.id,
                     status='pending',
                     priority=3,
+                    attempt_count=1,
+                    max_attempts=3,
                 )
             )
             db.session.commit()
@@ -314,6 +365,7 @@ class TestImportQueueStatusRoute:
 
         assert response.status_code == 200
         assert b'pending-playlist' in response.data
+        assert b'1 / 3' in response.data
 
     def test_queue_status_orders_database_jobs_by_priority(self, app, client):
         """Test appended database jobs keep priority order in the status page."""
@@ -348,6 +400,107 @@ class TestImportQueueStatusRoute:
         assert response.status_code == 200
         assert page.index('high-priority-playlist') < page.index('low-priority-playlist')
 
+    def test_queue_status_json_requires_admin(self, app, client):
+        """Test queue-status JSON returns a machine-readable admin error."""
+        _login(app, client, 'nonadmin_qs_json', 'nonadmin_qs_json@example.com')
+
+        response = client.get('/import/queue-status.json')
+
+        assert response.status_code == 403
+        assert response.get_json()['error'] == 'Admin access required'
+
+    def test_queue_status_json_returns_polling_payload_for_admin(self, app, client):
+        """Test queue-status JSON exposes pending and recent job state."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='json-pending-playlist',
+                    user_id=user.id,
+                    status='pending',
+                    priority=2,
+                    attempt_count=1,
+                    max_attempts=3,
+                )
+            )
+            db.session.commit()
+
+        response = client.get('/import/queue-status.json')
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data['stats']['queue_size'] >= 1
+        assert any(job['item_id'] == 'json-pending-playlist' for job in data['queue'])
+        assert any(job['item_id'] == 'json-pending-playlist' for job in data['recent_jobs'])
+
+    def test_retry_import_job_requires_admin(self, app, client):
+        """Test retrying an import job requires admin access."""
+        _login(app, client, 'nonadmin_retry', 'nonadmin_retry@example.com')
+
+        response = client.post('/import/jobs/1/retry')
+
+        assert response.status_code == 403
+        assert response.get_json()['error'] == 'Admin access required'
+
+    def test_retry_import_job_requeues_dead_letter_for_admin(self, app, client):
+        """Test admin retry endpoint moves a dead-letter job back to pending."""
+        _login_admin(app, client)
+        with app.app_context():
+            user = User.query.filter_by(username='extra_admin').first()
+            record = ImportJobRecord(
+                service_name='spotify',
+                item_type='playlist',
+                item_id='retry-playlist',
+                user_id=user.id,
+                status='dead_letter',
+                attempt_count=3,
+                max_attempts=3,
+                error_message='manual review required',
+            )
+            db.session.add(record)
+            db.session.commit()
+            record_id = record.id
+
+        response = client.post(
+            f'/import/jobs/{record_id}/retry',
+            json={'reset_attempts': True},
+        )
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data['retried'] is True
+        assert data['job']['status'] == 'pending'
+        assert data['job']['attempt_count'] == 0
+
+    def test_retry_import_job_error_hides_automation_details(self, app, client, monkeypatch):
+        """Retry endpoint errors should not expose stored job/provider details."""
+        from musicround.routes.import_routes import automation
+
+        _login_admin(app, client)
+
+        def fail_retry(job_id, reset_attempts=False):
+            raise automation.AutomationError(
+                'retry provider failed token=retry-secret traceback',
+                details={'error_message': 'old provider token=retry-secret traceback'},
+            )
+
+        monkeypatch.setattr(automation, 'retry_import_job', fail_retry)
+
+        response = client.post('/import/jobs/123/retry', json={'reset_attempts': True})
+
+        body = response.get_data(as_text=True)
+        data = response.get_json()
+        assert response.status_code == 400
+        assert data == {
+            'error': 'Import job retry failed. Check the server logs.',
+            'code': 'import_job_retry_failed',
+        }
+        assert 'retry-secret' not in body
+        assert 'traceback' not in body
+
 
 class TestUserRoutesExtended:
     """Additional user route tests for more coverage."""
@@ -369,6 +522,18 @@ class TestUserRoutesExtended:
         _login(app, client)
         response = client.get('/users/edit-profile')
         assert response.status_code == 200
+
+    def test_edit_profile_error_ui_does_not_render_raw_provider_fields(self, app, client):
+        """The Dropbox folder-picker UI must not surface raw provider payloads."""
+        _login(app, client)
+
+        response = client.get('/users/edit-profile')
+
+        assert response.status_code == 200
+        assert b'error.data.traceback' not in response.data
+        assert b'error.data.raw_response' not in response.data
+        assert b'Traceback:' not in response.data
+        assert b'Raw Response:' not in response.data
 
     def test_change_password_accessible_when_logged_in(self, app, client):
         """Test change-password page loads for authenticated users."""

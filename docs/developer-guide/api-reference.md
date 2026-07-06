@@ -143,12 +143,16 @@ Returns a paginated list of songs in the user's library.
 
 **Query Parameters:**
 - `page`: Page number (default: 1)
-- `per_page`: Items per page (default: 20, max: 100)
-- `search`: Search term
-- `sort`: Sort field (title, artist, album, year)
-- `order`: Sort order (asc, desc)
-- `genre`: Filter by genre
+- `per_page`: Items per page (default: 50, max: 200)
+- `q` or `query`: Search term matched against title and artist
+- `sort`: Sort field (`artist`, `title`, `genre`, `year`, `used_count`, `last_used`, `id`)
+- `direction`: Sort direction (`asc`, `desc`). A leading `-` in `sort` also sorts descending.
+- `genre`: Filter by exact genre name, case-insensitive
 - `year`: Filter by year
+- `year_min`: Minimum release year
+- `year_max`: Maximum release year
+- `has_preview`: `true` for songs with any preview URL, `false` for songs with none
+- `unused_only`: `true` for songs with no prior round usage
 
 **Response:**
 ```json
@@ -159,20 +163,36 @@ Returns a paginated list of songs in the user's library.
       "id": 456,
       "title": "Song Title",
       "artist": "Artist Name",
-      "album": "Album Name",
       "year": 2010,
       "genre": "Rock",
+      "cover_url": "https://example.com/cover.jpg",
       "preview_url": "https://example.com/preview.mp3",
-      "spotify_id": "spotify:track:abcdef123456",
-      "duration_ms": 240000
+      "used_count": 0,
+      "last_used": null,
+      "source": "spotify",
+      "spotify_id": "abcdef123456",
+      "deezer_id": "123456"
     },
     // More songs...
   ],
   "pagination": {
     "page": 1,
-    "per_page": 20,
+    "per_page": 50,
     "total": 42,
-    "pages": 3
+    "pages": 1,
+    "has_next": false,
+    "has_prev": false
+  },
+  "filters": {
+    "query": "rock",
+    "genre": "Rock",
+    "year": null,
+    "year_min": "1990",
+    "year_max": "2000",
+    "has_preview": "true",
+    "unused_only": "true",
+    "sort": "artist",
+    "direction": "asc"
   }
 }
 ```
@@ -710,31 +730,32 @@ Import songs from a Spotify playlist.
 ### Health Check Endpoint
 
 ```
-GET /api/health
+GET /healthz
 ```
 
-Get system health information (admin only).
+Get public-safe uptime and dependency health information. This endpoint does
+not require login and must not expose tokens, passwords, or full database URIs.
 
 **Response:**
 ```json
 {
-  "status": "success",
-  "data": {
-    "version": "1.0.0",
-    "uptime": "5d 12h 37m",
+  "ok": true,
+  "status": "ok",
+  "version": "1.10.0",
+  "release": "Import Infrastructure",
+  "services": {
     "database": {
-      "status": "connected",
-      "size": "42MB",
-      "migrations": "up-to-date"
+      "status": "ok",
+      "ok": true,
+      "backend": "postgresql",
+      "database": "quizzicalbeats",
+      "host": "postgres.example",
+      "issues": []
     },
-    "storage": {
-      "available": "1.2GB",
-      "used": "345MB"
-    },
-    "services": {
-      "spotify": "connected",
-      "dropbox": "connected",
-      "email": "connected"
+    "artifact_storage": {
+      "status": "ok",
+      "ok": true,
+      "issues": []
     }
   }
 }

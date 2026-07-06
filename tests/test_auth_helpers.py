@@ -5,6 +5,8 @@ A provider's refresh response doesn't always include a new refresh_token
 update_oauth_tokens must not clobber a still-valid stored refresh token with
 None just because a given response happened to omit it.
 """
+from datetime import datetime, timedelta
+
 from musicround.helpers.auth_helpers import find_or_create_user, update_oauth_tokens
 from musicround.models import User, db
 
@@ -34,11 +36,30 @@ class TestUpdateOauthTokensPreservesRefreshToken:
             )
             assert user.spotify_refresh_token == 'new-refresh-token'
 
+    def test_spotify_expires_at_sets_expiry(self, app):
+        with app.app_context():
+            user = _make_user()
+            expires_at = int((datetime.now() + timedelta(hours=2)).timestamp())
+            update_oauth_tokens(
+                user,
+                {'access_token': 'new-access-token', 'expires_at': str(expires_at)},
+                'spotify',
+            )
+            assert int(user.spotify_token_expiry.timestamp()) == expires_at
+
     def test_dropbox_refresh_without_new_refresh_token_keeps_existing(self, app):
         with app.app_context():
             user = _make_user(dropbox_refresh_token='old-dropbox-refresh')
             update_oauth_tokens(user, {'access_token': 'new-token'}, 'dropbox')
             assert user.dropbox_refresh_token == 'old-dropbox-refresh'
+
+    def test_dropbox_expires_in_sets_expiry(self, app):
+        with app.app_context():
+            user = _make_user(dropbox_refresh_token='old-dropbox-refresh')
+            before = datetime.now()
+            update_oauth_tokens(user, {'access_token': 'new-token', 'expires_in': '3600'}, 'dropbox')
+            assert before + timedelta(minutes=55) <= user.dropbox_token_expiry
+            assert user.dropbox_token_expiry <= datetime.now() + timedelta(minutes=65)
 
     def test_google_refresh_without_new_refresh_token_keeps_existing(self, app):
         with app.app_context():

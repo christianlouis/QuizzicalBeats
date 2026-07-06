@@ -90,7 +90,7 @@ class SongModelView(AuthModelView):
             flash(f'Used count reset for {len(ids)} songs.', 'success')
         except Exception as ex:
             db.session.rollback()
-            flash(f'Error resetting used count: {str(ex)}', 'danger')
+            flash('Error resetting used count. Please try again or check the server logs.', 'danger')
 
 # Enhanced Round ModelView
 class RoundModelView(AuthModelView):
@@ -152,7 +152,7 @@ class UserModelView(AuthModelView):
             flash(f'Successfully activated {len(ids)} users.', 'success')
         except Exception as ex:
             db.session.rollback()
-            flash(f'Error activating users: {str(ex)}', 'danger')
+            flash('Error activating users. Please try again or check the server logs.', 'danger')
             
     @action('deactivate_users', 'Deactivate Users', 'Are you sure you want to deactivate selected users?')
     def action_deactivate_users(self, ids):
@@ -167,7 +167,7 @@ class UserModelView(AuthModelView):
             flash(f'Successfully deactivated {len(ids)} users.', 'success')
         except Exception as ex:
             db.session.rollback()
-            flash(f'Error deactivating users: {str(ex)}', 'danger')
+            flash('Error deactivating users. Please try again or check the server logs.', 'danger')
 
 # Enhanced Role ModelView
 class RoleModelView(AuthModelView):

@@ -1,6 +1,9 @@
 """Security tests for Flask-Admin views."""
 
-from musicround.models import SystemSetting, User, db
+from flask import get_flashed_messages
+
+from musicround.models import Song, SystemSetting, User, db
+from musicround.routes.db_admin import SongModelView, UserModelView
 
 
 SENSITIVE_USER_VALUES = [
@@ -87,3 +90,123 @@ def test_admin_system_settings_list_and_export_hide_values(app, client):
     _assert_values_absent(list_response, ['system-refresh-secret'])
     _assert_values_absent(details_response, ['system-refresh-secret'])
     _assert_values_absent(csv_export_response, ['system-refresh-secret'])
+
+
+def test_system_settings_page_hides_fallback_refresh_token_value(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    response = client.get('/users/system-settings')
+
+    assert response.status_code == 200
+    _assert_values_absent(response, ['system-refresh-secret'])
+    assert 'Refresh token stored' in response.get_data(as_text=True)
+
+
+def test_system_settings_empty_fallback_token_keeps_existing_value(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': '',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': 'DE',
+        'max_songs_per_round': '8',
+        'enable_public_rounds': 'true',
+        'allow_signups': 'true',
+    })
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == 'system-refresh-secret'
+        assert SystemSetting.get('spotify_region') == 'DE'
+
+
+def test_system_settings_can_replace_and_clear_fallback_refresh_token(app, client):
+    _login_admin(app, client)
+    with app.app_context():
+        SystemSetting.set('fallback_spotify_refresh_token', 'system-refresh-secret')
+
+    replace_response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': 'new-system-refresh-secret',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': '',
+        'max_songs_per_round': '8',
+        'allow_signups': 'true',
+    })
+
+    assert replace_response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == 'new-system-refresh-secret'
+
+    clear_response = client.post('/users/system-settings', data={
+        'fallback_spotify_refresh_token': '',
+        'clear_fallback_spotify_refresh_token': 'true',
+        'default_tts_service': '',
+        'default_tts_voice': '',
+        'default_tts_model': '',
+        'spotify_region': '',
+        'max_songs_per_round': '8',
+        'allow_signups': 'true',
+    })
+
+    assert clear_response.status_code == 302
+    with app.app_context():
+        assert SystemSetting.get('fallback_spotify_refresh_token') == ''
+
+
+def test_admin_song_action_failure_hides_exception_details(app, monkeypatch):
+    with app.app_context():
+        song = Song(title='Admin Action Song', artist='Admin Artist')
+        db.session.add(song)
+        db.session.commit()
+        song_id = song.id
+
+        def fail_commit():
+            raise RuntimeError('database down token=admin-song-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+        view = SongModelView(Song, db.session)
+
+        with app.test_request_context('/admin/song/action/'):
+            view.action_reset_used_count([song_id])
+            messages = get_flashed_messages(with_categories=True)
+
+    rendered = ' '.join(message for _, message in messages)
+    assert 'Error resetting used count. Please try again or check the server logs.' in rendered
+    assert 'database down' not in rendered
+    assert 'admin-song-secret' not in rendered
+    assert 'traceback' not in rendered
+
+
+def test_admin_user_action_failures_hide_exception_details(app, monkeypatch):
+    with app.app_context():
+        user = User(username='admin_action_user', email='admin_action_user@example.com')
+        user.password = 'AdminActionPass123!'
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+        def fail_commit():
+            raise RuntimeError('database down token=admin-user-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+        view = UserModelView(User, db.session)
+
+        with app.test_request_context('/admin/user/action/'):
+            view.action_activate_users([user_id])
+            view.action_deactivate_users([user_id])
+            messages = get_flashed_messages(with_categories=True)
+
+    rendered = ' '.join(message for _, message in messages)
+    assert 'Error activating users. Please try again or check the server logs.' in rendered
+    assert 'Error deactivating users. Please try again or check the server logs.' in rendered
+    assert 'database down' not in rendered
+    assert 'admin-user-secret' not in rendered
+    assert 'traceback' not in rendered

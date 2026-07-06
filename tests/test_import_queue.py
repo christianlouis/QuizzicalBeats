@@ -382,8 +382,47 @@ class TestImportWorker:
             assert updated.imported_count == 3
             assert updated.skipped_count == 1
 
-    def test_process_job_persists_failure_details(self, app):
-        """Test failed imports leave an actionable ImportJobRecord error."""
+    def test_process_job_summarizes_import_result_errors_safely(self, app):
+        """Completed imports should not persist raw provider result errors."""
+        with app.app_context():
+            user = User(username='resulterrorworker', email='resulterror@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='deezer',
+                item_type='playlist',
+                item_id='unsafe-result',
+                user_id=user.id,
+                priority=1,
+            )
+            record_id = record.id
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.return_value = {
+                    'imported_count': 2,
+                    'skipped_count': 0,
+                    'errors': [
+                        'provider token=secret first failure',
+                        'preview url=https://example.test/?access_token=secret',
+                    ],
+                }
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record_id)
+            assert updated.status == 'completed'
+            assert updated.imported_count == 2
+            assert updated.error_message == 'Import completed with 2 errors. Check the server logs.'
+            assert 'secret' not in updated.error_message
+            assert 'access_token' not in updated.error_message
+
+    def test_process_job_persists_safe_failure_summary(self, app):
+        """Failed imports should not persist provider exception details."""
         with app.app_context():
             user = User(username='failworker', email='failworker@example.com')
             user.password = 'WorkerPass123!'
@@ -408,9 +447,45 @@ class TestImportWorker:
                 worker._process_job(job)
 
             updated = ImportJobRecord.query.get(record_id)
-            assert updated.status == 'failed'
+            assert updated.status == 'pending'
+            assert updated.attempt_count == 1
             assert updated.completed_at is not None
-            assert 'Spotify exploded' in updated.error_message
+            assert 'Import job failed. Check the server logs.' in updated.error_message
+            assert 'retry queued' in updated.error_message
+            assert 'Spotify exploded' not in updated.error_message
+
+    def test_process_job_moves_to_dead_letter_after_max_attempts(self, app):
+        """Exhausted import jobs should stop retrying and require manual review."""
+        with app.app_context():
+            user = User(username='deadworker', email='deadworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='bad',
+                user_id=user.id,
+                priority=1,
+                max_attempts=1,
+            )
+            record_id = record.id
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.side_effect = RuntimeError('Spotify exploded')
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record_id)
+            assert updated.status == 'dead_letter'
+            assert updated.attempt_count == 1
+            assert 'manual review required' in updated.error_message
+            assert 'Import job failed. Check the server logs.' in updated.error_message
+            assert 'Spotify exploded' not in updated.error_message
 
     def test_process_job_unknown_user_does_not_import(self, app):
         """Test that jobs for missing users are ignored."""

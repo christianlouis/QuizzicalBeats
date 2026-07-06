@@ -1,7 +1,7 @@
 """
 Helpers for Dropbox API integration
 """
-from flask import current_app, url_for, redirect, session
+from flask import current_app, flash, url_for, redirect, session
 from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 from musicround.helpers.logging_utils import redact_authorization_header
 import requests
@@ -9,6 +9,17 @@ import json
 import os
 from datetime import datetime, timedelta
 from flask_login import current_user
+
+
+class DropboxTokenRevokedError(Exception):
+    """Raised when Dropbox reports a permanently invalid refresh token."""
+
+
+DROPBOX_REFRESH_ERROR_MESSAGE = 'Dropbox token refresh failed. Please try again later.'
+DROPBOX_UPLOAD_ERROR_MESSAGE = 'Dropbox upload failed. Please try again or reconnect Dropbox.'
+DROPBOX_SHARED_LINK_ERROR_MESSAGE = 'Dropbox shared-link creation failed. Please try again or reconnect Dropbox.'
+DROPBOX_API_TIMEOUT_SECONDS = 10
+
 
 def get_dropbox_auth_url():
     """Get the authorization URL for Dropbox OAuth flow"""
@@ -35,7 +46,15 @@ def exchange_code_for_token(code):
         'redirect_uri': redirect_uri
     }
     
-    response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data)
+    try:
+        response = requests.post(
+            'https://api.dropboxapi.com/oauth2/token',
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        current_app.logger.error(f"Network error exchanging Dropbox code for token: {e}")
+        return None
     
     if response.status_code == 200:
         return response.json()
@@ -44,7 +63,7 @@ def exchange_code_for_token(code):
         return None
 
 def refresh_dropbox_token(refresh_token):
-    """Refresh an expired Dropbox access token"""
+    """Refresh an expired Dropbox access token."""
     app_key = current_app.config.get('DROPBOX_APP_KEY')
     app_secret = current_app.config.get('DROPBOX_APP_SECRET')
     
@@ -55,28 +74,45 @@ def refresh_dropbox_token(refresh_token):
         'client_secret': app_secret
     }
     
-    response = requests.post('https://api.dropboxapi.com/oauth2/token', data=data)
+    try:
+        response = requests.post(
+            'https://api.dropboxapi.com/oauth2/token',
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        current_app.logger.error(f"Network error refreshing Dropbox token: {e}")
+        return None
     
     if response.status_code == 200:
         return response.json()
-    else:
-        current_app.logger.error(f"Error refreshing token: {response.text}")
-        return None
 
-def get_dropbox_user_info(access_token):
-    """Get user info from Dropbox API"""
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    response = requests.post('https://api.dropboxapi.com/2/users/get_current_account', headers=headers)
-    
-    if response.status_code == 200:
-        return response.json()
-    else:
-        current_app.logger.error(f"Error getting user info: {response.text}")
-        return None
+    if response.status_code == 400:
+        try:
+            error_body = response.json()
+        except ValueError:
+            error_body = {}
+        error_code = error_body.get('error')
+        if error_code in {'invalid_grant', 'invalid_request'}:
+            raise DropboxTokenRevokedError(
+                error_body.get('error_description', 'Dropbox refresh token is invalid or has been revoked')
+            )
+
+    current_app.logger.error(f"Error refreshing token: {response.text}")
+    return None
+
+
+def _clear_user_dropbox_tokens(user):
+    """Discard Dropbox credentials after Dropbox reports a permanent token failure."""
+    from musicround.models import db
+
+    user.dropbox_token = None
+    user.dropbox_refresh_token = None
+    user.dropbox_token_expiry = None
+    db.session.commit()
+    current_app.logger.warning(
+        f"Discarded revoked Dropbox refresh token for user {user.id}; user must reconnect Dropbox."
+    )
 
 def get_current_user_dropbox_token():
     """Get a valid Dropbox access token for the current user, refreshing if needed"""
@@ -96,7 +132,12 @@ def get_current_user_dropbox_token():
         from musicround.models import db
         
         # Try to refresh the token
-        token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
+        try:
+            token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
+        except DropboxTokenRevokedError:
+            _clear_user_dropbox_tokens(current_user)
+            flash("Your Dropbox connection has expired. Please reconnect Dropbox.", "warning")
+            return None
         
         if token_info and 'access_token' in token_info:
             # Update token in database
@@ -161,7 +202,8 @@ def upload_and_share(file_path, dropbox_path):
             response = requests.post(
                 'https://content.dropboxapi.com/2/files/upload',
                 headers=headers,
-                data=file_data
+                data=file_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             if response.status_code != 200:
@@ -191,7 +233,8 @@ def upload_and_share(file_path, dropbox_path):
         response = requests.post(
             'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         # If the link already exists, we'll get a 409 error with "shared_link_already_exists"
@@ -204,7 +247,8 @@ def upload_and_share(file_path, dropbox_path):
             list_response = requests.post(
                 'https://api.dropboxapi.com/2/sharing/list_shared_links',
                 headers=headers,
-                json=list_data
+                json=list_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             if list_response.status_code == 200:
@@ -225,12 +269,13 @@ def upload_and_share(file_path, dropbox_path):
         current_app.logger.error(f"Exception in upload_and_share: {str(e)}")
         return None
 
-def refresh_dropbox_token_if_needed(user):
+def refresh_dropbox_token_if_needed(user, force=False):
     """
     Check if user's Dropbox token needs refreshing and refresh it if needed
     
     Args:
         user: The User object with Dropbox token information
+        force: Refresh even when the stored expiry still looks valid.
         
     Returns:
         dict: {'success': True/False, 'message': 'success or error message'}
@@ -239,14 +284,26 @@ def refresh_dropbox_token_if_needed(user):
         return {'success': False, 'message': 'No Dropbox token available'}
     
     # If token is still valid, return success
-    if user.dropbox_token_expiry and user.dropbox_token_expiry > datetime.now() + timedelta(minutes=5):
+    if (
+        not force
+        and user.dropbox_token_expiry
+        and user.dropbox_token_expiry > datetime.now() + timedelta(minutes=5)
+    ):
         return {'success': True, 'message': 'Token is still valid'}
     
     # Token needs refreshing
     from musicround.models import db
     
     try:
-        token_info = refresh_dropbox_token(user.dropbox_refresh_token)
+        try:
+            token_info = refresh_dropbox_token(user.dropbox_refresh_token)
+        except DropboxTokenRevokedError:
+            _clear_user_dropbox_tokens(user)
+            return {
+                'success': False,
+                'message': 'Dropbox connection expired. Please reconnect Dropbox.',
+                'reconnect_required': True,
+            }
         
         if token_info and 'access_token' in token_info:
             # Update token in database
@@ -266,7 +323,7 @@ def refresh_dropbox_token_if_needed(user):
             
     except Exception as e:
         current_app.logger.error(f"Error refreshing Dropbox token: {str(e)}")
-        return {'success': False, 'message': f'Error refreshing token: {str(e)}'}
+        return {'success': False, 'message': DROPBOX_REFRESH_ERROR_MESSAGE}
 
 def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
     """
@@ -313,7 +370,8 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
         response = requests.post(
             'https://content.dropboxapi.com/2/files/upload',
             headers=headers,
-            data=data
+            data=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox upload response code: {response.status_code}")
@@ -333,7 +391,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
             
             return {
                 'success': False, 
-                'message': f"Error uploading file: {response.status_code} - {error_message}",
+                'message': DROPBOX_UPLOAD_ERROR_MESSAGE,
                 'status_code': response.status_code
             }
         
@@ -353,7 +411,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
         current_app.logger.error(traceback.format_exc())
         return {
             'success': False,
-            'message': f"Error uploading file: {str(e)}"
+            'message': DROPBOX_UPLOAD_ERROR_MESSAGE
         }
 
 def create_shared_link(access_token, dropbox_path):
@@ -395,7 +453,8 @@ def create_shared_link(access_token, dropbox_path):
         response = requests.post(
             'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Sharing API response code: {response.status_code}")
@@ -412,7 +471,8 @@ def create_shared_link(access_token, dropbox_path):
             list_response = requests.post(
                 'https://api.dropboxapi.com/2/sharing/list_shared_links',
                 headers=headers,
-                json=list_data
+                json=list_data,
+                timeout=DROPBOX_API_TIMEOUT_SECONDS,
             )
             
             current_app.logger.debug(f"List shared links response code: {list_response.status_code}")
@@ -457,7 +517,7 @@ def create_shared_link(access_token, dropbox_path):
         current_app.logger.error(f"Error creating shared link: {response.status_code} - {error_message}")
         return {
             'success': False,
-            'message': f"Error creating shared link: {response.status_code} - {error_message}",
+            'message': DROPBOX_SHARED_LINK_ERROR_MESSAGE,
             'status_code': response.status_code
         }
         
@@ -467,7 +527,7 @@ def create_shared_link(access_token, dropbox_path):
         current_app.logger.error(traceback.format_exc())
         return {
             'success': False,
-            'message': f"Error creating shared link: {str(e)}"
+            'message': DROPBOX_SHARED_LINK_ERROR_MESSAGE
         }
 
 def get_dropbox_account_info(access_token):
@@ -488,7 +548,8 @@ def get_dropbox_account_info(access_token):
         # According to the API documentation, this endpoint requires no request body
         response = requests.post(
             'https://api.dropboxapi.com/2/users/get_current_account',
-            headers=headers
+            headers=headers,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         if response.status_code == 200:

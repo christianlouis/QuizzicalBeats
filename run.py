@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 from musicround import create_app
 from musicround.version import get_version_str, VERSION_INFO
+import contextlib
+import json
 import os
 import sys
 import argparse
@@ -24,6 +26,14 @@ def main():
     # Retention policy action
     retention_parser = backup_subparsers.add_parser('retention', help='Apply backup retention policy')
     retention_parser.add_argument('--days', type=int, default=30, help='Number of days to keep backups')
+
+    database_parser = subparsers.add_parser('database', help='Database diagnostics')
+    database_subparsers = database_parser.add_subparsers(dest='database_action', help='Database action to perform')
+    database_subparsers.add_parser('status', help='Print the configured database backend without credentials')
+
+    health_parser = subparsers.add_parser('health', help='Health diagnostics')
+    health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
+    health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
     
     # Parse the arguments
     args = parser.parse_args()
@@ -50,6 +60,35 @@ def main():
                 else:
                     print(f"Retention policy failed: {result['message']}")
                     return 1
+    elif args.command == 'database':
+        from flask import Flask
+        from musicround import _configure_database_uri
+        from musicround.config import Config
+        from musicround.helpers.database_config import database_summary, is_legacy_data_sqlite_uri
+
+        app = Flask(__name__)
+        app.config.from_object(Config)
+        _configure_database_uri(app)
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
+        summary = database_summary(db_uri)
+        print(f"Database backend: {summary['backend']}")
+        print(f"Database target: {summary['redacted_uri']}")
+        print(f"Managed database required: {bool(app.config.get('DATABASE_REQUIRE_MANAGED'))}")
+        if is_legacy_data_sqlite_uri(db_uri):
+            print(
+                "Warning: legacy /data SQLite database is configured; "
+                "move SQLALCHEMY_DATABASE_URI to the managed database secret for production."
+            )
+        return 0
+    elif args.command == 'health':
+        with contextlib.redirect_stdout(sys.stderr):
+            app = create_app()
+        with app.app_context():
+            from musicround.helpers.service_health import application_health_payload
+
+            payload = application_health_payload()
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0 if payload["ok"] else 1
     else:
         # Default: Run the Flask app
         app = create_app()
@@ -71,10 +110,6 @@ def main():
     return 0
 
 if __name__ == '__main__':
-    # Display app version and release info
-    version = get_version_str()
-    print(f"Quizzical Beats {version}")
-    
     # Run the main function
     exit_code = main()
     sys.exit(exit_code)

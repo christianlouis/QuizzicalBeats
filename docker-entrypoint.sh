@@ -6,8 +6,15 @@ echo "Starting Flask application..."
 export PYTHONUNBUFFERED=1
 : "${FLASK_DEBUG:=0}"
 echo "Flask environment: $FLASK_ENV"
-echo "Database URI: $SQLALCHEMY_DATABASE_URI"
-echo "Database path: $DATABASE_PATH"
+mkdir -p "${ROUND_MP3_DIR:-/data/rounds}" "${ROUND_PDF_DIR:-/data/pdfs}"
+python - <<'PY'
+import os
+from musicround.helpers.database_config import database_summary
+
+summary = database_summary(os.environ.get("SQLALCHEMY_DATABASE_URI"))
+print(f"Database backend: {summary['backend']}")
+print(f"Database target: {summary['redacted_uri']}")
+PY
 
 if [ "${LOG_ENV:-0}" = "1" ]; then
   echo "Available non-sensitive environment variables:"

@@ -11,29 +11,295 @@ import zipfile
 import io
 import json
 
-from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash
+from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
-from musicround.models import Round, Song, db
+from sqlalchemy import or_
+from musicround.models import Round, RoundAudioScript, RoundExport, RoundShare, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.email_helper import send_email as send_quiz_email
+from musicround.helpers.storage_health import (
+    check_round_artifact_storage,
+    round_mp3_dir,
+    round_pdf_dir,
+)
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
+
+ROUND_MP3_BASE_AUDIO_ERROR = "Required round audio could not be loaded. Check the server logs."
+ROUND_MP3_NUMBER_AUDIO_ERROR = "Round number audio could not be loaded. Check the server logs."
+ROUND_MP3_PREVIEW_DOWNLOAD_ERROR = "Song preview audio could not be downloaded. Check the server logs."
+ROUND_MP3_PREVIEW_PROCESSING_ERROR = "Song preview audio could not be processed. Check the server logs."
+ROUND_MP3_EXPORT_ERROR = "MP3 generation failed. Check the server logs."
+ROUND_PDF_GENERATION_ERROR = "PDF generation failed. Check the server logs."
+
+
+def _int_arg(name, default=None, minimum=None, maximum=None):
+    raw_value = request.args.get(name)
+    if raw_value in (None, ''):
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _rounds_list_statuses(rounds):
+    """Build compact readiness and schedule metadata for the rounds list."""
+    round_ids = [round_.id for round_ in rounds]
+    scheduled_by_round = {}
+    latest_email_by_round = {}
+    if round_ids:
+        scheduled_exports = (
+            RoundExport.query
+            .filter(
+                RoundExport.round_id.in_(round_ids),
+                RoundExport.export_type == 'email',
+                RoundExport.status == 'scheduled',
+                RoundExport.scheduled_for.isnot(None),
+            )
+            .order_by(RoundExport.scheduled_for.asc(), RoundExport.id.asc())
+            .all()
+        )
+        for export in scheduled_exports:
+            scheduled_by_round.setdefault(export.round_id, export)
+        latest_email_exports = (
+            RoundExport.query
+            .filter(
+                RoundExport.round_id.in_(round_ids),
+                RoundExport.export_type == 'email',
+            )
+            .order_by(RoundExport.timestamp.desc(), RoundExport.id.desc())
+            .all()
+        )
+        for export in latest_email_exports:
+            latest_email_by_round.setdefault(export.round_id, export)
+
+    statuses = {}
+    for round_ in rounds:
+        stored_song_count = len(round_.song_id_list)
+        resolved_song_count = len(round_.song_list)
+        if stored_song_count != 8:
+            readiness = {
+                'label': f'Songs {stored_song_count}/8',
+                'color': 'red',
+                'hint': 'Rounds should contain exactly eight stored songs before delivery.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        elif resolved_song_count != stored_song_count:
+            readiness = {
+                'label': f'Resolves {resolved_song_count}/8',
+                'color': 'red',
+                'hint': 'One or more stored song IDs no longer resolve to songs.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        elif round_.mp3_generated and round_.pdf_generated:
+            readiness = {
+                'label': 'Assets ready',
+                'color': 'green',
+                'hint': 'MP3 and PDF have been generated.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        elif round_.mp3_generated or round_.pdf_generated:
+            readiness = {
+                'label': 'Partial assets',
+                'color': 'yellow',
+                'hint': 'Only one of MP3 or PDF has been generated.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+        else:
+            readiness = {
+                'label': 'Needs assets',
+                'color': 'gray',
+                'hint': 'Generate MP3 and PDF before delivery.',
+                'stored_song_count': stored_song_count,
+                'resolved_song_count': resolved_song_count,
+            }
+
+        scheduled_export = scheduled_by_round.get(round_.id)
+        if scheduled_export:
+            schedule = {
+                'label': 'Scheduled',
+                'color': 'blue',
+                'scheduled_for': scheduled_export.scheduled_for,
+                'destination': scheduled_export.destination,
+            }
+        else:
+            latest_email_export = latest_email_by_round.get(round_.id)
+            if latest_email_export and latest_email_export.status == 'success':
+                schedule = {
+                    'label': 'Email sent',
+                    'color': 'green',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            elif latest_email_export and latest_email_export.status == 'failed':
+                schedule = {
+                    'label': 'Email failed',
+                    'color': 'red',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            elif latest_email_export and latest_email_export.status in {'processing', 'pending'}:
+                schedule = {
+                    'label': latest_email_export.status.capitalize(),
+                    'color': 'yellow',
+                    'scheduled_for': latest_email_export.processed_at or latest_email_export.timestamp,
+                    'destination': latest_email_export.destination,
+                }
+            else:
+                schedule = {
+                    'label': 'Not scheduled',
+                    'color': 'gray',
+                    'scheduled_for': None,
+                    'destination': None,
+                }
+
+        statuses[round_.id] = {'readiness': readiness, 'schedule': schedule}
+    return statuses
+
+
+def _visible_rounds_query():
+    """Return rounds visible to the current authenticated user."""
+    query = Round.query
+    if current_user.is_admin:
+        return query
+    return query.filter(
+        or_(
+            Round.user_id == current_user.id,
+            Round.user_id.is_(None),
+            Round.visibility == 'public',
+            Round.shares.any(RoundShare.user_id == current_user.id),
+        )
+    )
+
+
+def _can_view_round(round_obj):
+    if current_user.is_admin:
+        return True
+    if round_obj.user_id is None:
+        return True
+    if round_obj.user_id == current_user.id:
+        return True
+    if round_obj.visibility == 'public':
+        return True
+    return round_obj.shares.filter_by(user_id=current_user.id).first() is not None
+
+
+def _can_edit_round(round_obj):
+    if current_user.is_admin:
+        return True
+    if round_obj.user_id is None:
+        return True
+    if round_obj.user_id == current_user.id:
+        return True
+    share = round_obj.shares.filter_by(user_id=current_user.id).first()
+    return bool(share and share.role == 'editor')
+
+
+def _get_visible_round_or_404(round_id):
+    round_obj = Round.query.get_or_404(round_id)
+    if not _can_view_round(round_obj):
+        abort(404)
+    return round_obj
+
+
+def _get_editable_round_or_404(round_id):
+    round_obj = _get_visible_round_or_404(round_id)
+    if not _can_edit_round(round_obj):
+        abort(403)
+    return round_obj
+
+
+def _storage_failure_response(round_id, storage_health, status_code=503):
+    """Return a consistent storage-health failure for route actions."""
+    hint = '; '.join(storage_health.get('hints') or [])
+    error_msg = "Round artifact storage is not ready."
+    if hint:
+        error_msg = f"{error_msg} {hint}"
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({
+            'success': False,
+            'error': error_msg,
+            'hint': hint,
+            'storage': storage_health,
+        }), status_code
+    flash(error_msg, 'error')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+def _round_generation_failure_response(round_id, log_message, user_message, status_code=500):
+    """Return safe render-generation errors while preserving details in logs."""
+    current_app.logger.error(log_message)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'success': False, 'error': user_message}), status_code
+    flash(user_message, 'error')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+def _selected_track_hint_audio(round_id):
+    """Load selected per-track hint audio keyed by one-based song position."""
+    hints = {}
+    scripts = (
+        RoundAudioScript.query.filter_by(
+            round_id=round_id,
+            script_type='track_hint',
+            selected=True,
+        )
+        .filter(RoundAudioScript.generated_mp3_path.isnot(None))
+        .order_by(RoundAudioScript.cue_position.asc(), RoundAudioScript.id.asc())
+        .all()
+    )
+    for script in scripts:
+        if not script.cue_position:
+            continue
+        path = os.path.join('/data', script.generated_mp3_path)
+        try:
+            hints[script.cue_position] = AudioSegment.from_mp3(path)
+        except Exception as exc:
+            current_app.logger.warning(
+                "Skipping track hint audio for round %s position %s: %s",
+                round_id,
+                script.cue_position,
+                exc,
+            )
+    return hints
 
 @rounds_bp.route('/')
 @login_required
 def rounds_list():
-    """Display a list of all rounds"""
-    rounds = Round.query.all()
-    return render_template('rounds.html', rounds=rounds)
+    """Display a paginated list of rounds."""
+    page = _int_arg('page', default=1, minimum=1)
+    per_page = _int_arg('per_page', default=25, minimum=1, maximum=100)
+    query = _visible_rounds_query().order_by(Round.created_at.desc(), Round.id.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    rounds = pagination.items
+    query_args = {'per_page': per_page}
+    return render_template(
+        'rounds.html',
+        rounds=rounds,
+        pagination=pagination,
+        query_args=query_args,
+        filters={'per_page': per_page},
+        round_statuses=_rounds_list_statuses(rounds),
+    )
 
 @rounds_bp.route('/<int:round_id>')
 @login_required
 def round_detail(round_id):
     """Display details of a specific round"""
-    rnd = Round.query.get(round_id)
+    rnd = _get_visible_round_or_404(round_id)
     
     if rnd:
         ordered_songs = rnd.song_list
@@ -60,7 +326,7 @@ def round_detail(round_id):
 @login_required
 def update_round_name(round_id):
     """Update the name of a round"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     round_name = request.form.get('round_name', '').strip()
     
     # Update the round name
@@ -74,7 +340,7 @@ def update_round_name(round_id):
 @login_required
 def update_round_songs(round_id):
     """Update the songs in a round (order, additions, removals)"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     song_order = request.form.get('song_order', '')
     
     if song_order:
@@ -103,7 +369,7 @@ def round_mp3(round_id):
         if not current_user.is_authenticated:
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-    round = Round.query.get_or_404(round_id)
+    round = _get_editable_round_or_404(round_id)
     song_ids = round.song_id_list
     if not song_ids:
         error_msg = 'Round contains no songs. Please add songs before generating an MP3.'
@@ -112,6 +378,10 @@ def round_mp3(round_id):
             return jsonify({'success': False, 'error': error_msg}), 400
         flash(error_msg, 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+    storage = check_round_artifact_storage(include_mp3=True, include_pdf=False)
+    if not storage['ok']:
+        return _storage_failure_response(round_id, storage)
     
     # Create a dict mapping song_id to Song object for all songs in the round
     songs_dict = {song.id: song for song in Song.query.filter(Song.id.in_(song_ids)).all()}
@@ -120,9 +390,7 @@ def round_mp3(round_id):
     songs = [songs_dict.get(song_id) for song_id in song_ids if songs_dict.get(song_id)]
 
     # Create a directory for rounds in /data if it doesn't exist
-    rounds_dir = '/data/rounds'
-    if not os.path.exists(rounds_dir):
-        os.makedirs(rounds_dir)
+    rounds_dir = round_mp3_dir()
 
     # Define the path for the MP3 file
     mp3_file_path = os.path.join(rounds_dir, f'round_{round_id}.mp3')
@@ -158,13 +426,11 @@ def round_mp3(round_id):
         
         current_app.logger.info(f"Using MP3 files - Intro: {intro_path}, Outro: {outro_path}, Replay: {replay_path}")
     except Exception as e:
-        error_msg = f"Error loading intro/outro/replay audio: {e}"
-        current_app.logger.error(error_msg)
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'success': False, 'error': error_msg})
-        else:
-            flash(error_msg, 'error')
-            return redirect(url_for('rounds.round_detail', round_id=round_id))
+        return _round_generation_failure_response(
+            round_id,
+            f"Error loading intro/outro/replay audio: {e}",
+            ROUND_MP3_BASE_AUDIO_ERROR,
+        )
 
     # Create an empty audio segment
     combined_audio = AudioSegment.empty()
@@ -175,6 +441,7 @@ def round_mp3(round_id):
         # Store song audio segments for later replay
         song_segments = []
         number_segments = []
+        hint_segments = _selected_track_hint_audio(round_id)
 
         # First pass - append each song's preview with number announcements
         for i, song in enumerate(songs):
@@ -183,13 +450,11 @@ def round_mp3(round_id):
                 number_audio = AudioSegment.from_mp3(number_audio_path)
                 number_segments.append(number_audio)
             except Exception as e:
-                error_msg = f"Error loading number audio {i+1}: {e}"
-                current_app.logger.error(error_msg)
-                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                    return jsonify({'success': False, 'error': error_msg})
-                else:
-                    flash(error_msg, 'error')
-                    return redirect(url_for('rounds.round_detail', round_id=round_id))
+                return _round_generation_failure_response(
+                    round_id,
+                    f"Error loading number audio {i+1}: {e}",
+                    ROUND_MP3_NUMBER_AUDIO_ERROR,
+                )
 
             if song.deezer_id:
                 try:
@@ -217,23 +482,21 @@ def round_mp3(round_id):
                     
                     # Add to the combined audio for first playthrough
                     combined_audio += number_audio
+                    if i + 1 in hint_segments:
+                        combined_audio += hint_segments[i + 1]
                     combined_audio += song_audio
                 except requests.exceptions.RequestException as e:
-                    error_msg = f"Error downloading {song.title} (Deezer ID: {song.deezer_id}): {e}"
-                    current_app.logger.error(error_msg)
-                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                        return jsonify({'success': False, 'error': error_msg})
-                    else:
-                        flash(error_msg, 'error')
-                        return redirect(url_for('rounds.round_detail', round_id=round_id))
+                    return _round_generation_failure_response(
+                        round_id,
+                        f"Error downloading {song.title} (Deezer ID: {song.deezer_id}): {e}",
+                        ROUND_MP3_PREVIEW_DOWNLOAD_ERROR,
+                    )
                 except Exception as e:
-                    error_msg = f"Error processing {song.title} (Deezer ID: {song.deezer_id}): {e}"
-                    current_app.logger.error(error_msg)
-                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                        return jsonify({'success': False, 'error': error_msg})
-                    else:
-                        flash(error_msg, 'error')
-                        return redirect(url_for('rounds.round_detail', round_id=round_id))
+                    return _round_generation_failure_response(
+                        round_id,
+                        f"Error processing {song.title} (Deezer ID: {song.deezer_id}): {e}",
+                        ROUND_MP3_PREVIEW_PROCESSING_ERROR,
+                    )
             else:
                 current_app.logger.warning(f"No Deezer ID available for {song.title}")
                 song_segments.append(None)
@@ -273,19 +536,18 @@ def round_mp3(round_id):
                 return send_file(mp3_file_path, as_attachment=True)
             
         except Exception as e:
-            error_msg = f"Error generating MP3 file: {e}"
-            current_app.logger.error(error_msg)
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({'success': False, 'error': error_msg})
-            else:
-                flash(error_msg, 'error')
-                return redirect(url_for('rounds.round_detail', round_id=round_id))
+            return _round_generation_failure_response(
+                round_id,
+                f"Error generating MP3 file: {e}",
+                ROUND_MP3_EXPORT_ERROR,
+            )
 
 @rounds_bp.route('/download/mp3/round_<int:round_id>', methods=['GET'])
 @login_required
 def download_mp3(round_id):
     """Download an MP3 file for a round"""
-    mp3_file_path = os.path.join('/data/rounds', f'round_{round_id}.mp3')
+    _get_visible_round_or_404(round_id)
+    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
     
     if not os.path.exists(mp3_file_path):
         flash('MP3 file not found. Please generate the MP3 first.', 'error')
@@ -297,7 +559,8 @@ def download_mp3(round_id):
 @login_required
 def download_pdf(round_id):
     """Download a PDF file for a round"""
-    pdf_file_path = os.path.join('/data/pdfs', f'round_{round_id}.pdf')
+    _get_visible_round_or_404(round_id)
+    pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
     
     if not os.path.exists(pdf_file_path):
         flash('PDF file not found. Please generate the PDF first.', 'error')
@@ -315,7 +578,7 @@ def generate_pdf(round_id):
         return 'Round not found'
 
     file_name = f'round_{round_id}.pdf'
-    dir_path = '/data/pdfs'  # Use /data/pdfs for storing PDFs
+    dir_path = round_pdf_dir()
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     file_path = os.path.join(dir_path, file_name)
@@ -505,9 +768,11 @@ def round_pdf(round_id):
         }), 400
     
     # Define path for the PDF file
-    pdfs_dir = '/data/pdfs'
-    if not os.path.exists(pdfs_dir):
-        os.makedirs(pdfs_dir)
+    storage = check_round_artifact_storage(include_mp3=False, include_pdf=True)
+    if not storage['ok']:
+        return _storage_failure_response(round_id, storage)
+
+    pdfs_dir = round_pdf_dir()
     pdf_file_path = os.path.join(pdfs_dir, f'round_{rnd.id}.pdf')
     
     # Check if the PDF has already been generated and if the file exists
@@ -553,9 +818,11 @@ def round_pdf(round_id):
             return send_file(pdf_file_path, as_attachment=True)
             
     except Exception as e:
-        error_msg = f"Error generating PDF file: {e}"
-        current_app.logger.error(error_msg)
-        return jsonify({'success': False, 'error': error_msg})
+        return _round_generation_failure_response(
+            round_id,
+            f"Error generating PDF file: {e}",
+            ROUND_PDF_GENERATION_ERROR,
+        )
 
 @rounds_bp.route('/<int:round_id>/mail', methods=['POST'])
 @login_required
@@ -569,7 +836,11 @@ def send_email(round_id):
             return jsonify({'error': 'Authentication required'}), 401
     
     # Check if the round exists
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
+
+    storage = check_round_artifact_storage(include_mp3=True, include_pdf=True)
+    if not storage['ok']:
+        return _storage_failure_response(round_id, storage)
     
     # Generate PDF
     pdf_data = generate_pdf(round_id)
@@ -584,7 +855,7 @@ def send_email(round_id):
         return redirect(url_for('rounds.round_detail', round_id=round_id))
     
     # Define the path for the MP3 file
-    mp3_file_path = os.path.join('/data/rounds', f'round_{round_id}.mp3')
+    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
     
     # Regenerate if the database marks the asset stale or the file is missing.
     if not rnd.mp3_generated or not os.path.exists(mp3_file_path):
@@ -682,16 +953,16 @@ def send_email(round_id):
 @login_required
 def delete_round(round_id):
     """Delete a round and its associated files"""
-    rnd = Round.query.get_or_404(round_id)
+    rnd = _get_editable_round_or_404(round_id)
     
     try:
         # Delete associated MP3 file if it exists
-        mp3_file_path = os.path.join('/data/rounds', f'round_{round_id}.mp3')
+        mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
         if os.path.exists(mp3_file_path):
             os.remove(mp3_file_path)
             
         # Delete associated PDF file if it exists
-        pdf_file_path = os.path.join('/data/pdfs', f'round_{round_id}.pdf')
+        pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
         if os.path.exists(pdf_file_path):
             os.remove(pdf_file_path)
         
@@ -703,9 +974,10 @@ def delete_round(round_id):
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error deleting round: {e}")
-        flash(f"Error deleting round: {e}", 'error')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error(f"Error deleting round {round_id}: {e}", exc_info=True)
+        error_msg = "Unable to delete the round. Please try again later or contact an administrator."
+        flash(error_msg, 'error')
+        return jsonify({'success': False, 'error': error_msg}), 500
 
 @rounds_bp.route('/<int:round_id>/export-to-dropbox', methods=['POST'])
 @login_required
@@ -714,12 +986,16 @@ def export_to_dropbox(round_id):
     Export a round to the user's Dropbox account, including metadata and optionally MP3 files
     """
     current_app.logger.info(f"Starting Dropbox export for round ID {round_id} by user {current_user.username}")
-    round_obj = Round.query.get_or_404(round_id)
+    round_obj = _get_visible_round_or_404(round_id)
     
     # Properly parse boolean parameters from form data
     include_mp3s = request.form.get('include_mp3s', 'true').lower() == 'true'
     include_pdf = request.form.get('include_pdf', 'true').lower() == 'true'
     custom_folder = request.form.get('custom_folder', '')
+
+    storage = check_round_artifact_storage(include_mp3=include_mp3s, include_pdf=include_pdf)
+    if not storage['ok']:
+        return _storage_failure_response(round_id, storage)
     
     current_app.logger.debug(f"Export options - Include MP3: {include_mp3s}, Include PDF: {include_pdf}, Custom folder: '{custom_folder}'")
     
@@ -884,7 +1160,7 @@ def export_to_dropbox(round_id):
                     raise Exception(f"Error generating PDF: {pdf_data}")
             else:
                 # PDF already exists, read it
-                pdf_file_path = os.path.join('/data/pdfs', f'round_{round_id}.pdf')
+                pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
                 current_app.logger.debug(f"Reading existing PDF from {pdf_file_path}")
                 
                 if not os.path.exists(pdf_file_path):
@@ -925,7 +1201,7 @@ def export_to_dropbox(round_id):
             current_app.logger.info(f"MP3 export requested for round {round_id}")
             
             # Check if MP3 exists, generate if not
-            mp3_file_path = os.path.join('/data/rounds', f'round_{round_id}.mp3')
+            mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
             current_app.logger.debug(f"Checking for MP3 at {mp3_file_path}")
             current_app.logger.debug(f"MP3 generated flag: {round_obj.mp3_generated}")
             
@@ -985,119 +1261,28 @@ def export_to_dropbox(round_id):
         return jsonify(response_data)
         
     except Exception as e:
-        current_app.logger.error(f"Error exporting round {round_id} to Dropbox: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error exporting round {round_id} to Dropbox: {str(e)}",
+            exc_info=True,
+        )
+        if str(e) == 'Round contains no songs':
+            error_msg = 'Round contains no songs'
+        else:
+            error_msg = (
+                "Round export to Dropbox failed. "
+                "Please try again later or reconnect Dropbox."
+            )
         
         # Update export record with error
         round_export.status = 'failed'
-        round_export.error_message = str(e)
+        round_export.error_message = error_msg
         db.session.commit()
         
         # Error response
         response_data['success'] = False
-        response_data['message'] = f"Error exporting to Dropbox: {str(e)}"
+        response_data['message'] = error_msg
         
         return jsonify(response_data)
-
-def generate_round_text(round_obj):
-    """Generate a text representation of a round"""
-    lines = [
-        f"ROUND: {round_obj.title}",
-        f"Created: {round_obj.created_at.strftime('%Y-%m-%d')}",
-        f"Creator: {round_obj.user.username if round_obj.user else 'Unknown'}",
-        "",
-        f"Description: {round_obj.description or 'No description'}",
-        "",
-        "SONGS:",
-        ""
-    ]
-    
-    for idx, song in enumerate(round_obj.songs, 1):
-        lines.append(f"{idx}. {song.title} - {song.artist}")
-        if song.year:
-            lines.append(f"   Year: {song.year}")
-        if song.album:
-            lines.append(f"   Album: {song.album}")
-        lines.append("")
-    
-    return "\n".join(lines)
-
-def generate_round_pdf(round_obj):
-    """Generate a PDF representation of a round"""
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from io import BytesIO
-        
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-        
-        # Create custom styles
-        styles.add(ParagraphStyle(
-            name='Title',
-            parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=12
-        ))
-        
-        styles.add(ParagraphStyle(
-            name='SongTitle',
-            parent=styles['Normal'],
-            fontSize=12,
-            fontName='Helvetica-Bold'
-        ))
-        
-        # Build the document content
-        content = []
-        
-        # Round title
-        content.append(Paragraph(f"Round: {round_obj.title}", styles['Title']))
-        content.append(Spacer(1, 12))
-        
-        # Round info
-        content.append(Paragraph(f"Created: {round_obj.created_at.strftime('%Y-%m-%d')}", styles['Normal']))
-        content.append(Paragraph(f"Creator: {round_obj.user.username if round_obj.user else 'Unknown'}", styles['Normal']))
-        content.append(Spacer(1, 12))
-        
-        # Description
-        if round_obj.description:
-            content.append(Paragraph("Description:", styles['Heading3']))
-            content.append(Paragraph(round_obj.description, styles['Normal']))
-            content.append(Spacer(1, 12))
-        
-        # Songs
-        content.append(Paragraph("Songs:", styles['Heading3']))
-        content.append(Spacer(1, 6))
-        
-        for idx, song in enumerate(round_obj.songs, 1):
-            content.append(Paragraph(f"{idx}. {song.title} - {song.artist}", styles['SongTitle']))
-            
-            # Song details
-            details = []
-            if song.year:
-                details.append(f"Year: {song.year}")
-            if song.album:
-                details.append(f"Album: {song.album}")
-                
-            if details:
-                content.append(Paragraph(", ".join(details), styles['Normal']))
-            
-            content.append(Spacer(1, 6))
-        
-        # Build and return the PDF
-        doc.build(content)
-        pdf_data = buffer.getvalue()
-        buffer.close()
-        return pdf_data
-        
-    except ImportError:
-        current_app.logger.warning("ReportLab not installed, skipping PDF export")
-        return None
-    except Exception as e:
-        current_app.logger.error(f"Error generating PDF: {str(e)}")
-        return None
 
 def safe_filename(filename):
     """Convert a string to a safe filename"""

@@ -5,6 +5,7 @@ import json
 import time
 import random
 from datetime import datetime  # Add datetime import
+from urllib.parse import urlsplit
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
 from flask_login import current_user, login_required
 from musicround.models import Song, db
@@ -12,8 +13,97 @@ from musicround.routes.import_songs import import_pl
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.services import automation
 
 import_bp = Blueprint('import', __name__, url_prefix='/import')
+_DIRECT_SPOTIFY_SESSION_KEYS = (
+    'direct_bearer_token',
+    'direct_spotify_user',
+    'direct_spotify_username',
+)
+SPOTIFY_OFFICIAL_ACCOUNTS = (
+    'spotify',
+    'spotifycharts',
+    'spotifymaps',
+    'spotifyuk',
+    'spotifyusa',
+    'spotify_germany',
+)
+
+
+def _clear_direct_spotify_session():
+    """Remove temporary direct Spotify credentials from the browser session."""
+    for key in _DIRECT_SPOTIFY_SESSION_KEYS:
+        session.pop(key, None)
+
+
+def _safe_return_url(value, fallback_endpoint='import.direct_official_playlists'):
+    """Allow only local relative redirects from import forms."""
+    fallback = url_for(fallback_endpoint)
+    if not value:
+        return fallback
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if not value.startswith('/') or value.startswith('//') or '\n' in value or '\r' in value:
+        return fallback
+    return value
+
+
+def _bounded_query_int(name, default, minimum=None, maximum=None):
+    """Read a query integer without letting diagnostics 500 on bad input."""
+    raw_value = request.args.get(name)
+    try:
+        value = int(raw_value) if raw_value is not None else default
+    except (TypeError, ValueError):
+        current_app.logger.warning("Invalid %s query parameter for Spotify diagnostics.", name)
+        value = default
+
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _spotify_diagnostic_account(default='spotify'):
+    """Return an allowed official Spotify account for diagnostic routes."""
+    account = request.args.get('account', default)
+    if account in SPOTIFY_OFFICIAL_ACCOUNTS:
+        return account
+    current_app.logger.warning("Invalid Spotify diagnostics account requested.")
+    return default
+
+
+def _validate_direct_spotify_token(bearer_token):
+    """Validate a manually supplied direct Spotify bearer token."""
+    from musicround.helpers.spotify_direct import SpotifyDirectClient
+
+    client = SpotifyDirectClient(bearer_token=bearer_token)
+    result = client._make_api_request("me")
+    if result and result.get('id'):
+        return result
+    return None
+
+
+def _store_direct_spotify_session(bearer_token, user_info):
+    """Persist direct Spotify token metadata after validation has succeeded."""
+    session['direct_bearer_token'] = bearer_token
+    session['direct_spotify_user'] = user_info['id']
+    session['direct_spotify_username'] = user_info.get('display_name') or user_info['id']
+
+
+def _require_import_diagnostics_admin():
+    """Restrict raw Spotify diagnostic views to admins."""
+    if current_user.is_admin:
+        return None
+    flash('Admin access required for Spotify diagnostics.', 'danger')
+    return redirect(url_for('core.view_songs'))
+
+
+def _safe_spotify_diagnostic_error(client_name='Spotify'):
+    """Return a browser-safe diagnostic error message."""
+    return f"{client_name} diagnostic check failed. Check the server logs."
 
 def fetch_all_user_playlists(oauth_client, token, user_id, limit=50):
     """
@@ -127,6 +217,7 @@ def filter_playlists_by_keywords(playlists, keywords, debug_info=None):
     return filtered
 
 @import_bp.route('/official-playlists', methods=['GET', 'POST'])
+@login_required
 def import_official_playlists():
     """Display and import official Spotify playlists from multiple regional accounts"""
     # Resolve the best available Spotify token: a manually-supplied bearer token
@@ -182,14 +273,7 @@ def import_official_playlists():
     filter_keywords = [k.strip() for k in filter_keywords if k.strip()]
     
     # List of official Spotify user accounts to fetch playlists from
-    spotify_accounts = [
-        'spotify',
-        'spotifycharts',
-        'spotifymaps', 
-        'spotifyuk',
-        'spotifyusa', 
-        'spotify_germany'
-    ]
+    spotify_accounts = list(SPOTIFY_OFFICIAL_ACCOUNTS)
     
     # Get selected account from query string or default to all
     selected_account = request.args.get('account', 'all')
@@ -271,8 +355,6 @@ def import_official_playlists():
     if not all_playlists:
         flash('No Spotify playlists found matching your criteria', 'warning')
     
-    # Get the bearer token from the session to display in the form
-    session_bearer_token = session.get('direct_bearer_token', '')
     spotify_username = session.get('direct_spotify_username')
     
     return render_template(
@@ -283,12 +365,13 @@ def import_official_playlists():
         spotify_accounts=spotify_accounts,
         debug_info=debug_info,
         debug_mode=debug_mode,
-        session_bearer_token=session_bearer_token,
+        has_direct_bearer_token=bool(session.get('direct_bearer_token')),
         spotify_username=spotify_username,
         direct_mode=False
     )
 
 @import_bp.route('/direct-official-playlists', methods=['GET', 'POST'])
+@login_required
 def direct_official_playlists():
     """Display and import official Spotify playlists using the direct client with bearer token"""
     # Check if user has provided a bearer token
@@ -334,14 +417,7 @@ def direct_official_playlists():
     filter_keywords = [k.strip() for k in filter_keywords if k.strip()]
     
     # List of official Spotify user accounts to fetch playlists from
-    spotify_accounts = [
-        'spotify',
-        'spotifycharts',
-        'spotifymaps', 
-        'spotifyuk',
-        'spotifyusa', 
-        'spotify_germany'
-    ]
+    spotify_accounts = list(SPOTIFY_OFFICIAL_ACCOUNTS)
     
     # Get selected account from query string or default to all
     selected_account = request.args.get('account', 'all')
@@ -444,7 +520,7 @@ def direct_official_playlists():
         current_app.logger.error(f"Error fetching official playlists with direct client: {e}")
         import traceback
         current_app.logger.error(traceback.format_exc())
-        flash(f'Error retrieving playlists from Spotify: {str(e)}', 'danger')
+        flash('Error retrieving playlists from Spotify. Please refresh your Spotify token and try again.', 'danger')
         all_playlists = []
     
     # Handle empty result
@@ -460,14 +536,17 @@ def direct_official_playlists():
         debug_info=debug_info,
         debug_mode=debug_mode,
         direct_mode=True,
+        has_direct_bearer_token=True,
         spotify_username=session.get('direct_spotify_username')
     )
 
 @import_bp.route('/test-spotify-client', methods=['GET'])
+@login_required
 def test_spotify_client():
     """Test route to compare different Spotify client implementations"""
-    if 'access_token' not in session:
-        return redirect(url_for('users.login'))
+    admin_response = _require_import_diagnostics_admin()
+    if admin_response:
+        return admin_response
     
     # Get Spotify account to check from query parameters
     account = request.args.get('account', 'spotify')
@@ -525,7 +604,7 @@ def test_spotify_client():
         import traceback
         current_app.logger.error(f"Error testing spotipy: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['spotipy']['error'] = str(e)
+        results['spotipy']['error'] = _safe_spotify_diagnostic_error('Spotify')
     
     # Test direct implementation
     try:
@@ -554,7 +633,7 @@ def test_spotify_client():
         import traceback
         current_app.logger.error(f"Error testing direct client: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['direct']['error'] = str(e)
+        results['direct']['error'] = _safe_spotify_diagnostic_error('Direct Spotify')
     
     # Compare playlists between implementations
     comparison = {
@@ -585,20 +664,19 @@ def test_spotify_client():
     )
 
 @import_bp.route('/raw-playlists', methods=['GET'])
+@login_required
 def get_raw_playlists():
     """
     Get raw playlists from Spotify without any pagination logic.
     This helps diagnose issues with the playlist retrieval.
     """
-    if 'access_token' not in session:
-        return redirect(url_for('users.login'))
+    admin_response = _require_import_diagnostics_admin()
+    if admin_response:
+        return admin_response
     
-    # Get Spotify account to check
-    account = request.args.get('account', 'spotify')
-    # Get limit parameter (max 50)
-    limit = min(int(request.args.get('limit', '50')), 50)
-    # Get offset parameter
-    offset = int(request.args.get('offset', '0'))
+    account = _spotify_diagnostic_account()
+    limit = _bounded_query_int('limit', default=50, minimum=1, maximum=50)
+    offset = _bounded_query_int('offset', default=0, minimum=0)
     
     results = {
         'spotipy': {
@@ -611,17 +689,32 @@ def get_raw_playlists():
         }
     }
     
-    # Test spotipy raw response
+    # Test Authlib Spotify raw response
     try:
-        sp = current_app.config['sp']
-        current_app.logger.info(f"Getting raw playlists with spotipy for {account}, limit={limit}, offset={offset}")
-        raw_result = sp.user_playlists(account, limit=limit, offset=offset)
-        results['spotipy']['raw_response'] = raw_result
+        access_token, token_source = get_spotify_token()
+        if not access_token:
+            results['spotipy']['error'] = "No Spotify token available."
+        else:
+            token = {'access_token': access_token, 'token_type': 'Bearer'}
+            current_app.logger.info(
+                "Getting raw playlists with Authlib Spotify client for %s, limit=%s, offset=%s, source=%s",
+                account,
+                limit,
+                offset,
+                token_source,
+            )
+            response = oauth.spotify.get(
+                f'users/{account}/playlists',
+                params={'limit': limit, 'offset': offset},
+                token=token,
+            )
+            response.raise_for_status()
+            results['spotipy']['raw_response'] = response.json()
     except Exception as e:
         import traceback
-        current_app.logger.error(f"Error getting raw spotipy playlists: {e}")
+        current_app.logger.error(f"Error getting raw Spotify playlists: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['spotipy']['error'] = str(e)
+        results['spotipy']['error'] = _safe_spotify_diagnostic_error('Spotify')
     
     # Test direct API raw response
     try:
@@ -641,7 +734,7 @@ def get_raw_playlists():
         import traceback
         current_app.logger.error(f"Error getting raw direct playlists: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['direct']['error'] = str(e)
+        results['direct']['error'] = _safe_spotify_diagnostic_error('Direct Spotify')
     
     # Add direct auth link to template data
     direct_auth_url = url_for('import.direct_spotify_auth')
@@ -657,6 +750,7 @@ def get_raw_playlists():
     )
 
 @import_bp.route('/direct-auth', methods=['GET', 'POST'])
+@login_required
 def direct_spotify_auth():
     """
     Allow users to manually enter a Spotify bearer token for direct API access.
@@ -666,28 +760,20 @@ def direct_spotify_auth():
     success = None
     
     if request.method == 'POST':
-        bearer_token = request.form.get('bearer_token')
+        bearer_token = request.form.get('bearer_token', '').strip()
         if bearer_token:
             try:
-                # Store the token in session
-                session['direct_bearer_token'] = bearer_token
-                
-                # Test the token with a simple request
-                from musicround.helpers.spotify_direct import SpotifyDirectClient
-                client = SpotifyDirectClient(bearer_token=bearer_token)
-                
-                # Try to get current user info as a test
-                result = client._make_api_request("me")
-                
+                result = _validate_direct_spotify_token(bearer_token)
                 if result and 'id' in result:
-                    session['direct_spotify_user'] = result['id']
-                    session['direct_spotify_username'] = result.get('display_name', result['id'])
+                    _store_direct_spotify_session(bearer_token, result)
                     success = f"Successfully authenticated as {session['direct_spotify_username']}"
                 else:
+                    _clear_direct_spotify_session()
                     error = "Token validation failed. Please check the token and try again."
             except Exception as e:
                 current_app.logger.error(f"Error validating bearer token: {e}")
-                error = f"Error: {str(e)}"
+                _clear_direct_spotify_session()
+                error = "Token validation failed. Please check the token and try again."
         else:
             error = "No bearer token provided"
             
@@ -704,88 +790,76 @@ def direct_spotify_auth():
     )
 
 @import_bp.route('/update-direct-token', methods=['POST'])
+@login_required
 def update_direct_token():
     """Update the direct bearer token and redirect back to the referring page"""
     # Get return URL from form or default to playlist page
-    return_url = request.form.get('return_url') or url_for('import.direct_official_playlists')
+    return_url = _safe_return_url(request.form.get('return_url'))
     
     # Check if clearing token was requested
     if request.form.get('clear_token'):
-        session.pop('direct_bearer_token', None)
-        session.pop('direct_spotify_user', None)
-        session.pop('direct_spotify_username', None)
+        _clear_direct_spotify_session()
         flash('Bearer token cleared successfully', 'success')
         return redirect(return_url)
     
     # Get bearer token from form
-    bearer_token = request.form.get('bearer_token')
+    bearer_token = request.form.get('bearer_token', '').strip()
     if not bearer_token:
         flash('No bearer token provided', 'warning')
         return redirect(return_url)
     
     try:
-        # Store the token in session
-        session['direct_bearer_token'] = bearer_token
-        
-        # Test the token with a simple request
-        from musicround.helpers.spotify_direct import SpotifyDirectClient
-        client = SpotifyDirectClient(bearer_token=bearer_token)
-        
-        # Try to get current user info as a test
-        result = client._make_api_request("me")
-        
+        result = _validate_direct_spotify_token(bearer_token)
         if result and 'id' in result:
-            session['direct_spotify_user'] = result['id']
-            session['direct_spotify_username'] = result.get('display_name', result['id'])
+            _store_direct_spotify_session(bearer_token, result)
             flash(f'Successfully authenticated as {session["direct_spotify_username"]}', 'success')
         else:
+            _clear_direct_spotify_session()
             flash('Token validation failed. Please check the token and try again.', 'error')
     except Exception as e:
         current_app.logger.error(f"Error validating bearer token: {e}")
-        flash(f'Error validating token: {str(e)}', 'error')
+        _clear_direct_spotify_session()
+        flash('Token validation failed. Please check the token and try again.', 'error')
     
     return redirect(return_url)
 
 
-@import_bp.route('/queue-status')
-@login_required
-def queue_status():
-    """
-    Display real-time status of the import queue for administrators
-    """
-    # Check if user is an admin
-    if not current_user.is_admin:
-        flash('Admin access required for Import Queue view.', 'danger')
-        return redirect(url_for('core.index'))
-        
-    # Helper function to get current time
-    from datetime import datetime
-    def now():
-        return datetime.utcnow()
-    
-    # Get the import queue from app config
-    queue = current_app.config.get('import_queue')
-    if not queue:
-        flash("Import queue not initialized.", "danger")
-        return redirect(url_for('core.view_songs'))
-    
+def _import_job_payload(job):
+    """Serialize an import job record for polling APIs."""
+    return {
+        'id': job.id,
+        'service_name': job.service_name,
+        'item_type': job.item_type,
+        'item_id': job.item_id,
+        'priority': job.priority,
+        'user_id': job.user_id,
+        'status': job.status,
+        'created_at': job.created_at.isoformat() if job.created_at else None,
+        'started_at': job.started_at.isoformat() if job.started_at else None,
+        'completed_at': job.completed_at.isoformat() if job.completed_at else None,
+        'duration': job.duration,
+        'error_message': job.error_message,
+        'imported_count': job.imported_count or 0,
+        'skipped_count': job.skipped_count or 0,
+        'attempt_count': job.attempt_count or 0,
+        'max_attempts': job.max_attempts or 3,
+        'item_url': job.item_url,
+    }
+
+
+def _import_queue_status_data(queue):
+    """Collect queue status once for both HTML and JSON views."""
     local_queue_size = queue.qsize()
     queue_snapshot = queue.snapshot()
-    
-    # Get active and recent jobs from database if available
     active_jobs = []
     pending_jobs = []
     recent_jobs = []
     queue_size = local_queue_size
-    
-    # Check if ImportJobRecord is defined
+
     try:
         from musicround.models import ImportJobRecord
-        
-        # Get last 50 jobs from the database, sorted by most recent first
+
         recent_jobs = ImportJobRecord.query.order_by(ImportJobRecord.created_at.desc()).limit(50).all()
-        
-        # Get the active jobs (status='processing')
         active_jobs = ImportJobRecord.query.filter_by(status='processing').all()
         pending_jobs = (
             ImportJobRecord.query.filter_by(status='pending')
@@ -812,6 +886,8 @@ def queue_status():
                 'item_id': job.item_id,
                 'user_id': job.user_id,
                 'record_id': job.id,
+                'attempt_count': job.attempt_count or 0,
+                'max_attempts': job.max_attempts or 3,
             })
         queue_snapshot.sort(
             key=lambda job: (
@@ -822,18 +898,16 @@ def queue_status():
             )
         )
     except (ImportError, AttributeError):
-        # ImportJobRecord might not be defined yet, handle this case
         pass
-    
-    # Get some basic stats
+
     stats = {
         'queue_size': queue_size,
         'active_jobs': len(active_jobs),
         'completed_today': 0,
-        'failed_today': 0
+        'failed_today': 0,
+        'dead_letter_jobs': 0,
     }
-    
-    # If we have ImportJobRecord, get some stats
+
     if recent_jobs:
         import datetime
         today = datetime.datetime.utcnow().date()
@@ -843,13 +917,98 @@ def queue_status():
                     stats['completed_today'] += 1
                 elif job.status == 'failed':
                     stats['failed_today'] += 1
+                elif job.status == 'dead_letter':
+                    stats['dead_letter_jobs'] += 1
+
+    return {
+        'stats': stats,
+        'active_jobs': active_jobs,
+        'recent_jobs': recent_jobs,
+        'queue_snapshot': queue_snapshot,
+    }
+
+
+def _require_import_queue_admin():
+    """Return the configured import queue or a Flask response for common failures."""
+    if not current_user.is_admin:
+        return None, redirect(url_for('core.index'))
+
+    queue = current_app.config.get('import_queue')
+    if not queue:
+        return None, redirect(url_for('core.view_songs'))
+    return queue, None
+
+
+@import_bp.route('/queue-status')
+@login_required
+def queue_status():
+    """
+    Display real-time status of the import queue for administrators
+    """
+    # Check if user is an admin
+    queue, failure_response = _require_import_queue_admin()
+    if failure_response:
+        if not current_user.is_admin:
+            flash('Admin access required for Import Queue view.', 'danger')
+        else:
+            flash("Import queue not initialized.", "danger")
+        return failure_response
+
+    # Helper function to get current time
+    from datetime import datetime
+    def now():
+        return datetime.utcnow()
+
+    data = _import_queue_status_data(queue)
 
     return render_template(
         'import_queue_status.html',
-        stats=stats,
-        active_jobs=active_jobs,
-        recent_jobs=recent_jobs,
-        queue_snapshot=queue_snapshot,
+        stats=data['stats'],
+        active_jobs=data['active_jobs'],
+        recent_jobs=data['recent_jobs'],
+        queue_snapshot=data['queue_snapshot'],
         queue=queue,
         now=now
     )
+
+
+@import_bp.route('/queue-status.json')
+@login_required
+def queue_status_json():
+    """Return import queue status for polling clients and MCP workflows."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    queue = current_app.config.get('import_queue')
+    if not queue:
+        return jsonify({'error': 'Import queue not initialized'}), 503
+
+    data = _import_queue_status_data(queue)
+    return jsonify({
+        'stats': data['stats'],
+        'queue': data['queue_snapshot'],
+        'active_jobs': [_import_job_payload(job) for job in data['active_jobs']],
+        'recent_jobs': [_import_job_payload(job) for job in data['recent_jobs']],
+    })
+
+
+@import_bp.route('/jobs/<int:job_id>/retry', methods=['POST'])
+@login_required
+def retry_import_job(job_id):
+    """Retry a failed or dead-letter import job from the admin queue view."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    reset_attempts = request.form.get('reset_attempts') == '1'
+    if request.is_json:
+        reset_attempts = bool((request.get_json(silent=True) or {}).get('reset_attempts'))
+
+    try:
+        result = automation.retry_import_job(job_id, reset_attempts=reset_attempts)
+    except automation.AutomationError as exc:
+        current_app.logger.error("Import job retry failed for job %s: %s", job_id, exc, exc_info=True)
+        return jsonify({
+            'error': 'Import job retry failed. Check the server logs.',
+            'code': 'import_job_retry_failed',
+        }), 400
+    return jsonify(result)

@@ -19,18 +19,55 @@ SENSITIVE_FORM_FIELD_PARTS = (
     'private_key',
 )
 REDACTED_VALUE = '[redacted]'
+SENSITIVE_HEADER_NAMES = {
+    'authorization',
+    'cookie',
+    'proxy-authorization',
+    'set-cookie',
+}
+
+
+def _is_sensitive_key(key):
+    normalized_key = str(key).lower()
+    normalized_field_key = normalized_key.replace('-', '_').replace(' ', '_')
+    return (
+        normalized_key in SENSITIVE_HEADER_NAMES
+        or any(
+            part in normalized_key or part in normalized_field_key
+            for part in SENSITIVE_FORM_FIELD_PARTS
+        )
+    )
 
 
 def redact_sensitive_form_data(form_data):
     """Return form data with credentials and secret-like fields redacted."""
     redacted = {}
     for key, value in form_data.items():
-        normalized_key = key.lower()
-        if any(part in normalized_key for part in SENSITIVE_FORM_FIELD_PARTS):
+        if _is_sensitive_key(key):
             redacted[key] = REDACTED_VALUE
         else:
             redacted[key] = value
     return redacted
+
+
+def redact_sensitive_payload(payload):
+    """Recursively redact secret-like fields in request debug payloads."""
+    if isinstance(payload, dict):
+        return {
+            key: REDACTED_VALUE if _is_sensitive_key(key) else redact_sensitive_payload(value)
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [redact_sensitive_payload(value) for value in payload]
+    return payload
+
+
+def redact_sensitive_headers(headers):
+    """Return request headers with credential-bearing values redacted."""
+    return {
+        key: REDACTED_VALUE if _is_sensitive_key(key) else value
+        for key, value in headers.items()
+    }
 
 
 def generate_friendly_error_message(error_info, app=None):
@@ -148,8 +185,11 @@ def register_error_handlers(app):
             else:
                 return jsonify({'success': False, 'message': 'Could not generate a friendly message'}), 500
         except Exception as e:
-            app.logger.error(f"Error in friendly error API: {e}")
-            return jsonify({'success': False, 'message': str(e)}), 500
+            app.logger.error("Error in friendly error API: %s", e, exc_info=True)
+            return jsonify({
+                'success': False,
+                'message': 'Could not generate a friendly message',
+            }), 500
     
     @app.errorhandler(400)
     def bad_request_error(error):
@@ -211,8 +251,8 @@ def handle_error(error, code, default_message):
             'error_type': error.__class__.__name__,
             'request_path': request.path,
             'request_method': request.method,
-            'request_headers': {k: v for k, v in request.headers.items() if k.lower() not in ('cookie', 'authorization')},
-            'request_args': request.args.to_dict(),
+            'request_headers': redact_sensitive_headers(request.headers),
+            'request_args': redact_sensitive_payload(request.args.to_dict(flat=False)),
         }
         
         # Include POST data if it's form data (not for file uploads)
@@ -223,8 +263,8 @@ def handle_error(error, code, default_message):
         # Include JSON data if applicable
         if request.is_json:
             try:
-                debug_info['request_json'] = request.get_json()
-            except:
+                debug_info['request_json'] = redact_sensitive_payload(request.get_json())
+            except Exception:
                 debug_info['request_json'] = 'Invalid JSON'
         
         # Get traceback for more detailed debugging

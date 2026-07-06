@@ -36,6 +36,14 @@ def find_songs(
     query: str | None = None,
     title: str | None = None,
     artist: str | None = None,
+    genre: str | None = None,
+    year: int | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_preview: bool | None = None,
+    unused_only: bool = False,
+    offset: int = 0,
+    order_by: str = "artist",
     spotify_id: str | None = None,
     deezer_id: str | None = None,
     isrc: str | None = None,
@@ -47,6 +55,14 @@ def find_songs(
         query=query,
         title=title,
         artist=artist,
+        genre=genre,
+        year=year,
+        year_min=year_min,
+        year_max=year_max,
+        has_preview=has_preview,
+        unused_only=unused_only,
+        offset=offset,
+        order_by=order_by,
         spotify_id=spotify_id,
         deezer_id=deezer_id,
         isrc=isrc,
@@ -189,12 +205,60 @@ def import_catalog_item(
 
 
 @mcp.tool()
+def import_progress_events(
+    user_id: int | None = None,
+    include_recent: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return import queue and job status for polling clients."""
+    return _with_app_context(
+        automation.import_progress_events,
+        user_id=user_id,
+        include_recent=include_recent,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def retry_import_job(job_id: int, reset_attempts: bool = False) -> dict[str, Any]:
+    """Retry a failed or dead-letter import job."""
+    return _with_app_context(
+        automation.retry_import_job,
+        job_id=job_id,
+        reset_attempts=reset_attempts,
+    )
+
+
+@mcp.tool()
+def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
+    """Parse pasted text or CSV-like playlists into reviewable song candidates."""
+    return _with_app_context(automation.parse_text_playlist, text=text, limit=limit)
+
+
+@mcp.tool()
+def resolve_text_playlist(
+    text: str,
+    limit: int = 100,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Resolve a parsed text playlist against existing catalog songs."""
+    return _with_app_context(
+        automation.resolve_text_playlist,
+        text=text,
+        limit=limit,
+        min_confidence=min_confidence,
+    )
+
+
+@mcp.tool()
 def compile_round(
     name: str | None = None,
     round_type: str = "random",
     count: int = 8,
     criteria: str | None = None,
     song_ids: list[int] | None = None,
+    user_id: int | None = None,
+    visibility: str = "private",
 ) -> dict[str, Any]:
     """Compile songs into a named quiz round."""
     return _with_app_context(
@@ -204,6 +268,8 @@ def compile_round(
         count=count,
         criteria=criteria,
         song_ids=song_ids,
+        user_id=user_id,
+        visibility=visibility,
     )
 
 
@@ -211,6 +277,48 @@ def compile_round(
 def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     """Set or clear the display name for a round."""
     return _with_app_context(automation.rename_round, round_id=round_id, name=name)
+
+
+@mcp.tool()
+def set_round_owner(
+    round_id: int,
+    user_id: int | None,
+    visibility: str | None = None,
+) -> dict[str, Any]:
+    """Assign or clear the quizmaster owner for a round."""
+    return _with_app_context(
+        automation.set_round_owner,
+        round_id=round_id,
+        user_id=user_id,
+        visibility=visibility,
+    )
+
+
+@mcp.tool()
+def share_round(round_id: int, user_id: int, role: str = "viewer") -> dict[str, Any]:
+    """Share a round with another quizmaster as viewer or editor."""
+    return _with_app_context(
+        automation.share_round,
+        round_id=round_id,
+        user_id=user_id,
+        role=role,
+    )
+
+
+@mcp.tool()
+def list_round_shares(round_id: int) -> dict[str, Any]:
+    """List explicit share grants for a round."""
+    return _with_app_context(automation.list_round_shares, round_id=round_id)
+
+
+@mcp.tool()
+def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
+    """Remove a user's share grant from a round."""
+    return _with_app_context(
+        automation.revoke_round_share,
+        round_id=round_id,
+        user_id=user_id,
+    )
 
 
 @mcp.tool()
@@ -296,6 +404,187 @@ def add_round_song(
 
 
 @mcp.tool()
+def recent_usage_summary(
+    user_id: int | None = None,
+    months: int = 3,
+    song_ids: list[int] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Summarize recent song usage and warn when selected songs were used recently."""
+    return _with_app_context(
+        automation.recent_usage_summary,
+        user_id=user_id,
+        months=months,
+        song_ids=song_ids,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
+    """Return quizmaster personalization context and recent usage for round planning."""
+    return _with_app_context(
+        automation.quizmaster_context,
+        user_id=user_id,
+        months=months,
+    )
+
+
+@mcp.tool()
+def round_planning_brief(
+    user_id: int,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    desired_song_count: int = 8,
+    months: int = 3,
+) -> dict[str, Any]:
+    """Build an agent-readable brief for planning a robust themed music round."""
+    return _with_app_context(
+        automation.round_planning_brief,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        desired_song_count=desired_song_count,
+        months=months,
+    )
+
+
+@mcp.tool()
+def draft_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    tone: str = "warm, concise, lightly humorous",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft intro, replay, and outro script text before generating TTS audio."""
+    return _with_app_context(
+        automation.draft_round_audio_scripts,
+        round_id=round_id,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        tone=tone,
+        persist=persist,
+    )
+
+
+@mcp.tool()
+def save_round_audio_scripts(
+    round_id: int,
+    scripts: dict[str, str],
+    user_id: int | None = None,
+    quiz_date: str | None = None,
+    theme: str | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable intro, replay, and outro script text for a round."""
+    return _with_app_context(
+        automation.save_round_audio_scripts,
+        round_id=round_id,
+        scripts=scripts,
+        user_id=user_id,
+        quiz_date=quiz_date,
+        theme=theme,
+        tone=tone,
+        status=status,
+    )
+
+
+@mcp.tool()
+def draft_round_track_hints(
+    round_id: int,
+    user_id: int | None = None,
+    tone: str = "concise, playful, no title or artist spoilers",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft per-track hint text that can be played before each first-listen snippet."""
+    return _with_app_context(
+        automation.draft_round_track_hints,
+        round_id=round_id,
+        user_id=user_id,
+        tone=tone,
+        persist=persist,
+    )
+
+
+@mcp.tool()
+def save_round_track_hints(
+    round_id: int,
+    hints: list[dict[str, Any]],
+    user_id: int | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable per-track hint scripts with one-based positions."""
+    return _with_app_context(
+        automation.save_round_track_hints,
+        round_id=round_id,
+        hints=hints,
+        user_id=user_id,
+        tone=tone,
+        status=status,
+    )
+
+
+@mcp.tool()
+def list_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List stored intro, replay, and outro script drafts."""
+    return _with_app_context(
+        automation.list_round_audio_scripts,
+        round_id=round_id,
+        user_id=user_id,
+        status=status,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def update_round_audio_script(
+    script_id: int,
+    text: str | None = None,
+    status: str | None = None,
+    selected: bool | None = None,
+) -> dict[str, Any]:
+    """Edit, review, approve, reject, or select one stored script."""
+    return _with_app_context(
+        automation.update_round_audio_script,
+        script_id=script_id,
+        text=text,
+        status=status,
+        selected=selected,
+    )
+
+
+@mcp.tool()
+def generate_tts_from_script(
+    script_id: int,
+    service: str = "openai",
+    voice: str | None = None,
+    model: str | None = None,
+    stability: float | None = None,
+    similarity: float | None = None,
+) -> dict[str, Any]:
+    """Generate and assign a custom MP3 from a reviewed or approved stored script."""
+    return _with_app_context(
+        automation.generate_tts_from_script,
+        script_id=script_id,
+        service=service,
+        voice=voice,
+        model=model,
+        stability=stability,
+        similarity=similarity,
+    )
+
+
+@mcp.tool()
 def create_round_from_playlist(
     service_name: str,
     playlist_id_or_url: str,
@@ -317,6 +606,38 @@ def create_round_from_playlist(
         if exc.details:
             return exc.details
         raise
+
+
+@mcp.tool()
+def create_round_from_text_playlist(
+    text: str,
+    name: str | None = None,
+    count: int = 8,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Create a complete manual round from text rows that all resolve to catalog songs."""
+    try:
+        return _with_app_context(
+            automation.create_round_from_text_playlist,
+            text=text,
+            name=name,
+            count=count,
+            min_confidence=min_confidence,
+        )
+    except automation.AutomationError as exc:
+        if exc.details:
+            return exc.details
+        raise
+
+
+@mcp.tool()
+def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+    """Return catalog and round analytics for planning and fatigue checks."""
+    return _with_app_context(
+        automation.round_analytics_summary,
+        months=months,
+        limit=limit,
+    )
 
 
 @mcp.tool()

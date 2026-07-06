@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
 from importlib import import_module
 from musicround.config import Config
+from musicround.helpers.database_config import (
+    bool_from_config,
+    database_backend,
+    database_summary,
+    is_sqlite_database_uri,
+)
 from musicround.version import VERSION_INFO, get_version_str
 from datetime import datetime
 from musicround.helpers.auth_helpers import oauth # Import the oauth object
@@ -29,21 +35,110 @@ DEFAULT_DATABASE_PATH = os.path.join(DEFAULT_DATABASE_DIR, 'song_data.db')
 
 def _configure_database_uri(app):
     """Use an explicit database URI when configured, otherwise fall back to SQLite."""
+    require_managed = bool_from_config(app.config.get('DATABASE_REQUIRE_MANAGED'))
     configured_uri = os.environ.get('SQLALCHEMY_DATABASE_URI') or app.config.get(
         'SQLALCHEMY_DATABASE_URI'
     )
     if configured_uri:
+        if require_managed and is_sqlite_database_uri(configured_uri):
+            raise RuntimeError(
+                "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
+                "points at SQLite. Configure a managed SQL URI via secrets."
+            )
         app.config['SQLALCHEMY_DATABASE_URI'] = configured_uri
+        app.config['DATABASE_BACKEND'] = database_backend(configured_uri)
+        app.config['DATABASE_URI_REDACTED'] = database_summary(configured_uri)['redacted_uri']
         return
+
+    if require_managed:
+        raise RuntimeError(
+            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI is not configured."
+        )
 
     if not os.path.exists(DEFAULT_DATABASE_DIR):
         os.makedirs(DEFAULT_DATABASE_DIR, exist_ok=True)
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DEFAULT_DATABASE_PATH}'
+    app.config['DATABASE_BACKEND'] = 'sqlite'
+    app.config['DATABASE_URI_REDACTED'] = 'sqlite:///[local-file]'
     app.logger.warning(
         "SQLALCHEMY_DATABASE_URI is not configured; using local SQLite fallback at %s",
         DEFAULT_DATABASE_PATH,
     )
 
+
+def _import_workers_enabled(app):
+    """Return whether in-process import workers should start for this app."""
+    configured = app.config.get('IMPORT_WORKERS_ENABLED')
+    if configured is None:
+        configured = os.environ.get('IMPORT_WORKERS_ENABLED', 'false')
+    if isinstance(configured, bool):
+        return configured
+    return str(configured).lower() not in ('0', 'false', 'no', 'off', '')
+
+
+def _spotify_authlib_token_from_user(user):
+    """Build Authlib's token dict from the raw Spotify columns on User."""
+    access_token = user.spotify_token
+    legacy_token = None
+    if access_token:
+        try:
+            parsed = json.loads(access_token)
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            legacy_token = parsed
+            access_token = parsed.get('access_token')
+
+    if not access_token:
+        return None
+
+    token = {
+        'access_token': access_token,
+        'token_type': 'Bearer',
+    }
+    refresh_token = user.spotify_refresh_token or (legacy_token or {}).get('refresh_token')
+    if refresh_token:
+        token['refresh_token'] = refresh_token
+
+    expiry = user.spotify_token_expiry
+    legacy_expires_at = (legacy_token or {}).get('expires_at')
+    if expiry:
+        token['expires_at'] = int(expiry.timestamp())
+    elif legacy_expires_at:
+        try:
+            token['expires_at'] = int(float(legacy_expires_at))
+        except (TypeError, ValueError):
+            pass
+
+    return token
+
+
+def _store_spotify_authlib_token(user, token):
+    """Persist an Authlib Spotify token using the User model's raw-token contract."""
+    if not token:
+        return
+
+    access_token = token.get('access_token')
+    if access_token:
+        user.spotify_token = access_token
+
+    refresh_token = token.get('refresh_token')
+    if refresh_token:
+        user.spotify_refresh_token = refresh_token
+
+    expires_at = token.get('expires_at')
+    if expires_at is not None:
+        try:
+            user.spotify_token_expiry = datetime.fromtimestamp(int(float(expires_at)))
+        except (TypeError, ValueError):
+            pass
+    elif token.get('expires_in') is not None:
+        try:
+            user.spotify_token_expiry = datetime.fromtimestamp(
+                int(datetime.utcnow().timestamp()) + int(float(token['expires_in']))
+            )
+        except (TypeError, ValueError):
+            pass
 def run_migrations():
     """
     Run all migration scripts in the migrations directory
@@ -215,76 +310,13 @@ def create_app(config=None):
         app.logger.debug(f"_app_fetch_token: Called for service '{name}', user: {current_user.id if current_user.is_authenticated else 'Unauthenticated'}")
         if current_user.is_authenticated:
             if name == 'spotify':
-                token_str = current_user.spotify_token
+                token = _spotify_authlib_token_from_user(current_user)
                 app.logger.debug(
-                    "_app_fetch_token for Spotify (user %s): Stored token present=%s, length=%s",
+                    "_app_fetch_token for Spotify (user %s): Token metadata: %s",
                     current_user.id,
-                    bool(token_str),
-                    len(token_str) if token_str else 0,
+                    oauth_token_log_summary(token),
                 )
-                if token_str:
-                    try:
-                        token = json.loads(token_str)
-                        app.logger.debug(
-                            "_app_fetch_token for Spotify (user %s): Token after json.loads: %s",
-                            current_user.id,
-                            oauth_token_log_summary(token),
-                        )
-
-                        if 'refresh_token' not in token or not token.get('refresh_token'):
-                            if hasattr(current_user, 'spotify_refresh_token') and current_user.spotify_refresh_token:
-                                token['refresh_token'] = current_user.spotify_refresh_token
-                                app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Added refresh_token from current_user.spotify_refresh_token.")
-                            else:
-                                app.logger.warning(f"_app_fetch_token for Spotify (user {current_user.id}): refresh_token missing in JSON and not found in current_user.spotify_refresh_token.")
-                        
-                        current_time = int(datetime.utcnow().timestamp())
-                        if 'expires_at' in token:
-                            if not isinstance(token['expires_at'], int):
-                                try:
-                                    token['expires_at'] = int(float(token['expires_at']))
-                                    app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Converted existing expires_at to int: {token['expires_at']}")
-                                except (ValueError, TypeError):
-                                    app.logger.warning(f"_app_fetch_token for Spotify (user {current_user.id}): Could not convert existing expires_at '{token['expires_at']}' to int. Recalculating if possible.")
-                                    if 'expires_in' in token and isinstance(token['expires_in'], (int, float)):
-                                        token['expires_at'] = current_time + int(token['expires_in']) - 30
-                                        app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Recalculated expires_at from expires_in: {token['expires_at']}")
-                                    else:
-                                        app.logger.error(f"_app_fetch_token for Spotify (user {current_user.id}): Cannot determine expires_at. Original problematic value: {token['expires_at']}")
-                        elif 'expires_in' in token and isinstance(token['expires_in'], (int, float)):
-                            token['expires_at'] = current_time + int(token['expires_in']) - 30
-                            app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Calculated expires_at from expires_in: {token['expires_at']}")
-                        elif hasattr(current_user, 'spotify_token_expires_at') and current_user.spotify_token_expires_at:
-                            token['expires_at'] = int(current_user.spotify_token_expires_at.timestamp())
-                            app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Used expires_at from current_user.spotify_token_expires_at: {token['expires_at']}")
-                        else:
-                            app.logger.warning(f"_app_fetch_token for Spotify (user {current_user.id}): expires_at missing and cannot be calculated.")
-
-                        if 'token_type' not in token or not token.get('token_type'):
-                            token['token_type'] = 'Bearer'
-                            app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): Set token_type to Bearer.")
-                        
-                        if 'expires_in' in token: 
-                            del token['expires_in']
-
-                        app.logger.debug(
-                            "_app_fetch_token for Spotify (user %s): Final token prepared for Authlib: %s",
-                            current_user.id,
-                            oauth_token_log_summary(token),
-                        )
-                        return token
-                    except json.JSONDecodeError:
-                        app.logger.error(
-                            "_app_fetch_token for Spotify (user %s): Failed to decode stored token JSON",
-                            current_user.id,
-                        )
-                        return None
-                    except Exception as e:
-                        app.logger.error(f"_app_fetch_token for Spotify (user {current_user.id}): Error processing token: {str(e)}", exc_info=True)
-                        return None
-                else:
-                    app.logger.debug(f"_app_fetch_token for Spotify (user {current_user.id}): No token string found in DB.")
-                    return None
+                return token
         app.logger.debug(f"_app_fetch_token: User not authenticated or service not matched for '{name}'.")
         return None
 
@@ -298,19 +330,7 @@ def create_app(config=None):
                     current_user.id,
                     oauth_token_log_summary(token),
                 )
-                
-                current_user.spotify_token = json.dumps(token)
-                
-                if 'expires_at' in token and token['expires_at'] is not None and hasattr(current_user, 'spotify_token_expires_at'):
-                    try:
-                        current_user.spotify_token_expires_at = datetime.fromtimestamp(int(token['expires_at']))
-                        app.logger.debug(f"_app_update_token for Spotify (user {current_user.id}): Updated spotify_token_expires_at to {current_user.spotify_token_expires_at}")
-                    except (TypeError, ValueError) as e:
-                        app.logger.warning(f"_app_update_token for Spotify (user {current_user.id}): Could not update spotify_token_expires_at from token's expires_at ('{token['expires_at']}'): {str(e)}")
-
-                if 'refresh_token' in token and token['refresh_token'] and hasattr(current_user, 'spotify_refresh_token'):
-                    current_user.spotify_refresh_token = token['refresh_token']
-                    app.logger.debug(f"_app_update_token for Spotify (user {current_user.id}): Updated spotify_refresh_token.")
+                _store_spotify_authlib_token(current_user, token)
                 
                 try:
                     db.session.commit()
@@ -412,29 +432,26 @@ def create_app(config=None):
     import_queue = ImportQueue()
     app.config['import_queue'] = import_queue
 
-    with app.app_context():
-        try:
-            abandoned_count = import_queue.mark_abandoned_processing_records()
-            if abandoned_count:
-                logger.warning(
-                    "Marked %s abandoned import job(s) as failed after restart",
-                    abandoned_count,
-                )
-            pending_count = import_queue.enqueue_pending_records()
-            if pending_count:
-                logger.info("Queued %s pending import job(s) from the database", pending_count)
-        except Exception as e:
-            logger.error(f"Error loading pending import jobs: {e}")
-
-    workers_enabled = os.environ.get('IMPORT_WORKERS_ENABLED', 'true').lower() not in (
-        '0',
-        'false',
-        'no',
-    )
-    workers_enabled = workers_enabled and 'PYTEST_CURRENT_TEST' not in os.environ
+    workers_enabled = _import_workers_enabled(app)
+    app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = workers_enabled
+    app.config['IMPORT_WORKER_COUNT_RESOLVED'] = worker_count
 
     workers = []
     if workers_enabled:
+        with app.app_context():
+            try:
+                abandoned_count = import_queue.mark_abandoned_processing_records()
+                if abandoned_count:
+                    logger.warning(
+                        "Marked %s abandoned import job(s) as failed after restart",
+                        abandoned_count,
+                    )
+                pending_count = import_queue.enqueue_pending_records()
+                if pending_count:
+                    logger.info("Queued %s pending import job(s) from the database", pending_count)
+            except Exception as e:
+                logger.error(f"Error loading pending import jobs: {e}")
+
         workers = [
             ImportWorker(app, import_queue, worker_id=f"import-worker-{index + 1}")
             for index in range(worker_count)
@@ -442,7 +459,10 @@ def create_app(config=None):
         for worker in workers:
             worker.start()
     app.config['import_workers'] = workers
-    logger.info("Started %s import worker(s)", len(workers))
+    if workers_enabled:
+        logger.info("Started %s import worker(s)", len(workers))
+    else:
+        logger.info("Import workers disabled; set IMPORT_WORKERS_ENABLED=true to start them")
     
     # Return the app
     return app

@@ -22,6 +22,15 @@ def _require_spotify_token(item_type):
     flash(f"Please connect your Spotify account to import {item_type}.", "warning")
     return redirect(url_for('users.spotify_link')), None
 
+
+def _safe_spotify_import_error(item_type):
+    """Return a browser-safe Spotify import error message."""
+    return (
+        f'Error importing {item_type} from Spotify. '
+        'Please check the Spotify ID and try again.'
+    )
+
+
 # Legacy function retained for backward compatibility
 def import_track(track_id):
     """Legacy helper function that now uses the new ImportHelper"""
@@ -86,14 +95,13 @@ def import_song():
         
         imported_count = result.get('imported_count', 0)
         skipped_count = result.get('skipped_count', 0)
-        errors = result.get("errors", [])
 
         if imported_count > 0:
             flash(f'Successfully imported {imported_count} song!', 'success')
         elif skipped_count > 0:
             flash('Song was already in the database.', 'info')
         else:
-            flash(f'Error importing song: {", ".join(errors) if errors else "Unknown error"}', 'danger')
+            flash(_safe_spotify_import_error('song'), 'danger')
             
         return redirect(url_for('core.view_songs'))
         
@@ -178,16 +186,15 @@ def import_album():
         imported_count = result.get('imported_count', 0)
         skipped_count = result.get('skipped_count', 0)
         error_count = result.get('error_count', 0)
-        errors = result.get("errors", [])
 
         if imported_count > 0:
             flash(f'Successfully imported {imported_count} songs from album! ({skipped_count} skipped, {error_count} errors).', 'success')
         elif skipped_count > 0 and error_count == 0:
             flash(f'All {skipped_count} songs were already in the database.', 'info')
         elif error_count > 0:
-            flash(f'Album import: {imported_count} new, {skipped_count} skipped, {error_count} errors. Errors: {", ".join(errors)}', 'warning')
+            flash(f'Album import: {imported_count} new, {skipped_count} skipped, {error_count} errors.', 'warning')
         else:
-            flash(f'Error importing album: {", ".join(errors) if errors else "No songs imported, album might be empty or an unknown issue occurred."}', 'danger')
+            flash(_safe_spotify_import_error('album'), 'danger')
             
         return redirect(url_for('core.view_songs'))
         

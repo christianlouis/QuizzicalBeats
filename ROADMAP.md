@@ -1,7 +1,7 @@
 # Quizzical Beats - Project Roadmap
 
-**Version**: 2026.Q1  
-**Last Updated**: February 2026
+**Version**: 2026.Q3
+**Last Updated**: July 5, 2026
 
 ## Vision Statement
 
@@ -9,8 +9,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 ## Current Status
 
-**Latest Release**: v1.9 - "Documentation Dynamo"  
-**Active Development**: v2.0 - Scaling & Performance  
+**Latest Release**: v1.10 - "Import Infrastructure"
+**Active Development**: v2.x - Reliability, Performance, and Agentic Round Production
 **Repository Health**: ✅ Production-Ready
 
 ---
@@ -109,24 +109,32 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - ✅ .env.example template
 - ✅ Security documentation
 
+#### v1.10 - "Import Infrastructure"
+*Released: Q2 2026*
+- ✅ Database-backed import queue foundation
+- ✅ Background import workers
+- ✅ Import queue status surfaces for users and agents
+- ✅ Initial MCP automation support for round production workflows
+- ✅ Server-side catalog pagination and filters
+
 ---
 
 ### 🚀 Upcoming Releases
 
 #### v2.0 - "Import Infrastructure" *(Q1 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Critical  
 **Effort**: 2-3 weeks
 
-**Goals**: Background processing for large imports
+**Goals**: Harden the v1.10 import infrastructure foundation for production-scale autonomous workflows.
 
 **Features**:
-- [ ] Import queue system (Celery/RQ)
-- [ ] Background worker processes
-- [ ] Concurrent import job support
-- [ ] Priority queue handling
-- [ ] Job retry logic
-- [ ] Dead letter queue for failures
+- [x] Database-backed import queue system
+- [x] Background worker processes
+- [x] Concurrent import job support
+- [x] Priority queue handling
+- [x] Job retry logic
+- [x] Dead letter queue for failures
 
 **Success Metrics**:
 - Import 1000+ song playlists without timeout
@@ -134,23 +142,24 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - 99% job completion rate
 
 **Dependencies**:
-- Redis or RabbitMQ
 - Worker orchestration (Docker Compose)
+- Redis/RQ or Celery remains optional if import volume outgrows the database-backed queue
 
 ---
 
 #### v2.1 - "Progress Pulse" *(Q1 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 1-2 weeks
 
 **Goals**: Real-time import status tracking
 
 **Features**:
+- [x] JSON polling endpoint for queue and job status
 - [ ] WebSocket/SSE progress updates
 - [ ] Progress bars for active imports
-- [ ] Detailed error reporting
-- [ ] Recovery options for failed imports
+- [x] Detailed error reporting with retry/dead-letter state
+- [x] Manual recovery options for failed imports
 - [ ] Email notifications on completion
 - [ ] Import history dashboard
 
@@ -195,7 +204,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.3 - "Database Durability" *(Q2 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 1-2 weeks
 
@@ -204,7 +213,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Connection pooling (SQLAlchemy pool)
 - [ ] Database query optimization
-- [ ] Index creation for common queries
+- [x] Index creation for common catalog, import queue, and scheduled export queries
 - [ ] Concurrent write handling
 - [ ] Database performance monitoring
 - [ ] Read replica support (optional)
@@ -222,7 +231,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.4 - "Search Supercharge" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 2 weeks
 
@@ -231,7 +240,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Full-text search (PostgreSQL FTS or Elasticsearch)
 - [ ] Relevance scoring improvements
-- [ ] Advanced filters (year, genre, artist, BPM)
+- [x] Advanced song catalog filters (title/artist query, year, genre, preview, usage)
 - [ ] Search result caching
 - [ ] Faceted search
 - [ ] Search suggestions/autocomplete
@@ -249,7 +258,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.5 - "Performance Pulse" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 1-2 weeks
 
@@ -259,7 +268,11 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Database index optimization
 - [ ] Lazy loading for lists
 - [ ] Pagination for all large datasets
+- [x] Server-side pagination for the song catalog API
+- [x] Server-side pagination and filters for the browser song library
+- [x] Server-side pagination for the browser rounds list
 - [ ] MP3 preview streaming
+- [x] Catalog analytics summary for usage and preview coverage
 - [ ] Redis caching layer
 - [ ] Query result caching
 - [ ] CDN for static assets
@@ -277,17 +290,18 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.6 - "Textual Transport" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 2 weeks
 
 **Goals**: Text-based playlist import
 
 **Features**:
-- [ ] Plain text playlist parsing
-- [ ] CSV format support
-- [ ] Artist/song detection algorithms
-- [ ] Confidence scoring for matches
+- [x] Plain text playlist parsing
+- [x] CSV format support
+- [x] Artist/song detection algorithms
+- [x] Confidence scoring for matches
+- [x] MCP review payload for unresolved text rows
 - [ ] Manual review interface
 - [ ] Bulk import workflow
 - [ ] Format templates
@@ -309,10 +323,13 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] AI quiz round generation
 - [ ] Multiple quiz formats (MCQ, clips, open-ended)
-- [ ] Theme-based generation
+- [x] Theme-based planning brief for agentic generation
 - [ ] Metadata-driven questions
+- [x] Complete round creation from fully resolved text playlists
 - [ ] User review/edit interface
-- [ ] Prompt optimization
+- [x] Recent usage and fatigue context for prompt optimization
+- [x] Draft intro/replay/outro script support for generated rounds
+- [x] Persisted script review workflow before TTS assignment
 - [ ] AI provider abstraction (OpenAI, Anthropic, local)
 - [ ] Cost tracking
 
@@ -386,7 +403,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Email verification
 - [ ] Round completion notifications
-- [ ] OAuth token expiration warnings
+- [x] OAuth token expiration warnings in the profile UI
+- [ ] Proactive OAuth token expiration emails
 - [ ] Admin usage summaries
 - [ ] Push notifications (browser/Telegram)
 - [ ] Notification preferences
@@ -437,8 +455,10 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Features**:
 - [ ] Shared round editing
-- [ ] Collaboration roles (view/comment/edit)
-- [ ] User invitations via email/username
+- [x] Persisted round ownership and viewer/editor share grants
+- [x] Browser owner/visibility filtering and edit-route access checks
+- [ ] Collaboration roles beyond viewer/editor (comment/admin)
+- [ ] User invitations via email/username UI
 - [ ] Presence indicators
 - [ ] Revision history
 - [ ] Public sharing links
@@ -462,7 +482,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Persistent user settings
 - [ ] Default round format preferences
 - [ ] Personal tag system
-- [ ] Tag filtering and sorting
+- [x] Tag filtering and sorting in the round builder
 - [ ] Dark mode toggle
 - [ ] UI customization
 
@@ -482,7 +502,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] Nightly backup jobs
 - [ ] Sentry error tracking
 - [ ] Auto-updater script
-- [ ] Health check endpoint (/healthz)
+- [x] Health check endpoint (/healthz)
 - [ ] Uptime monitoring integration
 
 **Success Metrics**:
@@ -598,6 +618,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 | Date | Change |
 |------|--------|
+| 2026-07 | Realigned roadmap status with v1.10 Import Infrastructure and PR #142 reliability work |
 | 2026-02 | Added v1.9 Security Hardening release |
 | 2026-02 | Initial comprehensive roadmap created |
 | 2025-12 | v1.8 Documentation Dynamo completed |

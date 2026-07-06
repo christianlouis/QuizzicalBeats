@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import requests
@@ -18,9 +18,30 @@ from sqlalchemy import or_
 from musicround import db
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.storage_health import (
+    check_round_artifact_storage,
+    require_round_artifact_storage,
+    round_mp3_dir,
+    round_pdf_dir,
+)
+from musicround.helpers.service_health import (
+    artifact_storage_service_health,
+    dropbox_service_health,
+    email_service_health,
+    spotify_service_health,
+)
 from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
-from musicround.models import Round, RoundExport, Song, Tag, User
+from musicround.models import (
+    ImportJobRecord,
+    Round,
+    RoundAudioScript,
+    RoundExport,
+    RoundShare,
+    Song,
+    Tag,
+    User,
+)
 
 
 class AutomationError(ValueError):
@@ -29,6 +50,13 @@ class AutomationError(ValueError):
     def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.details = details or {}
+
+
+AUTOMATION_STORAGE_ERROR = "Round artifact storage is unhealthy."
+AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
+AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
+AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
+AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
@@ -42,8 +70,34 @@ def _ordered_round_songs(round_obj: Round) -> list[Song]:
     return [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
 
 
+def _playlist_position_map(song_ids: list[int], expected_count: int | None = None) -> list[dict[str, Any]]:
+    limit = expected_count if expected_count is not None else len(song_ids)
+    return [
+        {
+            "position": index + 1,
+            "song_id": song_id if index < len(song_ids) else None,
+            "resolved": index < len(song_ids),
+        }
+        for index, song_id in enumerate(song_ids[:limit])
+    ] + [
+        {
+            "position": index + 1,
+            "song_id": None,
+            "resolved": False,
+        }
+        for index in range(len(song_ids), limit)
+    ]
+
+
 def _song_summary(song: Song) -> dict[str, Any]:
     data = song.to_dict()
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
     return {
         "id": data["id"],
         "title": data["title"],
@@ -51,7 +105,7 @@ def _song_summary(song: Song) -> dict[str, Any]:
         "genre": data["genre"],
         "year": data["year"],
         "source": song.source,
-        "preview_url": data["preview_url"],
+        "preview_url": preview_url,
         "spotify_id": data["spotify_id"],
         "deezer_id": data["deezer_id"],
         "isrc": data["isrc"],
@@ -62,16 +116,42 @@ def _song_summary(song: Song) -> dict[str, Any]:
     }
 
 
+def _user_summary(user: User | None) -> dict[str, Any] | None:
+    if not user:
+        return None
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
+    }
+
+
+def _round_share_summary(share: RoundShare) -> dict[str, Any]:
+    return {
+        "id": share.id,
+        "round_id": share.round_id,
+        "user_id": share.user_id,
+        "role": share.role,
+        "created_at": _datetime_payload(share.created_at),
+        "user": _user_summary(share.user),
+    }
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
     return {
         "id": round_obj.id,
         "name": round_obj.name,
+        "owner_user_id": round_obj.user_id,
+        "owner": _user_summary(round_obj.owner),
+        "visibility": round_obj.visibility,
         "round_type": round_obj.round_type,
         "criteria": round_obj.round_criteria_used,
         "song_ids": ids,
         "songs": [_song_summary(song) for song in ordered],
+        "shares": [_round_share_summary(share) for share in round_obj.shares.order_by(RoundShare.id.asc()).all()],
         "mp3_generated": round_obj.mp3_generated,
         "pdf_generated": round_obj.pdf_generated,
         "last_generated_at": (
@@ -475,6 +555,14 @@ def find_songs(
     query: str | None = None,
     title: str | None = None,
     artist: str | None = None,
+    genre: str | None = None,
+    year: int | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_preview: bool | None = None,
+    unused_only: bool = False,
+    offset: int = 0,
+    order_by: str = "artist",
     spotify_id: str | None = None,
     deezer_id: str | None = None,
     isrc: str | None = None,
@@ -483,6 +571,8 @@ def find_songs(
     """Search the local catalog before adding or importing tracks."""
     if limit < 1 or limit > 100:
         raise AutomationError("limit must be between 1 and 100.")
+    if offset < 0:
+        raise AutomationError("offset must not be negative.")
 
     filters = []
     if query:
@@ -492,6 +582,32 @@ def find_songs(
         filters.append(Song.title.ilike(f"%{title.strip()}%"))
     if artist:
         filters.append(Song.artist.ilike(f"%{artist.strip()}%"))
+    if genre:
+        filters.append(Song.genre.ilike(genre.strip()))
+    if year is not None:
+        filters.append(Song.year == int(year))
+    if year_min is not None:
+        filters.append(Song.year >= int(year_min))
+    if year_max is not None:
+        filters.append(Song.year <= int(year_max))
+    if has_preview is True:
+        filters.append(or_(
+            Song.preview_url.isnot(None),
+            Song.spotify_preview_url.isnot(None),
+            Song.deezer_preview_url.isnot(None),
+            Song.apple_preview_url.isnot(None),
+            Song.youtube_preview_url.isnot(None),
+        ))
+    elif has_preview is False:
+        filters.extend([
+            Song.preview_url.is_(None),
+            Song.spotify_preview_url.is_(None),
+            Song.deezer_preview_url.is_(None),
+            Song.apple_preview_url.is_(None),
+            Song.youtube_preview_url.is_(None),
+        ])
+    if unused_only:
+        filters.append(or_(Song.used_count == 0, Song.used_count.is_(None)))
     if spotify_id:
         filters.append(Song.spotify_id == spotify_id)
     if deezer_id:
@@ -502,8 +618,51 @@ def find_songs(
     song_query = Song.query
     for condition in filters:
         song_query = song_query.filter(condition)
-    songs = song_query.order_by(Song.artist, Song.title).limit(limit).all()
-    return {"count": len(songs), "songs": [_song_summary(song) for song in songs]}
+    total = song_query.count()
+
+    descending = order_by.startswith("-")
+    field_name = order_by[1:] if descending else order_by
+    allowed_order = {
+        "artist": Song.artist,
+        "title": Song.title,
+        "genre": Song.genre,
+        "year": Song.year,
+        "used_count": Song.used_count,
+        "last_used": Song.last_used,
+        "id": Song.id,
+    }
+    column = allowed_order.get(field_name)
+    if column is None:
+        raise AutomationError(
+            "order_by must be one of artist, title, genre, year, used_count, last_used, id."
+        )
+    song_query = song_query.order_by(column.desc() if descending else column.asc())
+    if field_name not in {"artist", "title"}:
+        song_query = song_query.order_by(Song.artist.asc(), Song.title.asc())
+
+    songs = song_query.offset(offset).limit(limit).all()
+    return {
+        "count": len(songs),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "query": query,
+            "title": title,
+            "artist": artist,
+            "genre": genre,
+            "year": year,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_preview": has_preview,
+            "unused_only": unused_only,
+            "spotify_id": spotify_id,
+            "deezer_id": deezer_id,
+            "isrc": isrc,
+            "order_by": order_by,
+        },
+        "songs": [_song_summary(song) for song in songs],
+    }
 
 
 def import_catalog_item(
@@ -581,10 +740,14 @@ def create_round(
     count: int = 8,
     criteria: str | None = None,
     song_ids: list[int] | None = None,
+    user_id: int | None = None,
+    visibility: str = "private",
 ) -> dict[str, Any]:
     """Create and persist a quiz round."""
     if count < 1:
         raise AutomationError("count must be at least 1.")
+    if visibility not in {"private", "shared", "public"}:
+        raise AutomationError("visibility must be private, shared, or public.")
 
     resolved_type, resolved_criteria, songs = _songs_for_round(
         round_type, count, criteria, song_ids
@@ -592,8 +755,11 @@ def create_round(
     if not songs:
         raise AutomationError("No songs matched the requested round criteria.")
 
+    owner = _find_user(user_id) if user_id is not None else None
     round_obj = Round(
         name=name,
+        user_id=owner.id if owner else None,
+        visibility=visibility,
         round_type=resolved_type,
         round_criteria_used=resolved_criteria,
         songs=",".join(str(song.id) for song in songs),
@@ -615,6 +781,94 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     round_obj.name = name.strip() if name and name.strip() else None
     db.session.commit()
     return {"round": _round_summary(round_obj)}
+
+
+def set_round_owner(
+    round_id: int,
+    user_id: int | None,
+    visibility: str | None = None,
+) -> dict[str, Any]:
+    """Assign or clear a round owner and optionally update visibility."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    owner = _find_user(user_id) if user_id is not None else None
+    if visibility is not None and visibility not in {"private", "shared", "public"}:
+        raise AutomationError("visibility must be private, shared, or public.")
+
+    round_obj.user_id = owner.id if owner else None
+    if visibility is not None:
+        round_obj.visibility = visibility
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"round": _round_summary(round_obj)}
+
+
+def share_round(
+    round_id: int,
+    user_id: int,
+    role: str = "viewer",
+) -> dict[str, Any]:
+    """Grant a user access to a round for future collaboration workflows."""
+    if role not in {"viewer", "editor"}:
+        raise AutomationError("role must be viewer or editor.")
+
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id)
+    if round_obj.user_id == user.id:
+        raise AutomationError("The owner already has access to this round.")
+
+    share = RoundShare.query.filter_by(round_id=round_id, user_id=user.id).first()
+    created = share is None
+    if not share:
+        share = RoundShare(round_id=round_id, user_id=user.id)
+        db.session.add(share)
+    share.role = role
+    round_obj.visibility = "shared"
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "created": created,
+        "share": _round_share_summary(share),
+        "round": _round_summary(round_obj),
+    }
+
+
+def list_round_shares(round_id: int) -> dict[str, Any]:
+    """List owner and explicit share grants for a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    shares = round_obj.shares.order_by(RoundShare.id.asc()).all()
+    return {
+        "round_id": round_id,
+        "visibility": round_obj.visibility,
+        "owner": _user_summary(round_obj.owner),
+        "count": len(shares),
+        "shares": [_round_share_summary(share) for share in shares],
+    }
+
+
+def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
+    """Remove a user's explicit share grant from a round."""
+    share = RoundShare.query.filter_by(round_id=round_id, user_id=user_id).first()
+    if not share:
+        raise AutomationError(f"Round {round_id} is not shared with user {user_id}.")
+    removed = _round_share_summary(share)
+    round_obj = db.session.get(Round, round_id)
+    db.session.delete(share)
+    db.session.flush()
+    if round_obj and round_obj.visibility == "shared" and round_obj.shares.count() == 0:
+        round_obj.visibility = "private"
+        round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "revoked": True,
+        "share": removed,
+        "round": _round_summary(round_obj) if round_obj else None,
+    }
 
 
 def _song_position(round_obj: Round, position: int) -> tuple[list[int], int]:
@@ -945,6 +1199,7 @@ def create_round_from_playlist(
         ) or _deezer_playlist_song_ids(playlist_id, count)
     if not song_ids:
         raise AutomationError("Playlist import did not return song IDs to build a round.")
+    position_map = _playlist_position_map(song_ids, count)
     if len(song_ids) < count:
         message = (
             f"Playlist import resolved {len(song_ids)} songs; "
@@ -960,6 +1215,12 @@ def create_round_from_playlist(
                 "expected_song_count": count,
                 "resolved_song_count": len(song_ids),
                 "missing_count": count - len(song_ids),
+                "resolved_positions": position_map,
+                "missing_positions": [
+                    item["position"]
+                    for item in position_map
+                    if not item["resolved"]
+                ],
                 "import": imported,
                 "hints": [message],
                 "remediation": [
@@ -978,7 +1239,11 @@ def create_round_from_playlist(
         count=count,
         song_ids=song_ids[:count],
     )
-    return {"import": imported, "round": round_result["round"]}
+    return {
+        "import": imported,
+        "round": round_result["round"],
+        "resolved_positions": position_map,
+    }
 
 
 def generate_round_pdf(round_id: int) -> dict[str, Any]:
@@ -987,13 +1252,21 @@ def generate_round_pdf(round_id: int) -> dict[str, Any]:
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
+    try:
+        require_round_artifact_storage(include_mp3=False, include_pdf=True)
+    except RuntimeError as exc:
+        current_app.logger.error("PDF generation blocked by unhealthy artifact storage: %s", exc)
+        raise AutomationError(
+            AUTOMATION_STORAGE_ERROR,
+            details=check_round_artifact_storage(include_mp3=False),
+        ) from exc
     pdf_data = generate_pdf(round_id)
     if isinstance(pdf_data, str):
         raise AutomationError(pdf_data)
     round_obj.pdf_generated = True
     round_obj.last_generated_at = datetime.utcnow()
     db.session.commit()
-    path = os.path.join("/data/pdfs", f"round_{round_id}.pdf")
+    path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
     return {"round_id": round_id, "path": path, "bytes": len(pdf_data)}
 
 
@@ -1004,6 +1277,14 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
     user = _find_user(user_id)
+    try:
+        require_round_artifact_storage(include_mp3=True, include_pdf=False)
+    except RuntimeError as exc:
+        current_app.logger.error("MP3 generation blocked by unhealthy artifact storage: %s", exc)
+        raise AutomationError(
+            AUTOMATION_STORAGE_ERROR,
+            details=check_round_artifact_storage(include_pdf=False),
+        ) from exc
     with current_app.test_request_context(headers={"X-Requested-With": "XMLHttpRequest"}):
         login_user(user)
         try:
@@ -1016,9 +1297,10 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
         if payload.get("success") is False or payload.get("error"):
             raise AutomationError(payload.get("error", "MP3 generation failed."))
 
-    path = os.path.join("/data/rounds", f"round_{round_id}.mp3")
+    path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
     if not os.path.exists(path):
-        raise AutomationError(f"MP3 generation did not create {path}.")
+        current_app.logger.error("MP3 generation for round %s did not create %s", round_id, path)
+        raise AutomationError(AUTOMATION_MP3_GENERATION_ERROR)
     return {"round_id": round_id, "path": path, "bytes": os.path.getsize(path)}
 
 
@@ -1029,6 +1311,14 @@ def generate_round_assets(
     include_mp3: bool = True,
 ) -> dict[str, Any]:
     """Generate requested round assets."""
+    try:
+        require_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf)
+    except RuntimeError as exc:
+        current_app.logger.error("Round asset generation blocked by unhealthy artifact storage: %s", exc)
+        raise AutomationError(
+            AUTOMATION_STORAGE_ERROR,
+            details=check_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf),
+        ) from exc
     assets: dict[str, Any] = {"round_id": round_id}
     if include_pdf:
         assets["pdf"] = generate_round_pdf(round_id)
@@ -1078,9 +1368,16 @@ def _download_preview_audio(
     try:
         track = deezer_client.get_track(song.deezer_id)
     except Exception as exc:
+        current_app.logger.error(
+            "Deezer metadata lookup failed for song %s (%s): %s",
+            song.id,
+            song.deezer_id,
+            exc,
+            exc_info=True,
+        )
         return None, None, _quality_issue(
             "deezer_lookup_failed",
-            f"Could not fetch Deezer metadata for {song.artist} - {song.title}: {exc}",
+            f"Could not fetch Deezer metadata for {song.artist} - {song.title}. Check the server logs.",
             song,
         )
 
@@ -1102,29 +1399,60 @@ def _download_preview_audio(
                     preview_file.write(chunk)
         return preview_url, AudioSegment.from_file(preview_path), None
     except Exception as exc:
+        current_app.logger.error(
+            "Preview download/decode failed for song %s (%s): %s",
+            song.id,
+            song.deezer_id,
+            exc,
+            exc_info=True,
+        )
         return preview_url, None, _quality_issue(
             "preview_download_failed",
-            f"Could not download or decode preview for {song.artist} - {song.title}: {exc}",
+            f"Could not download or decode preview for {song.artist} - {song.title}. Replace this song or retry later.",
             song,
-            {"preview_url": preview_url},
+            {"preview_url_present": bool(preview_url)},
         )
 
 
+def _selected_track_hint_scripts(round_id: int) -> list[RoundAudioScript]:
+    """Return selected generated per-track hints in playback order."""
+    return (
+        RoundAudioScript.query.filter_by(
+            round_id=round_id,
+            script_type="track_hint",
+            selected=True,
+        )
+        .filter(RoundAudioScript.generated_mp3_path.isnot(None))
+        .order_by(RoundAudioScript.cue_position.asc(), RoundAudioScript.id.asc())
+        .all()
+    )
+
+
 def _round_audio_components(
-    user: User, song_count: int
+    user: User, song_count: int, round_id: int | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     issues: list[dict[str, Any]] = []
-    components: dict[str, Any] = {"custom_audio_ms": {}, "number_audio_ms": []}
+    components: dict[str, Any] = {
+        "custom_audio_ms": {},
+        "number_audio_ms": [],
+        "hint_audio_ms": {},
+    }
 
     for mp3_type in ("intro", "replay", "outro"):
         try:
             segment = AudioSegment.from_mp3(get_mp3_path(user, mp3_type))
             components["custom_audio_ms"][mp3_type] = len(segment)
         except Exception as exc:
+            current_app.logger.error(
+                "Could not load %s audio for duration validation: %s",
+                mp3_type,
+                exc,
+                exc_info=True,
+            )
             issues.append(
                 _quality_issue(
                     "custom_audio_failed",
-                    f"Could not load {mp3_type} audio for duration validation: {exc}",
+                    f"Could not load {mp3_type} audio for duration validation. Check the server logs.",
                 )
             )
 
@@ -1133,12 +1461,40 @@ def _round_audio_components(
         try:
             components["number_audio_ms"].append(len(AudioSegment.from_mp3(path)))
         except Exception as exc:
+            current_app.logger.error(
+                "Could not load number announcement %s for duration validation: %s",
+                index + 1,
+                exc,
+                exc_info=True,
+            )
             issues.append(
                 _quality_issue(
                     "number_audio_failed",
-                    f"Could not load number announcement {index + 1}: {exc}",
+                    f"Could not load number announcement {index + 1}. Check the server logs.",
                 )
             )
+
+    if round_id is not None:
+        for script in _selected_track_hint_scripts(round_id):
+            if not script.cue_position:
+                continue
+            path = os.path.join("/data", script.generated_mp3_path)
+            try:
+                components["hint_audio_ms"][script.cue_position] = len(AudioSegment.from_mp3(path))
+            except Exception as exc:
+                current_app.logger.error(
+                    "Could not load hint audio for round %s position %s: %s",
+                    round_id,
+                    script.cue_position,
+                    exc,
+                    exc_info=True,
+                )
+                issues.append(
+                    _quality_issue(
+                        "track_hint_audio_failed",
+                        f"Could not load hint audio for position {script.cue_position}. Check the server logs.",
+                    )
+                )
 
     return components, issues
 
@@ -1272,11 +1628,41 @@ def inspect_round_package(
 
     user = _find_user(user_id)
     song_ids = _round_song_ids(round_obj)
-    songs = _ordered_round_songs(round_obj)
+    songs_by_id = {
+        song.id: song
+        for song in Song.query.filter(Song.id.in_(song_ids)).all()
+    }
+    songs = [songs_by_id[song_id] for song_id in song_ids if song_id in songs_by_id]
+    song_slots = [
+        {
+            "position": index,
+            "stored_song_id": song_id,
+            "resolved": song_id in songs_by_id,
+            "song": _song_summary(songs_by_id[song_id]) if song_id in songs_by_id else None,
+        }
+        for index, song_id in enumerate(song_ids, start=1)
+    ]
     issues: list[dict[str, Any]] = []
     preview_checks: list[dict[str, Any]] = []
     remediation: list[dict[str, Any]] = []
     total_preview_ms = 0
+    service_health = {
+        "artifact_storage": artifact_storage_service_health(),
+        "spotify": spotify_service_health(user),
+        "dropbox": dropbox_service_health(user),
+    }
+    storage = service_health["artifact_storage"]
+    for issue in storage["issues"]:
+        issues.append(issue)
+        remediation.append(
+            {
+                "action": "repair_storage",
+                "issue_code": issue["code"],
+                "message": issue["message"],
+                "hint": issue["details"].get("hint"),
+                "path": issue["details"].get("path"),
+            }
+        )
 
     actual_song_count = len(song_ids)
     if actual_song_count != expected_song_count:
@@ -1341,10 +1727,15 @@ def inspect_round_package(
         )
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        for index, song in enumerate(songs, start=1):
+        for slot in song_slots:
+            song = songs_by_id.get(slot["stored_song_id"])
+            if not song:
+                continue
+            index = slot["position"]
             preview_url, audio, issue = _download_preview_audio(song, temp_dir)
             check = {
                 "position": index,
+                "stored_song_id": slot["stored_song_id"],
                 "song_id": song.id,
                 "title": song.title,
                 "artist": song.artist,
@@ -1428,7 +1819,7 @@ def inspect_round_package(
                     )
             preview_checks.append(check)
 
-    components, component_issues = _round_audio_components(user, len(songs))
+    components, component_issues = _round_audio_components(user, len(songs), round_id=round_id)
     issues.extend(component_issues)
     expected_ms = None
     if not component_issues:
@@ -1438,6 +1829,7 @@ def inspect_round_package(
             + custom_audio_ms.get("replay", 0)
             + custom_audio_ms.get("outro", 0)
             + 2 * sum(components["number_audio_ms"])
+            + sum((components.get("hint_audio_ms") or {}).values())
             + 2 * total_preview_ms
         )
 
@@ -1448,14 +1840,16 @@ def inspect_round_package(
         for warning in pdf_result.get("warnings", []):
             issues.append(_quality_issue("pdf_quality_warning", warning))
     except Exception as exc:
-        issues.append(_quality_issue("pdf_inspection_failed", str(exc)))
+        current_app.logger.error("PDF inspection failed for round %s: %s", round_id, exc, exc_info=True)
+        issues.append(_quality_issue("pdf_inspection_failed", AUTOMATION_PDF_INSPECTION_ERROR))
 
     try:
         mp3_result = inspect_mp3_quality(round_id=round_id)
         for warning in mp3_result.get("warnings", []):
             issues.append(_quality_issue("mp3_quality_warning", warning))
     except Exception as exc:
-        issues.append(_quality_issue("mp3_inspection_failed", str(exc)))
+        current_app.logger.error("MP3 inspection failed for round %s: %s", round_id, exc, exc_info=True)
+        issues.append(_quality_issue("mp3_inspection_failed", AUTOMATION_MP3_INSPECTION_ERROR))
 
     if expected_ms is not None and mp3_result and mp3_result.get("duration_seconds") is not None:
         expected_seconds = expected_ms / 1000
@@ -1467,7 +1861,7 @@ def inspect_round_package(
                 (
                     f"Generated MP3 is {actual_seconds:.1f}s, expected about "
                     f"{expected_seconds:.1f}s from intro, replay, outro, number "
-                    "announcements, and two plays of every preview."
+                    "announcements, optional hints, and two plays of every preview."
                 ),
                 details={
                     "actual_seconds": round(actual_seconds, 3),
@@ -1498,6 +1892,12 @@ def inspect_round_package(
         "preview_download_failed",
     }:
         status = "needs_substitution"
+    elif issue_codes & {
+        "artifact_storage_missing",
+        "artifact_storage_not_directory",
+        "artifact_storage_not_writable",
+    }:
+        status = "storage_unhealthy"
     elif issue_codes & {"pdf_inspection_failed", "mp3_inspection_failed", "round_mp3_duration_mismatch"}:
         status = "render_failed"
     else:
@@ -1511,8 +1911,11 @@ def inspect_round_package(
         "actual_song_count": actual_song_count,
         "resolved_song_count": resolved_song_count,
         "song_count": len(songs),
+        "song_slots": song_slots,
         "preview_checks": preview_checks,
         "components": components,
+        "storage": storage,
+        "service_health": service_health,
         "expected_duration_seconds": None if expected_ms is None else round(expected_ms / 1000, 3),
         "pdf": pdf_result,
         "mp3": mp3_result,
@@ -1543,6 +1946,812 @@ def round_repair_report(
         duration_tolerance_seconds=duration_tolerance_seconds,
     )
     return {"quality": quality, "report": quality["report"]}
+
+
+def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "service_name": record.service_name,
+        "item_type": record.item_type,
+        "item_id": record.item_id,
+        "item_url": record.item_url,
+        "priority": record.priority,
+        "user_id": record.user_id,
+        "status": record.status,
+        "created_at": _datetime_payload(record.created_at),
+        "started_at": _datetime_payload(record.started_at),
+        "completed_at": _datetime_payload(record.completed_at),
+        "duration_seconds": record.duration,
+        "imported_count": record.imported_count or 0,
+        "skipped_count": record.skipped_count or 0,
+        "attempt_count": record.attempt_count or 0,
+        "max_attempts": record.max_attempts or 1,
+        "error_message": record.error_message,
+    }
+
+
+def import_progress_events(
+    user_id: int | None = None,
+    include_recent: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return import queue and job status for polling MCP clients."""
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+
+    queue = current_app.config.get("IMPORT_QUEUE")
+    query = ImportJobRecord.query
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+
+    statuses = ("pending", "processing", "completed", "failed", "dead_letter")
+    stats = {
+        status: query.filter_by(status=status).count()
+        for status in statuses
+    }
+    active_jobs = (
+        query.filter(ImportJobRecord.status.in_(("pending", "processing")))
+        .order_by(
+            ImportJobRecord.priority.asc(),
+            ImportJobRecord.created_at.asc(),
+            ImportJobRecord.id.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    recent_jobs = []
+    if include_recent:
+        recent_jobs = (
+            query.order_by(
+                ImportJobRecord.completed_at.desc().nullslast(),
+                ImportJobRecord.created_at.desc(),
+                ImportJobRecord.id.desc(),
+            )
+            .limit(limit)
+            .all()
+        )
+
+    return {
+        "ok": True,
+        "queue_initialized": queue is not None,
+        "queue_size": queue.qsize() if queue else None,
+        "queue_snapshot": queue.snapshot() if queue else [],
+        "stats": stats,
+        "active_jobs": [_import_job_summary(record) for record in active_jobs],
+        "recent_jobs": [_import_job_summary(record) for record in recent_jobs],
+        "hints": [
+            "Poll this tool while imports are active. Dead-letter jobs require manual review."
+        ],
+    }
+
+
+def retry_import_job(job_id: int, reset_attempts: bool = False) -> dict[str, Any]:
+    """Move a failed or dead-letter import job back to pending and enqueue it."""
+    record = db.session.get(ImportJobRecord, job_id)
+    if not record:
+        raise AutomationError(f"Import job {job_id} was not found.")
+    if record.status not in {"failed", "dead_letter"}:
+        raise AutomationError(
+            f"Import job {job_id} is {record.status}; only failed or dead_letter jobs can retry."
+        )
+
+    record.status = "pending"
+    record.started_at = None
+    record.completed_at = None
+    record.error_message = None
+    if reset_attempts:
+        record.attempt_count = 0
+    db.session.commit()
+
+    queue = current_app.config.get("IMPORT_QUEUE") or current_app.config.get("import_queue")
+    enqueued = False
+    if queue:
+        queue.enqueue_record(record)
+        enqueued = True
+
+    return {
+        "retried": True,
+        "enqueued": enqueued,
+        "job": _import_job_summary(record),
+        "hints": [] if enqueued else [
+            "No in-process import queue is configured; a database-backed worker can still pick up this pending job."
+        ],
+    }
+
+
+def _split_playlist_line(line: str) -> tuple[str | None, str | None, float, list[str]]:
+    text = re.sub(r"^\s*(?:\d+[\).\-\s]+|[-*]\s+)", "", line).strip()
+    text = text.strip("\"'")
+    issues: list[str] = []
+    confidence = 0.95
+
+    if not text:
+        return None, None, 0.0, ["empty_line"]
+
+    spotify_match = re.search(r"open\.spotify\.com/track/([A-Za-z0-9]+)", text)
+    deezer_match = re.search(r"deezer\.com/(?:[a-z]{2}/)?track/(\d+)", text)
+    if spotify_match or deezer_match:
+        issues.append("platform_track_url")
+        return text, None, 0.55, issues
+
+    for delimiter in (" - ", " – ", " — ", "\t", ";", ","):
+        if delimiter in text:
+            left, right = [part.strip() for part in text.split(delimiter, 1)]
+            if left and right:
+                return right, left, confidence, issues
+
+    by_match = re.match(r"(.+?)\s+by\s+(.+)", text, flags=re.IGNORECASE)
+    if by_match:
+        return by_match.group(1).strip(), by_match.group(2).strip(), 0.85, issues
+
+    issues.append("missing_artist")
+    return text, None, 0.35, issues
+
+
+def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
+    """Parse pasted text or CSV-like playlist rows into reviewable candidates."""
+    if not text or not text.strip():
+        raise AutomationError("text must not be empty.")
+    if limit < 1 or limit > 500:
+        raise AutomationError("limit must be between 1 and 500.")
+
+    candidates = []
+    low_confidence = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if len(candidates) >= limit:
+            break
+        title, artist, confidence, issues = _split_playlist_line(raw_line)
+        if title is None:
+            continue
+        candidate = {
+            "line": line_number,
+            "raw": raw_line.strip(),
+            "title": title,
+            "artist": artist,
+            "confidence": confidence,
+            "needs_review": confidence < 0.8 or bool(issues),
+            "issues": issues,
+        }
+        candidates.append(candidate)
+        if candidate["needs_review"]:
+            low_confidence.append(candidate)
+
+    return {
+        "count": len(candidates),
+        "candidates": candidates,
+        "low_confidence_count": len(low_confidence),
+        "low_confidence": low_confidence,
+        "ready_for_import": bool(candidates) and not low_confidence,
+        "hints": [
+            "Review low-confidence rows before importing or creating a round.",
+            "Preferred format is 'Artist - Title' with one song per line.",
+        ],
+    }
+
+
+def _catalog_match_for_candidate(candidate: dict[str, Any]) -> Song | None:
+    title = (candidate.get("title") or "").strip()
+    artist = (candidate.get("artist") or "").strip()
+    if not title or not artist:
+        return None
+    return (
+        Song.query.filter(Song.title.ilike(title), Song.artist.ilike(artist))
+        .order_by(Song.used_count.asc(), Song.id.asc())
+        .first()
+    )
+
+
+def resolve_text_playlist(
+    text: str,
+    limit: int = 100,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Parse a text playlist and resolve confident rows against the catalog."""
+    parsed = parse_text_playlist(text, limit=limit)
+    resolved = []
+    unresolved = []
+    for candidate in parsed["candidates"]:
+        match = None
+        if candidate["confidence"] >= min_confidence and not candidate["needs_review"]:
+            match = _catalog_match_for_candidate(candidate)
+
+        item = dict(candidate)
+        if match:
+            item["song"] = _song_summary(match)
+            item["song_id"] = match.id
+            resolved.append(item)
+        else:
+            item["song"] = None
+            item["song_id"] = None
+            if candidate["confidence"] < min_confidence:
+                item.setdefault("issues", []).append("below_min_confidence")
+            elif candidate["artist"]:
+                item.setdefault("issues", []).append("not_found_in_catalog")
+            unresolved.append(item)
+
+    return {
+        "parsed": parsed,
+        "resolved_count": len(resolved),
+        "unresolved_count": len(unresolved),
+        "resolved": resolved,
+        "unresolved": unresolved,
+        "ready_for_round": parsed["count"] > 0 and not unresolved,
+        "hints": [
+            "Resolve or correct every unresolved row before creating a round.",
+            "Use add_song or import_catalog_item to add missing catalog entries.",
+        ],
+    }
+
+
+def create_round_from_text_playlist(
+    text: str,
+    name: str | None = None,
+    count: int = 8,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Create a manual round from a parsed text playlist only when all rows resolve."""
+    resolved = resolve_text_playlist(text, limit=max(count, 1), min_confidence=min_confidence)
+    if resolved["unresolved_count"]:
+        raise AutomationError(
+            "Text playlist has unresolved rows.",
+            details={
+                "created": False,
+                "status": "needs_review",
+                "resolution": resolved,
+            },
+        )
+    song_ids = [item["song_id"] for item in resolved["resolved"]]
+    if len(song_ids) != count:
+        message = f"Text playlist resolved {len(song_ids)} songs; expected exactly {count}."
+        raise AutomationError(
+            message,
+            details={
+                "created": False,
+                "status": "song_count_mismatch",
+                "expected_song_count": count,
+                "resolved_song_count": len(song_ids),
+                "resolution": resolved,
+            },
+        )
+
+    round_result = create_round(
+        name=name,
+        round_type="manual",
+        count=count,
+        song_ids=song_ids,
+    )
+    return {
+        "created": True,
+        "resolution": resolved,
+        "round": round_result["round"],
+    }
+
+
+def _song_usage_warning(song: Song, window_start: datetime) -> dict[str, Any] | None:
+    if not song.last_used:
+        return None
+    if song.last_used < window_start:
+        return None
+    return {
+        "song": _song_summary(song),
+        "warning": (
+            f"Heads up: {song.artist} - {song.title} was used on "
+            f"{song.last_used.date().isoformat()}."
+        ),
+        "last_used": _datetime_payload(song.last_used),
+    }
+
+
+def recent_usage_summary(
+    user_id: int | None = None,
+    months: int = 3,
+    song_ids: list[int] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Summarize recent song and round usage for autonomous round planning."""
+    if months < 1 or months > 24:
+        raise AutomationError("months must be between 1 and 24.")
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+
+    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    rounds_query = Round.query.filter(Round.created_at >= window_start)
+    rounds = rounds_query.order_by(Round.created_at.desc(), Round.id.desc()).limit(limit).all()
+
+    songs_query = Song.query.filter(Song.last_used.isnot(None)).filter(Song.last_used >= window_start)
+    songs = songs_query.order_by(Song.used_count.desc(), Song.last_used.desc()).limit(limit).all()
+
+    selected_warnings = []
+    if song_ids:
+        selected = Song.query.filter(Song.id.in_(song_ids)).all()
+        selected_warnings = [
+            warning for song in selected
+            if (warning := _song_usage_warning(song, window_start)) is not None
+        ]
+
+    user = _find_user(user_id) if user_id is not None else None
+    return {
+        "window_months": months,
+        "window_start": _datetime_payload(window_start),
+        "user": None if user is None else {"id": user.id, "username": user.username, "email": user.email},
+        "round_count": len(rounds),
+        "recent_rounds": [_round_summary(round_obj) for round_obj in rounds],
+        "frequent_songs": [_song_summary(song) for song in songs],
+        "selected_song_warnings": selected_warnings,
+        "guidance": [
+            "Avoid selected_song_warnings unless there is a strong thematic reason.",
+            "Prefer lower used_count songs when quality and recognizability are comparable.",
+        ],
+    }
+
+
+def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+    """Return catalog and round analytics useful for planning and backlog decisions."""
+    if months < 1 or months > 36:
+        raise AutomationError("months must be between 1 and 36.")
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+
+    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    recent_rounds = Round.query.filter(Round.created_at >= window_start).count()
+    most_used = (
+        Song.query.order_by(Song.used_count.desc(), Song.artist.asc(), Song.title.asc())
+        .limit(limit)
+        .all()
+    )
+    stale_candidates = (
+        Song.query.filter((Song.used_count == 0) | (Song.used_count.is_(None)))
+        .order_by(Song.artist.asc(), Song.title.asc())
+        .limit(limit)
+        .all()
+    )
+    missing_preview_count = Song.query.filter(
+        Song.preview_url.is_(None),
+        Song.deezer_preview_url.is_(None),
+        Song.spotify_preview_url.is_(None),
+    ).count()
+
+    genre_rows = db.session.query(Song.genre, db.func.count(Song.id)).group_by(Song.genre).all()
+    genre_counts = {
+        genre or "Unknown": count
+        for genre, count in sorted(genre_rows, key=lambda item: (-(item[1] or 0), item[0] or ""))
+    }
+
+    return {
+        "window_months": months,
+        "window_start": _datetime_payload(window_start),
+        "song_count": Song.query.count(),
+        "round_count": Round.query.count(),
+        "recent_round_count": recent_rounds,
+        "missing_preview_count": missing_preview_count,
+        "genre_counts": genre_counts,
+        "most_used_songs": [_song_summary(song) for song in most_used],
+        "unused_candidates": [_song_summary(song) for song in stale_candidates],
+        "guidance": [
+            "Prefer unused_candidates when they fit the theme and have usable previews.",
+            "Treat missing_preview_count as replacement pressure before scheduling email delivery.",
+        ],
+    }
+
+
+def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
+    """Return personalization context for an agent planning a quiz round."""
+    user = _find_user(user_id)
+    preferences = user.preferences
+    return {
+        "quizmaster": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
+        },
+        "preferences": {
+            "default_tts_service": preferences.default_tts_service if preferences else "polly",
+            "enable_intro": preferences.enable_intro if preferences else True,
+            "theme": preferences.theme if preferences else "light",
+            "has_intro_mp3": bool(user.intro_mp3),
+            "has_replay_mp3": bool(user.replay_mp3),
+            "has_outro_mp3": bool(user.outro_mp3),
+        },
+        "recent_usage": recent_usage_summary(user_id=user.id, months=months, limit=25),
+    }
+
+
+def round_planning_brief(
+    user_id: int,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    desired_song_count: int = 8,
+    months: int = 3,
+) -> dict[str, Any]:
+    """Build an agent-readable brief for planning a robust themed round."""
+    if desired_song_count < 1 or desired_song_count > 25:
+        raise AutomationError("desired_song_count must be between 1 and 25.")
+
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+    context = quizmaster_context(user_id=user_id, months=months)
+    date_notes = []
+    if parsed_date:
+        weekday = parsed_date.strftime("%A")
+        date_notes.append(f"Quiz date is {parsed_date.date().isoformat()} ({weekday}).")
+        if parsed_date.month == 12:
+            date_notes.append("Seasonal angle available: year-end, winter, holidays.")
+        elif parsed_date.month in {6, 7, 8}:
+            date_notes.append("Seasonal angle available: summer, festivals, travel.")
+
+    constraints = [
+        f"Build exactly {desired_song_count} songs.",
+        "Every selected song needs a playable preview before email delivery.",
+        "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
+        "Prefer mainstream recognizability unless the theme explicitly asks for deeper cuts.",
+    ]
+    return {
+        "theme": theme,
+        "quiz_date": _datetime_payload(parsed_date),
+        "date_notes": date_notes,
+        "desired_song_count": desired_song_count,
+        "constraints": constraints,
+        "quizmaster_context": context,
+        "agent_prompt": (
+            "Use this brief to propose a complete music round. Explain any repeated "
+            "song risk and return replacement ideas for weak preview candidates."
+        ),
+    }
+
+
+def draft_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    tone: str = "warm, concise, lightly humorous",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft intro, replay, and outro text for later TTS generation."""
+    round_obj = db.session.get(Round, round_id) if round_id is not None else None
+    if round_id is not None and not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+
+    user = _find_user(user_id) if user_id is not None else None
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+    songs = _ordered_round_songs(round_obj) if round_obj else []
+    theme_label = theme or (round_obj.name if round_obj and round_obj.name else "music round")
+    artist_names = ", ".join(song.artist for song in songs[:3])
+    date_phrase = f" on {parsed_date.date().isoformat()}" if parsed_date else ""
+    quizmaster_phrase = f" for {user.username}" if user else ""
+    song_hint = f" Expect artists like {artist_names}." if artist_names else ""
+
+    scripts = {
+        "intro": (
+            f"Welcome to the {theme_label}{date_phrase}{quizmaster_phrase}. "
+            f"Eight songs, twice through, and no mercy for confident wrong answers.{song_hint}"
+        ),
+        "replay": (
+            "Here comes the second listen. Trust your first instinct, unless your "
+            "first instinct was loudly explaining the wrong decade."
+        ),
+        "outro": (
+            "That is the music round. Lock in artist and title, compare notes quietly, "
+            "and prepare to defend every spelling choice."
+        ),
+    }
+    result = {
+        "round_id": round_id,
+        "round_name": round_obj.name if round_obj else None,
+        "user_id": user.id if user else None,
+        "quiz_date": _datetime_payload(parsed_date),
+        "theme": theme_label,
+        "tone": tone,
+        "scripts": scripts,
+        "next_step": "Review the text, then call generate_tts_snippet for intro, replay, and outro.",
+    }
+    if persist:
+        if round_id is None:
+            raise AutomationError("round_id is required when persist is true.")
+        saved = save_round_audio_scripts(
+            round_id=round_id,
+            user_id=user.id if user else None,
+            scripts=scripts,
+            quiz_date=parsed_date,
+            theme=theme_label,
+            tone=tone,
+        )
+        result["script_records"] = saved["scripts"]
+        result["next_step"] = (
+            "Review the saved script records, approve the preferred text, then "
+            "call generate_tts_from_script for intro, replay, and outro."
+        )
+    return result
+
+
+def _audio_script_summary(script: RoundAudioScript) -> dict[str, Any]:
+    return {
+        "id": script.id,
+        "round_id": script.round_id,
+        "user_id": script.user_id,
+        "script_type": script.script_type,
+        "text": script.text,
+        "status": script.status,
+        "tone": script.tone,
+        "theme": script.theme,
+        "cue_position": script.cue_position,
+        "quiz_date": _datetime_payload(script.quiz_date),
+        "selected": bool(script.selected),
+        "generated_mp3_path": script.generated_mp3_path,
+        "created_at": _datetime_payload(script.created_at),
+        "updated_at": _datetime_payload(script.updated_at),
+    }
+
+
+def _validate_script_type(script_type: str) -> str:
+    normalized = (script_type or "").strip().lower()
+    if normalized not in {"intro", "replay", "outro", "track_hint"}:
+        raise AutomationError("script_type must be intro, replay, outro, or track_hint.")
+    return normalized
+
+
+def _validate_script_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized not in {"draft", "reviewed", "approved", "rejected", "used"}:
+        raise AutomationError("status must be draft, reviewed, approved, rejected, or used.")
+    return normalized
+
+
+def save_round_audio_scripts(
+    round_id: int,
+    scripts: dict[str, str],
+    user_id: int | None = None,
+    quiz_date: str | datetime | None = None,
+    theme: str | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable intro/replay/outro text before assigning TTS audio."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    if not scripts:
+        raise AutomationError("scripts must include at least one script text.")
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    normalized_status = _validate_script_status(status)
+    parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
+
+    created_scripts = []
+    for raw_type, text in scripts.items():
+        script_type = _validate_script_type(raw_type)
+        if not text or not text.strip():
+            raise AutomationError(f"{script_type} script text must not be empty.")
+        script = RoundAudioScript(
+            round_id=round_obj.id,
+            user_id=user.id if user else None,
+            script_type=script_type,
+            text=text.strip(),
+            status=normalized_status,
+            tone=tone,
+            theme=theme,
+            quiz_date=parsed_date,
+        )
+        db.session.add(script)
+        created_scripts.append(script)
+    db.session.commit()
+    return {
+        "created": len(created_scripts),
+        "round": _round_summary(round_obj),
+        "scripts": [_audio_script_summary(script) for script in created_scripts],
+    }
+
+
+def _hint_text_for_song(song: Song, position: int, tone: str) -> str:
+    clues: list[str] = [f"Hint for song {position}."]
+    if song.year:
+        clues.append(f"It comes from {song.year}.")
+    if song.genre:
+        clues.append(f"Think {song.genre}.")
+    if song.popularity:
+        clues.append("This one has serious mainstream mileage.")
+    if not song.year and not song.genre:
+        clues.append("Listen for the era, then lock artist and title.")
+    if "funny" in tone.lower() or "humor" in tone.lower() or "humorous" in tone.lower():
+        clues.append("Confidence is welcome; overconfidence is traditional.")
+    return " ".join(clues)
+
+
+def draft_round_track_hints(
+    round_id: int,
+    user_id: int | None = None,
+    tone: str = "concise, playful, no title or artist spoilers",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Draft per-track hint text that can be played before snippets."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    songs = _ordered_round_songs(round_obj)
+    hints = [
+        {
+            "position": index,
+            "song_id": song.id,
+            "text": _hint_text_for_song(song, index, tone),
+        }
+        for index, song in enumerate(songs, start=1)
+    ]
+    result: dict[str, Any] = {
+        "round": _round_summary(round_obj),
+        "user_id": user.id if user else None,
+        "tone": tone,
+        "hints": hints,
+        "next_step": "Review hints, then call save_round_track_hints and generate_tts_from_script.",
+    }
+    if persist:
+        saved = save_round_track_hints(
+            round_id=round_id,
+            hints=hints,
+            user_id=user.id if user else None,
+            tone=tone,
+            status="draft",
+        )
+        result["script_records"] = saved["scripts"]
+        result["next_step"] = "Approve selected hint scripts, then call generate_tts_from_script for each hint."
+    return result
+
+
+def save_round_track_hints(
+    round_id: int,
+    hints: list[dict[str, Any]],
+    user_id: int | None = None,
+    tone: str | None = None,
+    status: str = "draft",
+) -> dict[str, Any]:
+    """Persist reviewable per-track hint scripts."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    if not hints:
+        raise AutomationError("hints must include at least one track hint.")
+    song_count = len(round_obj.song_id_list)
+    user = _find_user(user_id) if user_id is not None else round_obj.owner
+    normalized_status = _validate_script_status(status)
+
+    created_scripts = []
+    for hint in hints:
+        try:
+            position = int(hint.get("position"))
+        except (TypeError, ValueError):
+            raise AutomationError("Each hint needs a numeric position.")
+        if position < 1 or position > song_count:
+            raise AutomationError(f"Hint position {position} is outside this round's song range.")
+        text = (hint.get("text") or "").strip()
+        if not text:
+            raise AutomationError(f"Hint position {position} text must not be empty.")
+        script = RoundAudioScript(
+            round_id=round_obj.id,
+            user_id=user.id if user else None,
+            script_type="track_hint",
+            text=text,
+            status=normalized_status,
+            tone=tone,
+            cue_position=position,
+        )
+        db.session.add(script)
+        created_scripts.append(script)
+    db.session.commit()
+    return {
+        "created": len(created_scripts),
+        "round": _round_summary(round_obj),
+        "scripts": [_audio_script_summary(script) for script in created_scripts],
+    }
+
+
+def list_round_audio_scripts(
+    round_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List stored round-audio scripts for review workflows."""
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+    query = RoundAudioScript.query
+    if round_id is not None:
+        query = query.filter_by(round_id=round_id)
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    if status is not None:
+        query = query.filter_by(status=_validate_script_status(status))
+    scripts = (
+        query.order_by(
+            RoundAudioScript.created_at.desc(),
+            RoundAudioScript.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(scripts),
+        "scripts": [_audio_script_summary(script) for script in scripts],
+    }
+
+
+def update_round_audio_script(
+    script_id: int,
+    text: str | None = None,
+    status: str | None = None,
+    selected: bool | None = None,
+) -> dict[str, Any]:
+    """Edit or review one stored round-audio script."""
+    script = db.session.get(RoundAudioScript, script_id)
+    if not script:
+        raise AutomationError(f"RoundAudioScript {script_id} was not found.")
+    if text is not None:
+        if not text.strip():
+            raise AutomationError("text must not be empty.")
+        script.text = text.strip()
+    if status is not None:
+        script.status = _validate_script_status(status)
+    if selected is not None:
+        script.selected = bool(selected)
+    script.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"script": _audio_script_summary(script)}
+
+
+def generate_tts_from_script(
+    script_id: int,
+    service: str = "openai",
+    voice: str | None = None,
+    model: str | None = None,
+    stability: float | None = None,
+    similarity: float | None = None,
+) -> dict[str, Any]:
+    """Generate a user custom MP3 from an approved stored script."""
+    script = db.session.get(RoundAudioScript, script_id)
+    if not script:
+        raise AutomationError(f"RoundAudioScript {script_id} was not found.")
+    if script.status not in {"approved", "reviewed"}:
+        raise AutomationError("Script must be reviewed or approved before TTS generation.")
+    user_id = script.user_id or (script.round.user_id if script.round else None)
+    if user_id is None:
+        raise AutomationError("Script has no user or round owner for audio assignment.")
+
+    if script.script_type == "track_hint":
+        user = _find_user(user_id)
+        mp3_type = f"round_{script.round_id}_hint_{script.cue_position or script.id}"
+        path = generate_tts_mp3(
+            text=script.text,
+            username=user.username,
+            mp3_type=mp3_type,
+            service=service,
+            voice=voice,
+            model=model,
+            stability=stability,
+            similarity=similarity,
+        )
+        if not path:
+            raise AutomationError("TTS generation failed.")
+        generated = {
+            "user_id": user.id,
+            "mp3_type": script.script_type,
+            "path": path,
+        }
+    else:
+        generated = generate_tts_snippet(
+            user_id=user_id,
+            mp3_type=script.script_type,
+            text=script.text,
+            service=service,
+            voice=voice,
+            model=model,
+            stability=stability,
+            similarity=similarity,
+        )
+    script.generated_mp3_path = generated["path"]
+    script.selected = True
+    script.status = "used"
+    script.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"script": _audio_script_summary(script), "generated": generated}
 
 
 def _parse_datetime_utc(value: str | datetime) -> datetime:
@@ -1599,6 +2808,21 @@ def schedule_round_email(
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
     scheduled_at = _parse_datetime_utc(scheduled_for)
+    email_health = email_service_health(required=True)
+    if not email_health["ok"]:
+        message = "Email configuration is not ready for scheduled delivery."
+        raise AutomationError(
+            message,
+            details={
+                "scheduled": False,
+                "status": "email_unhealthy",
+                "recipient": target,
+                "scheduled_for": _datetime_payload(scheduled_at),
+                "service_health": {"email": email_health},
+                "hints": [issue["message"] for issue in email_health["issues"]],
+            },
+        )
+
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
@@ -1704,13 +2928,19 @@ def process_due_scheduled_round_emails(
         except Exception as exc:
             export.status = "failed"
             export.processed_at = datetime.utcnow()
-            export.error_message = str(exc)
+            current_app.logger.error(
+                "Scheduled round email export %s failed: %s",
+                export.id,
+                exc,
+                exc_info=True,
+            )
+            export.error_message = AUTOMATION_SCHEDULED_EMAIL_ERROR
             db.session.commit()
             details = getattr(exc, "details", None)
             results.append(
                 {
                     "export": _round_export_summary(export),
-                    "error": str(exc),
+                    "error": AUTOMATION_SCHEDULED_EMAIL_ERROR,
                     "details": details,
                 }
             )
@@ -1823,7 +3053,7 @@ def inspect_mp3_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join("/data/rounds", f"round_{round_id}.mp3")
+        path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
     if not os.path.exists(path):
         raise AutomationError(f"MP3 file not found: {path}")
 
@@ -1864,7 +3094,7 @@ def inspect_pdf_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join("/data/pdfs", f"round_{round_id}.pdf")
+        path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
     if not os.path.exists(path):
         raise AutomationError(f"PDF file not found: {path}")
 

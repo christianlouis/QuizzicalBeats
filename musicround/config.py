@@ -42,6 +42,7 @@ class Config:
     
     SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    DATABASE_REQUIRE_MANAGED = os.getenv("DATABASE_REQUIRE_MANAGED", "False") == "True"
 
     
     # Spotify API credentials    
@@ -80,6 +81,11 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
     MAIL_SENDER = os.getenv("MAIL_SENDER", "quizzical-beats@example.com")
     MAIL_RECIPIENT = os.getenv("MAIL_RECIPIENT", "admin@example.com")
+
+    # Round artifact storage. These directories must already exist and be
+    # writable before MP3/PDF generation, export, scheduling, or delivery.
+    ROUND_MP3_DIR = os.getenv("ROUND_MP3_DIR", "/data/rounds")
+    ROUND_PDF_DIR = os.getenv("ROUND_PDF_DIR", "/data/pdfs")
     
     # Automation settings
     AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN")
@@ -113,6 +119,7 @@ class Config:
     
     # Static OAuth URL configuration (for production environments)
     STATIC_OAUTH_URLS = os.getenv("STATIC_OAUTH_URLS", "False") == "True"
+    ENABLE_OAUTH_DEBUG = os.getenv("ENABLE_OAUTH_DEBUG", "False") == "True"
     OAUTH_SPOTIFY_AUTH_URL = os.getenv("OAUTH_SPOTIFY_AUTH_URL")
     OAUTH_SPOTIFY_LINK_URL = os.getenv("OAUTH_SPOTIFY_LINK_URL")
     OAUTH_GOOGLE_URL = os.getenv("OAUTH_GOOGLE_URL")

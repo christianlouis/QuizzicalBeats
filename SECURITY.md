@@ -213,6 +213,7 @@ logging.basicConfig(
 - [ ] Generated secure SECRET_KEY (32+ bytes)
 - [ ] Generated secure AUTOMATION_TOKEN (32+ bytes)
 - [ ] Set DEBUG=False
+- [ ] Keep OAuth diagnostics disabled (ENABLE_OAUTH_DEBUG=False) unless actively troubleshooting
 - [ ] Enabled HTTPS (USE_HTTPS=True)
 - [ ] Using production database (PostgreSQL/MySQL)
 - [ ] Database credentials are strong and unique

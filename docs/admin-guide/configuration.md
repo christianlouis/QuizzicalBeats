@@ -127,6 +127,10 @@ AUTHENTIK_METADATA_URL=https://authentik.example.com/.well-known/openid-configur
 DROPBOX_APP_KEY=your-dropbox-app-key
 DROPBOX_APP_SECRET=your-dropbox-app-secret
 DROPBOX_REDIRECT_URI=http://localhost:5000/users/dropbox/callback
+
+# Optional admin-only OAuth URL diagnostics. Keep disabled in production unless
+# actively troubleshooting redirect/proxy configuration.
+ENABLE_OAUTH_DEBUG=False
 ```
 
 ### Email Configuration

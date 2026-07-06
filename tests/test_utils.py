@@ -41,6 +41,13 @@ class TestGenerateToken:
         # With 32-char alphanumeric tokens the collision probability is negligible
         assert len(tokens) == 10
 
+    @pytest.mark.parametrize('length', [0, -1, 1.5, '32'])
+    def test_invalid_length_rejected(self, length):
+        """Invalid token lengths should not silently create weak/empty tokens."""
+        from musicround.helpers.utils import generate_token
+        with pytest.raises(ValueError):
+            generate_token(length=length)
+
 
 class TestAllowedFile:
     """Tests for the allowed_file function."""

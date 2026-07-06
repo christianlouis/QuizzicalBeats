@@ -1,5 +1,11 @@
 """Tests for email helper SMTP transport behavior."""
-from musicround.helpers.email_helper import send_email
+import smtplib
+
+from musicround.helpers.email_helper import (
+    EMAIL_CONFIGURATION_ERROR,
+    EMAIL_DELIVERY_ERROR,
+    send_email,
+)
 
 
 class FakeSmtpServer:
@@ -30,6 +36,14 @@ class FakeSmtpServer:
 
     def sendmail(self, sender, recipient, message):
         self.sendmail_args = (sender, recipient, message)
+
+
+class FailingSmtpServer(FakeSmtpServer):
+    """SMTP test double that fails during delivery."""
+
+    def sendmail(self, sender, recipient, message):
+        super().sendmail(sender, recipient, message)
+        raise smtplib.SMTPException('smtp password=secret failed')
 
 
 def _configure_mail(app, use_tls=False, use_ssl=False):
@@ -92,3 +106,53 @@ def test_send_email_plain_smtp_does_not_start_tls_when_disabled(app, monkeypatch
 
     assert success is True
     assert FakeSmtpServer.instances[0].starttls_called is False
+
+
+def test_send_email_returns_safe_message_for_missing_configuration(app):
+    """Missing SMTP configuration should not leak exact missing secret names."""
+    app.config.update(
+        MAIL_HOST=None,
+        MAIL_PORT=None,
+        MAIL_USERNAME=None,
+        MAIL_PASSWORD=None,
+        MAIL_SENDER=None,
+    )
+
+    success, message = send_email('to@example.test', 'Subject', 'Body')
+
+    assert success is False
+    assert message == EMAIL_CONFIGURATION_ERROR
+    assert 'MAIL_PASSWORD' not in message
+    assert 'MAIL_HOST' not in message
+
+
+def test_send_email_returns_safe_message_for_smtp_errors(app, monkeypatch):
+    """SMTP exception details should stay in logs, not helper return values."""
+    _configure_mail(app)
+    FakeSmtpServer.instances = []
+
+    monkeypatch.setattr('musicround.helpers.email_helper.smtplib.SMTP', FailingSmtpServer)
+
+    success, message = send_email('to@example.test', 'Subject', 'Body')
+
+    assert success is False
+    assert message == EMAIL_DELIVERY_ERROR
+    assert 'secret' not in message
+    assert 'password' not in message
+
+
+def test_send_email_returns_safe_message_for_unexpected_transport_errors(app, monkeypatch):
+    """Unexpected transport errors should return the same safe delivery message."""
+    _configure_mail(app)
+
+    def failing_smtp(*_args, **_kwargs):
+        raise RuntimeError('socket token=transport-secret failed')
+
+    monkeypatch.setattr('musicround.helpers.email_helper.smtplib.SMTP', failing_smtp)
+
+    success, message = send_email('to@example.test', 'Subject', 'Body')
+
+    assert success is False
+    assert message == EMAIL_DELIVERY_ERROR
+    assert 'transport-secret' not in message
+    assert 'token' not in message

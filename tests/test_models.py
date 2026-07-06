@@ -3,7 +3,7 @@ import pytest
 from datetime import datetime, timedelta
 from musicround.models import (
     db, User, Role, UserPreferences, Tag, SongTag, Song,
-    Round, RoundExport, SystemSetting, ImportJobRecord,
+    Round, RoundAudioScript, RoundExport, RoundShare, SystemSetting, ImportJobRecord,
 )
 
 
@@ -202,6 +202,84 @@ class TestUserPreferencesModel:
         db.session.refresh(user)
         assert user.preferences is not None
         assert user.preferences.theme == 'dark'
+
+
+class TestRoundCollaborationModels:
+    """Tests for round ownership, sharing, and audio script review models."""
+
+    def test_round_owner_relationship(self, app):
+        """Rounds can be owned by a quizmaster."""
+        user = User(username='roundowner', email='roundowner@example.com')
+        db.session.add(user)
+        db.session.commit()
+
+        round_ = Round(
+            name='Owned Round',
+            round_type='manual',
+            round_criteria_used='test',
+            songs='1,2',
+            owner=user,
+            visibility='private',
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        assert round_.user_id == user.id
+        assert user.rounds.first().id == round_.id
+
+    def test_round_share_unique_user_per_round(self, app):
+        """A user has one explicit share grant per round."""
+        owner = User(username='shareowner', email='shareowner@example.com')
+        viewer = User(username='shareviewer', email='shareviewer@example.com')
+        db.session.add_all([owner, viewer])
+        db.session.commit()
+        round_ = Round(
+            name='Shared Round',
+            round_type='manual',
+            round_criteria_used='test',
+            songs='1',
+            owner=owner,
+            visibility='shared',
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        share = RoundShare(round=round_, user=viewer, role='viewer')
+        db.session.add(share)
+        db.session.commit()
+
+        assert round_.shares.count() == 1
+        assert viewer.shared_rounds.first().round_id == round_.id
+
+    def test_round_audio_script_creation(self, app):
+        """Intro/replay/outro text can be stored before TTS generation."""
+        user = User(username='scriptuser', email='scriptuser@example.com')
+        db.session.add(user)
+        db.session.commit()
+        round_ = Round(
+            name='Script Round',
+            round_type='manual',
+            round_criteria_used='test',
+            songs='1',
+            owner=user,
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        script = RoundAudioScript(
+            round=round_,
+            user=user,
+            script_type='intro',
+            text='Welcome to the round',
+            status='draft',
+            theme='summer',
+        )
+        db.session.add(script)
+        db.session.commit()
+
+        assert round_.audio_scripts.count() == 1
+        assert user.round_audio_scripts.first().script_type == 'intro'
+        assert script.selected is False
 
 
 class TestTagModel:

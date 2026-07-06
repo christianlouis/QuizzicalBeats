@@ -1,7 +1,8 @@
 """Additional tests for setup, system health, and API branches."""
-import pytest
 import json
-from musicround.models import db, User, Role, Song, Tag
+import pytest
+from musicround.helpers.import_queue import ImportQueue
+from musicround.models import db, ImportJobRecord, User, Role, Song, Tag
 
 
 def _create_user(app, username, email, password='TestPass123!', is_admin=False):
@@ -69,9 +70,161 @@ class TestSetupRoute:
         response = client.get('/users/setup', follow_redirects=True)
         assert response.status_code == 200
 
+    def test_setup_failure_hides_exception_details(self, app, client, monkeypatch):
+        """Setup failure flashes should not expose database or token-like details."""
+        _create_user(app, 'setup_error_user', 'setuperror@example.com')
+        _login(app, client, 'setup_error_user')
+
+        def fail_commit():
+            raise RuntimeError('database down token=setup-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+
+        response = client.get('/users/setup', follow_redirects=True)
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Error setting up admin privileges. Please try again or check the server logs.' in body
+        assert 'database down' not in body
+        assert 'setup-secret' not in body
+        assert 'traceback' not in body
+
 
 class TestSystemHealthRoute:
     """Tests for /users/system-health route."""
+
+    def test_healthz_public_safe_payload(self, client):
+        """The uptime endpoint should not require login or expose secrets."""
+        response = client.get('/healthz')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['ok'] is True
+        assert data['status'] == 'ok'
+        assert data['services']['database']['status'] == 'ok'
+        assert data['services']['import_queue']['initialized'] is True
+        assert 'password' not in json.dumps(data).lower()
+        assert 'token' not in json.dumps(data).lower()
+
+    def test_import_queue_health_reports_pending_without_local_workers(self, app):
+        """Queue health should warn when imports are waiting but local workers are disabled."""
+        from musicround.helpers.service_health import import_queue_service_health
+
+        with app.app_context():
+            app.config['import_queue'] = ImportQueue()
+            app.config['import_workers'] = []
+            app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = False
+            user = User(username='queue_health_user', email='queue-health@example.com')
+            db.session.add(user)
+            db.session.commit()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='pending-playlist',
+                    user_id=user.id,
+                    status='pending',
+                )
+            )
+            db.session.commit()
+
+            health = import_queue_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['jobs']['pending'] == 1
+        assert health['issues'][0]['code'] == 'import_jobs_waiting_without_local_workers'
+
+    def test_import_queue_health_reports_dead_letter_jobs(self, app):
+        """Dead-letter jobs should be visible as repairable health warnings."""
+        from musicround.helpers.service_health import import_queue_service_health
+
+        with app.app_context():
+            app.config['import_queue'] = ImportQueue()
+            app.config['import_workers'] = [object()]
+            app.config['IMPORT_WORKERS_ENABLED_RESOLVED'] = True
+            app.config['IMPORT_WORKER_COUNT_RESOLVED'] = 1
+            user = User(username='queue_dead_user', email='queue-dead@example.com')
+            db.session.add(user)
+            db.session.commit()
+            db.session.add(
+                ImportJobRecord(
+                    service_name='spotify',
+                    item_type='playlist',
+                    item_id='dead-playlist',
+                    user_id=user.id,
+                    status='dead_letter',
+                )
+            )
+            db.session.commit()
+
+            health = import_queue_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['worker_count'] == 1
+        assert health['jobs']['dead_letter'] == 1
+        assert any(issue['code'] == 'import_jobs_need_manual_review' for issue in health['issues'])
+
+    def test_healthz_reports_degraded_storage(self, client, monkeypatch):
+        """Storage failures should make /healthz fail for deployment gates."""
+        from musicround.helpers import service_health
+
+        monkeypatch.setattr(
+            service_health,
+            'check_round_artifact_storage',
+            lambda include_mp3=True, include_pdf=True: {
+                'ok': False,
+                'checks': [],
+                'issues': [{
+                    'code': 'artifact_storage_not_writable',
+                    'severity': 'error',
+                    'message': 'Round MP3 directory is not writable.',
+                    'details': {'hint': 'Fix storage permissions.'},
+                }],
+                'hints': ['Fix storage permissions.'],
+            },
+        )
+
+        response = client.get('/healthz')
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert data['ok'] is False
+        assert data['status'] == 'degraded'
+        assert data['services']['artifact_storage']['issues'][0]['code'] == 'artifact_storage_not_writable'
+
+    def test_healthz_database_error_hides_exception_details(self, app, client, monkeypatch):
+        """Database probe failures must not expose raw driver errors or credentials."""
+        def fail_probe(*args, **kwargs):
+            raise RuntimeError('postgres://qb:secret-password@db.example/qb token=health-secret traceback')
+
+        monkeypatch.setattr(db.session, 'execute', fail_probe)
+
+        response = client.get('/healthz')
+
+        body = response.get_data(as_text=True)
+        data = response.get_json()
+        assert response.status_code == 503
+        assert data['services']['database']['issues'][0]['code'] == 'database_unavailable'
+        assert 'secret-password' not in body
+        assert 'health-secret' not in body
+        assert 'traceback' not in body
+
+    def test_database_health_warns_for_legacy_data_sqlite(self, app):
+        """Legacy production SQLite config should be visible without failing uptime checks."""
+        from musicround.helpers.service_health import database_service_health
+
+        with app.app_context():
+            app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/song_data.db'
+            app.config['DATABASE_BACKEND'] = 'sqlite'
+
+            health = database_service_health()
+
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert health['issues'][0]['code'] == 'legacy_sqlite_data_store'
+        assert 'managed database secret' in health['issues'][0]['details']['hint']
 
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""
@@ -86,6 +239,28 @@ class TestSystemHealthRoute:
         _login(app, client, 'health_admin')
         response = client.get('/users/system-health')
         assert response.status_code in (200, 302, 500)  # may fail if admin_required checks roles
+
+    def test_system_health_database_error_hides_exception_details(self, app, client, monkeypatch):
+        """System-health should not render database exception details."""
+        from musicround.helpers import backup_helper
+        from musicround.helpers import database_config
+
+        def fail_database_summary(uri):
+            raise RuntimeError('database-uri-secret token=health-secret traceback')
+
+        _create_user(app, 'health_admin_error', 'healthadminerror@example.com', is_admin=True)
+        _login(app, client, 'health_admin_error')
+        monkeypatch.setattr(database_config, 'database_summary', fail_database_summary)
+        monkeypatch.setattr(backup_helper, 'list_backups', lambda: [])
+
+        response = client.get('/users/system-health')
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Database status check failed. Check the server logs.' in body
+        assert 'database-uri-secret' not in body
+        assert 'health-secret' not in body
+        assert 'traceback' not in body
 
 
 class TestSongApiExtendedBranches:

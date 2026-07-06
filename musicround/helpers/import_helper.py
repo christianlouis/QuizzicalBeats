@@ -4,35 +4,45 @@ This module provides consistent import functionality for tracks, albums, and pla
 from various music streaming services like Spotify and Deezer.
 """
 import json
-import secrets
-import string
-import traceback
+import re
+from urllib.parse import urlsplit
 from flask import current_app
 from flask_login import current_user
-from authlib.integrations.base_client.errors import MissingTokenError # Corrected import path
+from authlib.integrations.base_client.errors import MissingTokenError
 from httpx import HTTPStatusError
 from musicround.models import Song, Tag, db
 from musicround.helpers.metadata import get_song_metadata_by_isrc
-from musicround.helpers.auth_helpers import oauth, update_oauth_tokens # Ensure update_oauth_tokens is imported
-from datetime import datetime # Ensure datetime is imported
-
-def generate_token(length=32):
-    """
-    Generate a secure random token for authentication or validation purposes.
-    
-    Args:
-        length (int): The length of the token to generate (default: 32)
-        
-    Returns:
-        str: A secure random token string
-    """
-    # Use secrets module for cryptographically strong random numbers
-    alphabet = string.ascii_letters + string.digits
-    token = ''.join(secrets.choice(alphabet) for _ in range(length))
-    return token
+from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
+from datetime import datetime
 
 class ImportHelper:
     """Unified helper for importing music content from different services."""
+
+    @staticmethod
+    def _safe_item_label(item_id):
+        """Return a compact import item label without query strings or secrets."""
+        value = str(item_id or '').strip()
+        if not value:
+            return 'item'
+
+        parsed = urlsplit(value)
+        if parsed.scheme or parsed.netloc:
+            path_parts = [part for part in parsed.path.split('/') if part]
+            return path_parts[-1] if path_parts else parsed.netloc
+
+        value = value.split('?', 1)[0].split('#', 1)[0].strip()
+        value = re.sub(
+            r'(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)=\S+',
+            r'\1=[redacted]',
+            value,
+        )
+        return value or 'item'
+
+    @staticmethod
+    def _safe_import_error(service_name, item_type, item_id):
+        """Return a browser-safe import error string."""
+        item_label = ImportHelper._safe_item_label(item_id)
+        return f"Failed to import {service_name} {item_type} {item_label}. Check the server logs."
 
     @staticmethod
     def _authenticated_current_user():
@@ -160,7 +170,7 @@ class ImportHelper:
         return song
 
     @staticmethod
-    def _fetch_audio_features_for_song(sp, song_obj, spotify_track_id, token=None): # Added token parameter
+    def _fetch_audio_features_for_song(sp, song_obj, spotify_track_id, token=None):
         """Fetches audio features for a given song and updates the song object."""
         if not spotify_track_id:
             current_app.logger.warning(f"Cannot fetch audio features: Spotify track ID missing for song {song_obj.title if song_obj else 'Unknown'}.")
@@ -303,42 +313,54 @@ class ImportHelper:
                     imported_songs = ImportHelper.import_spotify_album(spotify_client, item_id, token=auth_token)
                     if not imported_songs or len(imported_songs) == 0:
                         current_app.logger.warning(f"Spotify album import returned empty result for album ID: {item_id}")
+                        item_label = ImportHelper._safe_item_label(item_id)
                         return {
                             'imported_count': 0,
                             'skipped_count': 0,
                             'error_count': 1,
-                            'errors': [f"No songs found in Spotify album {item_id} or album import failed."]
+                            'errors': [f"No songs found in Spotify album {item_label} or album import failed."]
                         }
                     return imported_songs
                 except Exception as e:
-                    current_app.logger.error(f"Exception occurred while importing Spotify album {item_id}: {str(e)}")
-                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    current_app.logger.error(
+                        "Exception occurred while importing Spotify album %s: %s",
+                        item_id,
+                        e,
+                        exc_info=True,
+                    )
                     return {
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Spotify album {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Spotify', 'album', item_id)]
                     }
             elif item_type.lower() == 'playlist':
                 try:
                     imported_songs = ImportHelper.import_spotify_playlist(spotify_client, item_id, token=auth_token)
+                    if imported_songs and imported_songs.get('error_count', 0) > 0:
+                        return imported_songs
                     if not imported_songs or imported_songs.get('imported_count', 0) == 0:
                         current_app.logger.warning(f"Spotify playlist import returned empty result for playlist ID: {item_id}")
+                        item_label = ImportHelper._safe_item_label(item_id)
                         return {
                             'imported_count': 0,
                             'skipped_count': 0,
                             'error_count': 1,
-                            'errors': [f"No songs found in Spotify playlist {item_id} or playlist import failed."]
+                            'errors': [f"No songs found in Spotify playlist {item_label} or playlist import failed."]
                         }
                     return imported_songs
                 except Exception as e:
-                    current_app.logger.error(f"Exception occurred while importing Spotify playlist {item_id}: {str(e)}")
-                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    current_app.logger.error(
+                        "Exception occurred while importing Spotify playlist %s: %s",
+                        item_id,
+                        e,
+                        exc_info=True,
+                    )
                     return {
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Spotify playlist {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Spotify', 'playlist', item_id)]
                     }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Spotify import.")
@@ -363,14 +385,33 @@ class ImportHelper:
             lastfm_api_key = current_app.config.get('LASTFM_API_KEY')
             
             if item_type.lower() == 'track':
-                song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
-                if song:
-                    if was_new:
-                        return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                try:
+                    song, was_new = deezer_client.import_track(item_id, lastfm_api_key=lastfm_api_key)
+                    if song:
+                        if was_new:
+                            return {'imported_count': 1, 'skipped_count': 0, 'error_count': 0, 'errors': []}
+                        else:
+                            return {'imported_count': 0, 'skipped_count': 1, 'error_count': 0, 'errors': []}
                     else:
-                        return {'imported_count': 0, 'skipped_count': 1, 'error_count': 0, 'errors': []}
-                else:
-                    return {'imported_count': 0, 'skipped_count': 0, 'error_count': 1, 'errors': [f"Failed to import Deezer track {item_id}."]}
+                        return {
+                            'imported_count': 0,
+                            'skipped_count': 0,
+                            'error_count': 1,
+                            'errors': [ImportHelper._safe_import_error('Deezer', 'track', item_id)]
+                        }
+                except Exception as e:
+                    current_app.logger.error(
+                        "Exception occurred while importing Deezer track %s: %s",
+                        item_id,
+                        e,
+                        exc_info=True,
+                    )
+                    return {
+                        'imported_count': 0,
+                        'skipped_count': 0,
+                        'error_count': 1,
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'track', item_id)]
+                    }
             elif item_type.lower() == 'album':
                 try:
                     result = deezer_client.import_album(item_id, lastfm_api_key=lastfm_api_key)
@@ -379,11 +420,12 @@ class ImportHelper:
                     
                     if imported_count == 0 and skipped_count == 0:
                         current_app.logger.warning(f"Deezer album import returned empty result for album ID: {item_id}")
+                        item_label = ImportHelper._safe_item_label(item_id)
                         return {
                             'imported_count': 0,
                             'skipped_count': 0,
                             'error_count': 1,
-                            'errors': [f"No songs found in Deezer album {item_id} or album import failed."]
+                            'errors': [f"No songs found in Deezer album {item_label} or album import failed."]
                         }
                     return {
                         'imported_count': imported_count,
@@ -392,13 +434,17 @@ class ImportHelper:
                         'errors': []
                     }
                 except Exception as e:
-                    current_app.logger.error(f"Exception occurred while importing Deezer album {item_id}: {str(e)}")
-                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    current_app.logger.error(
+                        "Exception occurred while importing Deezer album %s: %s",
+                        item_id,
+                        e,
+                        exc_info=True,
+                    )
                     return {
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Deezer album {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'album', item_id)]
                     }
             elif item_type.lower() == 'playlist':
                 try:
@@ -413,11 +459,12 @@ class ImportHelper:
 
                     if imported_count == 0 and skipped_count == 0:
                         current_app.logger.warning(f"Deezer playlist import returned empty result for playlist ID: {item_id}")
+                        item_label = ImportHelper._safe_item_label(item_id)
                         return {
                             'imported_count': 0,
                             'skipped_count': 0,
                             'error_count': 1,
-                            'errors': [f"No songs found in Deezer playlist {item_id} or playlist import failed."]
+                            'errors': [f"No songs found in Deezer playlist {item_label} or playlist import failed."]
                         }
                     return {
                         'imported_count': imported_count,
@@ -427,13 +474,17 @@ class ImportHelper:
                         'song_ids': song_ids,
                     }
                 except Exception as e:
-                    current_app.logger.error(f"Exception occurred while importing Deezer playlist {item_id}: {str(e)}")
-                    current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+                    current_app.logger.error(
+                        "Exception occurred while importing Deezer playlist %s: %s",
+                        item_id,
+                        e,
+                        exc_info=True,
+                    )
                     return {
                         'imported_count': 0,
                         'skipped_count': 0,
                         'error_count': 1,
-                        'errors': [f"Failed to import Deezer playlist {item_id}: {str(e)}"]
+                        'errors': [ImportHelper._safe_import_error('Deezer', 'playlist', item_id)]
                     }
             else:
                 current_app.logger.error(f"Unsupported item_type '{item_type}' for Deezer import.")
@@ -550,7 +601,7 @@ class ImportHelper:
             
             if song is None: # If no ISRC, or ISRC lookup failed to produce a song object
                 current_app.logger.info(f"Creating song for track {track_id} using basic Spotify data (no ISRC or failed ISRC enrichment).")
-                song = ImportHelper._create_song_from_spotify(track_info) # Ensure this helper is robust
+                song = ImportHelper._create_song_from_spotify(track_info)
             
             if song:
                 # Ensure spotify_id is set if created via ISRC path primarily
@@ -564,7 +615,7 @@ class ImportHelper:
                 except Exception as e_flush:
                     current_app.logger.error(f"Error flushing session for song {song.title} (Spotify ID: {track_id}): {str(e_flush)}", exc_info=True)
                     db.session.rollback()
-                    result['errors'].append(f"DB flush error for {song.title}: {str(e_flush)}")
+                    result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
                     result['error_count'] += 1
                     return result
 
@@ -613,7 +664,7 @@ class ImportHelper:
                 result['song_id'] = song.id  # Add the song ID to the result
                 current_app.logger.info(f"Successfully imported Spotify track {track_id} as '{song.title}' with ID {song.id}")
             else:
-                result['errors'].append(f"Failed to create song object for track {track_id}")
+                result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
                 result['error_count'] += 1
                 current_app.logger.error(f"Song object creation failed for Spotify track ID: {track_id}")
             
@@ -622,7 +673,7 @@ class ImportHelper:
         except MissingTokenError as mte:
             # This specific error should ideally be prevented by the explicit token passing
             current_app.logger.error(f"Authlib MissingTokenError (should not happen with explicit token) for Spotify track {track_id}: {str(mte)}", exc_info=True)
-            result['errors'].append(f"Spotify authentication error (missing token) for track {track_id}.")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
             result['error_count'] += 1
             db.session.rollback()
             return result
@@ -630,19 +681,12 @@ class ImportHelper:
             status_code = hse.response.status_code
             error_text = hse.response.text
             current_app.logger.error(f"HTTPStatusError ({status_code}) importing Spotify track {track_id}: {error_text}", exc_info=True)
-            error_detail = f"Spotify API error ({status_code}) for track {track_id}."
-            try:
-                error_json = hse.response.json()
-                if error_json.get('error', {}).get('message'):
-                    error_detail = f"Spotify error for track {track_id}: {error_json['error']['message']}"
-            except ValueError: 
-                pass 
-            result['errors'].append(error_detail)
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
             result['error_count'] += 1
             return result
         except Exception as e:
             current_app.logger.error(f"Generic error importing Spotify track {track_id}: {str(e)}", exc_info=True)
-            result['errors'].append(f"Unexpected error for track {track_id}: {str(e)}")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'track', track_id))
             result['error_count'] += 1
             return result
 
@@ -705,7 +749,8 @@ class ImportHelper:
                     track_id = track_item_simplified.get('id')
                     if not track_id:
                         current_app.logger.warning(f"Skipping track with no ID in album '{album_name}' (ID: {album_id})")
-                        result['errors'].append(f"Found a track with no ID in album {album_id}.")
+                        item_label = ImportHelper._safe_item_label(album_id)
+                        result['errors'].append(f"Found a track with no ID in Spotify album {item_label}.")
                         result['error_count'] +=1
                         continue
                     
@@ -731,24 +776,17 @@ class ImportHelper:
 
         except MissingTokenError as mte:
             current_app.logger.error(f"Authlib MissingTokenError while importing Spotify album {album_id}: {str(mte)}", exc_info=True)
-            result['errors'].append(f"Spotify authentication error (missing token) for album {album_id}.")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'album', album_id))
             result['error_count'] += 1 
         except HTTPStatusError as hse:
             status_code = hse.response.status_code
             error_text = hse.response.text
             current_app.logger.error(f"HTTPStatusError ({status_code}) importing Spotify album {album_id}: {error_text}", exc_info=True)
-            error_detail = f"Spotify API error ({status_code}) for album {album_id}."
-            try:
-                error_json = hse.response.json()
-                if error_json.get('error', {}).get('message'):
-                    error_detail = f"Spotify error for album {album_id}: {error_json['error']['message']}"
-            except ValueError: 
-                pass 
-            result['errors'].append(error_detail)
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'album', album_id))
             result['error_count'] += 1
         except Exception as e:
             current_app.logger.error(f"Unexpected error importing Spotify album {album_id}: {str(e)}", exc_info=True)
-            result['errors'].append(f"Failed to import album {album_id} due to unexpected error: {str(e)}")
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'album', album_id))
             result['error_count'] += 1
         
         return result
@@ -811,14 +849,16 @@ class ImportHelper:
                     track_info_obj = item_wrapper.get('track')
                     if not track_info_obj or not isinstance(track_info_obj, dict): # Skip if track is None (e.g., local file) or not a dict
                         current_app.logger.warning(f"Skipping item in playlist '{playlist_name}' (ID: {playlist_id}) as it's not a valid track object or is unavailable: {track_info_obj}")
-                        result['errors'].append(f"Skipped an invalid/unavailable item in playlist {playlist_id}.")
+                        item_label = ImportHelper._safe_item_label(playlist_id)
+                        result['errors'].append(f"Skipped an invalid/unavailable item in Spotify playlist {item_label}.")
                         # Not necessarily an error_count increment unless we want to be strict
                         continue
 
                     track_id = track_info_obj.get('id')
                     if not track_id: # Should not happen if track_info_obj is valid
                         current_app.logger.warning(f"Skipping track with no ID in playlist '{playlist_name}' (ID: {playlist_id})")
-                        result['errors'].append(f"Found a track with no ID in playlist {playlist_id}.")
+                        item_label = ImportHelper._safe_item_label(playlist_id)
+                        result['errors'].append(f"Found a track with no ID in Spotify playlist {item_label}.")
                         result['error_count'] +=1
                         continue
                     track_import_result = ImportHelper.import_spotify_track(
@@ -845,7 +885,12 @@ class ImportHelper:
                     current_app.logger.info(f"No more track pages for playlist '{playlist_name}' (ID: {playlist_id}).")
             db.session.commit() # Commit any changes made by track imports
         except Exception as e:
-            current_app.logger.error(f"Error importing Spotify playlist {playlist_id}: {str(e)}")
-            result['errors'].append(str(e))
+            current_app.logger.error(
+                "Error importing Spotify playlist %s: %s",
+                playlist_id,
+                e,
+                exc_info=True,
+            )
+            result['errors'].append(ImportHelper._safe_import_error('Spotify', 'playlist', playlist_id))
             result['error_count'] += 1
             return result

@@ -11,9 +11,178 @@ from sqlalchemy import or_
 from flask_login import login_required, current_user
 import requests  # Import requests for direct API calls
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
 from musicround.helpers.logging_utils import redact_authorization_header
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+
+def _song_payload(song):
+    """Return compact song JSON for list/search endpoints."""
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
+    return {
+        'id': song.id,
+        'title': song.title,
+        'artist': song.artist,
+        'year': song.year,
+        'genre': song.genre,
+        'cover_url': song.cover_url,
+        'preview_url': preview_url,
+        'used_count': song.used_count or 0,
+        'last_used': song.last_used.isoformat() if song.last_used else None,
+        'source': song.source,
+        'spotify_id': song.spotify_id,
+        'deezer_id': song.deezer_id,
+    }
+
+
+def _safe_dropbox_api_error(status_code, message='Dropbox API error', **extra):
+    """Return a stable Dropbox API error without provider raw bodies or tracebacks."""
+    payload = {
+        'error': message,
+        'code': 'dropbox_api_error',
+        'status_code': status_code,
+    }
+    payload.update(extra)
+    return jsonify(payload)
+
+
+def _safe_spotify_api_error(status_code, message='Spotify API error'):
+    """Return a stable Spotify API error without provider raw bodies or traces."""
+    return jsonify({
+        'error': message,
+        'code': 'spotify_api_error',
+        'status_code': status_code,
+    })
+
+
+def _bool_arg(name):
+    value = request.args.get(name)
+    if value is None:
+        return None
+    return value.lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _int_arg(name, default=None, minimum=None, maximum=None):
+    raw_value = request.args.get(name)
+    if raw_value in (None, ''):
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _filtered_song_query():
+    """Apply common catalog filters from request query parameters."""
+    query = Song.query
+    search = (request.args.get('q') or request.args.get('query') or '').strip()
+    if search:
+        pattern = f'%{search}%'
+        query = query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+
+    genre = (request.args.get('genre') or '').strip()
+    if genre:
+        query = query.filter(Song.genre.ilike(genre))
+
+    year = _int_arg('year')
+    if year is not None:
+        query = query.filter(Song.year == year)
+    year_min = _int_arg('year_min')
+    if year_min is not None:
+        query = query.filter(Song.year >= year_min)
+    year_max = _int_arg('year_max')
+    if year_max is not None:
+        query = query.filter(Song.year <= year_max)
+
+    has_preview = _bool_arg('has_preview')
+    if has_preview is True:
+        query = query.filter(or_(
+            Song.preview_url.isnot(None),
+            Song.spotify_preview_url.isnot(None),
+            Song.deezer_preview_url.isnot(None),
+            Song.apple_preview_url.isnot(None),
+            Song.youtube_preview_url.isnot(None),
+        ))
+    elif has_preview is False:
+        query = query.filter(
+            Song.preview_url.is_(None),
+            Song.spotify_preview_url.is_(None),
+            Song.deezer_preview_url.is_(None),
+            Song.apple_preview_url.is_(None),
+            Song.youtube_preview_url.is_(None),
+        )
+
+    unused_only = _bool_arg('unused_only')
+    if unused_only:
+        query = query.filter(or_(Song.used_count == 0, Song.used_count.is_(None)))
+
+    return query
+
+
+def _ordered_song_query(query):
+    sort = request.args.get('sort', 'artist')
+    direction = request.args.get('direction', 'asc')
+    descending = direction == 'desc' or sort.startswith('-')
+    sort = sort[1:] if sort.startswith('-') else sort
+    allowed = {
+        'artist': Song.artist,
+        'title': Song.title,
+        'genre': Song.genre,
+        'year': Song.year,
+        'used_count': Song.used_count,
+        'last_used': Song.last_used,
+        'id': Song.id,
+    }
+    column = allowed.get(sort, Song.artist)
+    query = query.order_by(column.desc() if descending else column.asc())
+    if sort not in {'artist', 'title'}:
+        query = query.order_by(Song.artist.asc(), Song.title.asc())
+    return query
+
+
+@api_bp.route('/songs', methods=['GET'])
+@login_required
+def list_songs():
+    """List songs with server-side filters and pagination."""
+    page = _int_arg('page', default=1, minimum=1)
+    per_page = _int_arg('per_page', default=50, minimum=1, maximum=200)
+    query = _ordered_song_query(_filtered_song_query())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({
+        'status': 'success',
+        'data': [_song_payload(song) for song in pagination.items],
+        'pagination': {
+            'page': pagination.page,
+            'per_page': pagination.per_page,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'has_next': pagination.has_next,
+            'has_prev': pagination.has_prev,
+        },
+        'filters': {
+            'query': request.args.get('q') or request.args.get('query'),
+            'genre': request.args.get('genre'),
+            'year': request.args.get('year'),
+            'year_min': request.args.get('year_min'),
+            'year_max': request.args.get('year_max'),
+            'has_preview': request.args.get('has_preview'),
+            'unused_only': request.args.get('unused_only'),
+            'sort': request.args.get('sort', 'artist'),
+            'direction': request.args.get('direction', 'asc'),
+        },
+    })
 
 @api_bp.route('/songs/<int:song_id>', methods=['GET'])
 def song_detail(song_id):
@@ -176,7 +345,11 @@ def refresh_song_metadata(song_id):
     
     try:
         # Get fresh metadata using the existing ISRC
-        current_app.logger.info(f"=== DEBUG: Starting metadata refresh for song {song_id} with ISRC {song.isrc} ===")
+        current_app.logger.debug(
+            "Starting metadata refresh for song %s with ISRC %s",
+            song_id,
+            song.isrc,
+        )
         metadata = get_song_metadata_by_isrc(song.isrc, current_app)
         
         if not metadata:
@@ -184,23 +357,23 @@ def refresh_song_metadata(song_id):
             return jsonify({'error': 'No metadata found for this ISRC'}), 404
         
         # Debug the metadata received
-        current_app.logger.info(f"DEBUG: Received metadata structure: {type(metadata).__name__}")
+        current_app.logger.debug(f"Received metadata structure: {type(metadata).__name__}")
         for key, value in metadata.items():
             value_type = type(value).__name__
             value_str = str(value)
             if len(value_str) > 100:
                 value_str = value_str[:100] + "..."
-            current_app.logger.info(f"DEBUG: Metadata key '{key}' = {value_str} (type: {value_type})")
+            current_app.logger.debug(f"Metadata key '{key}' = {value_str} (type: {value_type})")
         
         # Update song with new metadata
         if metadata.get('title'):
-            current_app.logger.info(f"DEBUG: Updating title to '{metadata['title']}'")
+            current_app.logger.debug(f"Updating title to '{metadata['title']}'")
             song.title = metadata['title']
         if metadata.get('artist_name'):
-            current_app.logger.info(f"DEBUG: Updating artist to '{metadata['artist_name']}'")
+            current_app.logger.debug(f"Updating artist to '{metadata['artist_name']}'")
             song.artist = metadata['artist_name']
         if metadata.get('genre'):
-            current_app.logger.info(f"DEBUG: Updating genre to '{metadata['genre']}' (type: {type(metadata['genre']).__name__})")
+            current_app.logger.debug(f"Updating genre to '{metadata['genre']}' (type: {type(metadata['genre']).__name__})")
             song.genre = metadata['genre']
             
             # Import helper for creating tags from genre
@@ -208,21 +381,21 @@ def refresh_song_metadata(song_id):
             ImportHelper.create_tags_from_genre(song, metadata['genre'])
             
         if metadata.get('year'):
-            current_app.logger.info(f"DEBUG: Updating year to '{metadata['year']}'")
+            current_app.logger.debug(f"Updating year to '{metadata['year']}'")
             song.year = metadata['year']
         
         # Check additional metadata for genres and add tags from there too
         if 'genres' in metadata:
-            current_app.logger.info(f"DEBUG: Creating tags from additional genres")
+            current_app.logger.debug("Creating tags from additional genres")
             from musicround.helpers.import_helper import ImportHelper
             ImportHelper.create_tags_from_genre(song, metadata['genres'])
         
         # Update URLs if available
         if metadata.get('preview_url'):
-            current_app.logger.info(f"DEBUG: Updating preview_url")
+            current_app.logger.debug("Updating preview_url")
             song.preview_url = metadata['preview_url']
         if metadata.get('cover_url'):
-            current_app.logger.info(f"DEBUG: Updating cover_url")
+            current_app.logger.debug("Updating cover_url")
             song.cover_url = metadata['cover_url']
         
         # Update platform-specific IDs if available
@@ -257,22 +430,29 @@ def refresh_song_metadata(song_id):
         if metadata.get('sources'):
             try:
                 sources_str = ','.join(metadata['sources'])
-                current_app.logger.info(f"DEBUG: Setting metadata_sources to '{sources_str}'")
+                current_app.logger.debug(f"Setting metadata_sources to '{sources_str}'")
                 song.metadata_sources = sources_str
             except Exception as source_error:
-                current_app.logger.error(f"DEBUG: Error joining sources: {source_error}")
-                current_app.logger.error(f"DEBUG: Sources value: {metadata['sources']} (type: {type(metadata['sources']).__name__})")
+                current_app.logger.error(f"Error joining metadata sources: {source_error}")
+                current_app.logger.error(
+                    "Metadata sources value: %s (type: %s)",
+                    metadata['sources'],
+                    type(metadata['sources']).__name__,
+                )
         
         # Save changes to the database
         try:
-            current_app.logger.info("DEBUG: Committing changes to database")
+            current_app.logger.debug("Committing changes to database")
             db.session.commit()
             current_app.logger.info(f"Metadata for song {song_id} updated successfully with sources: {metadata.get('sources')}")
         except Exception as db_error:
             db.session.rollback()
-            current_app.logger.error(f"DEBUG: Database commit error: {db_error}")
-            current_app.logger.error(f"DEBUG: Traceback: {traceback.format_exc()}")
-            return jsonify({'error': f"Database error: {str(db_error)}"}), 500
+            current_app.logger.error(f"Database commit error: {db_error}")
+            current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+            return jsonify({
+                'error': 'Unable to save refreshed song metadata.',
+                'code': 'metadata_refresh_save_failed',
+            }), 500
         
         # Return updated song details including tags
         tag_list = [{'id': tag.id, 'name': tag.name} for tag in song.tags]
@@ -300,7 +480,10 @@ def refresh_song_metadata(song_id):
     except Exception as e:
         current_app.logger.error(f"Error refreshing metadata for song {song_id}: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': 'Unable to refresh song metadata.',
+            'code': 'metadata_refresh_failed',
+        }), 500
 
 # New API routes for tag operations
 
@@ -489,7 +672,7 @@ def get_spotify_album(album_id):
         return jsonify(album_data)
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error fetching Spotify album: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify album: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -569,7 +752,7 @@ def get_spotify_playlist(playlist_id):
         return jsonify(playlist_data)
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error fetching Spotify playlist: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify playlist: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -607,7 +790,7 @@ def spotify_search():
 
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error during Spotify search: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error during Spotify search: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -691,28 +874,8 @@ def search_songs():
     
     current_app.logger.info(f"User {current_user.username} searching for songs with query: {query}")
         
-    # Search for songs by title or artist
-    songs = Song.query.filter(
-        or_(
-            Song.title.ilike(f'%{query}%'),
-            Song.artist.ilike(f'%{query}%')
-        )
-    ).limit(20).all()
-    
-    # Convert songs to JSON
-    results = []
-    for song in songs:
-        results.append({
-            'id': song.id,
-            'title': song.title,
-            'artist': song.artist,
-            'year': song.year,
-            'genre': song.genre,
-            'cover_url': song.cover_url,
-            'preview_url': song.preview_url
-        })
-    
-    return jsonify(results)
+    songs = _ordered_song_query(_filtered_song_query()).limit(20).all()
+    return jsonify([_song_payload(song) for song in songs])
 
 @api_bp.route('/songs/update-audio-features', methods=['POST'])
 @login_required
@@ -774,7 +937,7 @@ def update_audio_features():
         return jsonify({
             'success': False,
             'message': 'Failed to initialize Spotify client',
-            'error': str(e)
+            'error': 'SPOTIFY_DIRECT_CLIENT_INIT_FAILED',
         }), 500
     
     # Process songs in batches
@@ -861,7 +1024,6 @@ def list_dropbox_folders():
     from musicround.helpers.dropbox_helper import get_current_user_dropbox_token
     import requests
     import json
-    import traceback
     
     # Check if user has Dropbox connected
     if not current_user.dropbox_token:
@@ -911,7 +1073,8 @@ def list_dropbox_folders():
         response = requests.post(
             'https://api.dropboxapi.com/2/files/list_folder',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox API response status: {response.status_code}")
@@ -922,7 +1085,6 @@ def list_dropbox_folders():
             # Check for specific error types to provide better messages
             try:
                 error_data = response.json()
-                error_message = f"Dropbox API error: {response.status_code}"
                 
                 # Handle "not_found" error by trying to create the folder if it's not root
                 if (response.status_code == 409 and 
@@ -931,25 +1093,23 @@ def list_dropbox_folders():
                     current_app.logger.info(f"Folder {display_path} doesn't exist, showing root folder instead")
                     # Return root folder with a note about the folder not existing
                     return list_root_folders(token, display_path)
-                
-                if 'error_summary' in error_data:
-                    error_message += f": {error_data['error_summary']}"
-                
+
                 # Handle common errors
                 if response.status_code == 401:
                     # Try to refresh the token and retry once
                     current_app.logger.info("Attempting to refresh Dropbox token and retry")
-                    from musicround.helpers.dropbox_helper import refresh_dropbox_token
+                    from musicround.helpers.dropbox_helper import refresh_dropbox_token_if_needed
                     
                     if current_user.dropbox_refresh_token:
-                        new_token_info = refresh_dropbox_token(current_user.dropbox_refresh_token)
-                        if new_token_info and 'access_token' in new_token_info:
+                        refresh_result = refresh_dropbox_token_if_needed(current_user, force=True)
+                        if refresh_result.get('success') and current_user.dropbox_token:
                             # Try again with the new token
-                            headers['Authorization'] = f"Bearer {new_token_info['access_token']}"
+                            headers['Authorization'] = f"Bearer {current_user.dropbox_token}"
                             response = requests.post(
                                 'https://api.dropboxapi.com/2/files/list_folder',
                                 headers=headers,
-                                json=data
+                                json=data,
+                                timeout=DROPBOX_API_TIMEOUT_SECONDS,
                             )
                             
                             if response.status_code == 200:
@@ -957,16 +1117,28 @@ def list_dropbox_folders():
                                 current_app.logger.info("Successfully refreshed token and retrieved folders")
                             else:
                                 current_app.logger.error(f"Still failed after token refresh: {response.status_code}, {response.text}")
-                                return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                                return _safe_dropbox_api_error(response.status_code), response.status_code
                         else:
                             current_app.logger.error("Token refresh failed")
+                            return _safe_dropbox_api_error(
+                                401,
+                                message=refresh_result.get(
+                                    'message',
+                                    'Dropbox token refresh failed.',
+                                ),
+                                reconnect_required=bool(refresh_result.get('reconnect_required')),
+                            ), 401
                 
                 if response.status_code != 200:  # If we're still having an error
-                    return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                    return _safe_dropbox_api_error(response.status_code), response.status_code
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")
-                return jsonify({'error': f'Dropbox API error: {response.status_code}', 'raw_response': response.text}), 500
+                current_app.logger.error(
+                    "Dropbox list_folder non-JSON error body: %s",
+                    response.text[:1000],
+                )
+                return _safe_dropbox_api_error(response.status_code), 502
         
         # Process the successful response
         result = response.json()
@@ -994,8 +1166,8 @@ def list_dropbox_folders():
         current_app.logger.error(f"Error listing Dropbox folders: {str(e)}")
         current_app.logger.error(f"Traceback: {error_traceback}")
         return jsonify({
-            'error': str(e),
-            'traceback': error_traceback,
+            'error': 'Unexpected Dropbox folder listing error.',
+            'code': 'dropbox_folder_list_failed',
             'message': 'An unexpected error occurred while listing Dropbox folders'
         }), 500
 
@@ -1007,7 +1179,6 @@ def create_dropbox_folder():
     from musicround.helpers.dropbox_helper import get_current_user_dropbox_token
     import requests
     import json
-    import traceback
     
     # Check if user has Dropbox connected
     if not current_user.dropbox_token:
@@ -1061,7 +1232,8 @@ def create_dropbox_folder():
         response = requests.post(
             'https://api.dropboxapi.com/2/files/create_folder_v2',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         current_app.logger.debug(f"Dropbox API response status: {response.status_code}")
@@ -1070,27 +1242,25 @@ def create_dropbox_folder():
             current_app.logger.error(f"Dropbox API error: {response.status_code}, Response: {response.text}")
             
             try:
-                error_data = response.json()
-                error_message = f"Dropbox API error: {response.status_code}"
-                
-                if 'error_summary' in error_data:
-                    error_message += f": {error_data['error_summary']}"
+                response.json()
                 
                 # Special handling for conflict (folder already exists)
                 if response.status_code == 409 and 'conflict' in response.text:
                     return jsonify({
                         'error': 'A folder with this name already exists',
-                        'details': error_data
+                        'code': 'dropbox_folder_exists',
+                        'status_code': response.status_code,
                     }), 409
                 
-                return jsonify({'error': error_message, 'details': error_data}), response.status_code
+                return _safe_dropbox_api_error(response.status_code), response.status_code
                 
             except Exception as json_error:
                 current_app.logger.error(f"Error parsing Dropbox error response: {str(json_error)}")
-                return jsonify({
-                    'error': f'Dropbox API error: {response.status_code}',
-                    'raw_response': response.text
-                }), 500
+                current_app.logger.error(
+                    "Dropbox create_folder non-JSON error body: %s",
+                    response.text[:1000],
+                )
+                return _safe_dropbox_api_error(response.status_code), 502
         
         # Process the successful response
         result = response.json()
@@ -1113,8 +1283,8 @@ def create_dropbox_folder():
         current_app.logger.error(f"Error creating Dropbox folder: {str(e)}")
         current_app.logger.error(f"Traceback: {error_traceback}")
         return jsonify({
-            'error': str(e),
-            'traceback': error_traceback,
+            'error': 'Unexpected Dropbox folder creation error.',
+            'code': 'dropbox_folder_create_failed',
             'message': 'An unexpected error occurred while creating Dropbox folder'
         }), 500
 
@@ -1144,15 +1314,15 @@ def list_root_folders(token, attempted_path=None):
         response = requests.post(
             'https://api.dropboxapi.com/2/files/list_folder',
             headers=headers,
-            json=data
+            json=data,
+            timeout=DROPBOX_API_TIMEOUT_SECONDS,
         )
         
         if response.status_code != 200:
             current_app.logger.error(f"Root folder listing failed: {response.status_code}, {response.text}")
-            return jsonify({
-                'error': f'Could not list root folders: {response.status_code}',
-                'attempted_path': attempted_path
-            }), response.status_code
+            payload_json = _safe_dropbox_api_error(response.status_code).get_json()
+            payload_json['attempted_path'] = attempted_path
+            return jsonify(payload_json), response.status_code
         
         # Process the successful response
         result = response.json()
@@ -1180,6 +1350,8 @@ def list_root_folders(token, attempted_path=None):
     except Exception as e:
         current_app.logger.error(f"Error listing root folders: {str(e)}")
         return jsonify({
-            'error': f'Error listing root folders: {str(e)}',
+            'error': 'Unexpected Dropbox root-folder listing error.',
+            'code': 'dropbox_root_folder_list_failed',
+            'message': 'An unexpected error occurred while listing Dropbox root folders',
             'attempted_path': attempted_path
         }), 500

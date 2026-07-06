@@ -6,6 +6,7 @@ being retried (see musicround/helpers/spotify_helper.py).
 """
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
+import json
 
 import pytest
 
@@ -151,6 +152,28 @@ class TestGetCurrentUserSpotifyToken:
                 assert result == 'new-token'
                 assert user.spotify_token == 'new-token'
 
+    def test_legacy_json_token_is_normalized_before_use(self, app):
+        """Old Authlib JSON payloads in spotify_token should be migrated once read."""
+        expires_at = int((datetime.now() + timedelta(hours=1)).timestamp())
+        with app.test_request_context('/'):
+            user = User(username='legacyjson', email='legacyjson@example.com')
+            user.spotify_id = 'spotify-user-legacy'
+            user.spotify_token = json.dumps({
+                'access_token': 'legacy-access',
+                'refresh_token': 'legacy-refresh',
+                'expires_at': expires_at,
+            })
+            db.session.add(user)
+            db.session.commit()
+
+            with patch('musicround.helpers.spotify_helper.current_user', user):
+                result = spotify_helper.get_current_user_spotify_token()
+
+            assert result == 'legacy-access'
+            assert user.spotify_token == 'legacy-access'
+            assert user.spotify_refresh_token == 'legacy-refresh'
+            assert user.spotify_token_expiry == datetime.fromtimestamp(expires_at)
+
 
 class TestGetSystemSpotifyToken:
     def test_invalid_grant_clears_system_settings(self, app):
@@ -238,15 +261,23 @@ class TestManualSpotifyBearerToken:
             from flask import session
             session['access_token'] = 'stale-token'
             session['bearer_token_added'] = (datetime.now() - timedelta(hours=2)).timestamp()
+            session['token_source'] = 'manual'
+            session['client_token_expiry'] = (datetime.now() + timedelta(hours=1)).timestamp()
             assert spotify_helper.get_manual_spotify_bearer_token() is None
+            assert 'access_token' not in session
+            assert 'bearer_token_added' not in session
+            assert 'token_source' not in session
+            assert 'client_token_expiry' not in session
 
     def test_token_without_timestamp_is_rejected(self, app):
         """Manual bearer tokens must include an age marker so TTL can be enforced."""
         with app.test_request_context('/'):
             from flask import session
             session['access_token'] = 'manually-extracted-token'
+            session['token_source'] = 'manual'
             assert spotify_helper.get_manual_spotify_bearer_token() is None
             assert 'access_token' not in session
+            assert 'token_source' not in session
 
     def test_token_with_invalid_timestamp_is_rejected(self, app):
         """Malformed manual bearer-token timestamps must not bypass the TTL."""
@@ -254,9 +285,11 @@ class TestManualSpotifyBearerToken:
             from flask import session
             session['access_token'] = 'manually-extracted-token'
             session['bearer_token_added'] = 'not-a-timestamp'
+            session['token_source'] = 'manual'
             assert spotify_helper.get_manual_spotify_bearer_token() is None
             assert 'access_token' not in session
             assert 'bearer_token_added' not in session
+            assert 'token_source' not in session
 
 
 class TestGetSpotifyTokenPriority:

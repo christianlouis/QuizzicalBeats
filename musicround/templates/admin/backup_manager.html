@@ -36,7 +36,19 @@
                         <span class="text-gray-600">Storage location:</span>
                         <span class="font-medium text-xs md:text-sm font-mono">{{ backup_location }}</span>
                     </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Database backend:</span>
+                        <span class="font-medium">
+                            {{ database_backend }}
+                            {% if database_host %}<span class="text-xs text-gray-500">({{ database_host }})</span>{% endif %}
+                        </span>
+                    </div>
                 </div>
+                {% if backup_warning %}
+                <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                    {{ backup_warning }}
+                </div>
+                {% endif %}
             </div>
             
             <div class="flex-1 border rounded-lg p-4 bg-white">
@@ -44,7 +56,9 @@
                 <div class="flex flex-col space-y-2">
                     <form method="POST" action="{{ url_for('users.create_backup') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded flex items-center justify-center">
+                        <button type="submit"
+                                class="w-full {% if supports_application_backup %}bg-teal-500 hover:bg-teal-600{% else %}bg-gray-300 cursor-not-allowed{% endif %} text-white py-2 px-4 rounded flex items-center justify-center"
+                                {% if not supports_application_backup %}disabled title="{{ backup_warning }}"{% endif %}>
                             <i class="fas fa-save mr-2"></i> Create New Backup
                         </button>
                     </form>
@@ -143,7 +157,9 @@
             </div>
             
             <div class="flex flex-wrap gap-2">
-                <button type="submit" class="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600">
+                <button type="submit"
+                        class="{% if supports_application_backup %}bg-teal-500 hover:bg-teal-600{% else %}bg-gray-300 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
+                        {% if not supports_application_backup %}disabled title="{{ backup_warning }}"{% endif %}>
                     <i class="fas fa-save mr-2"></i> Create Backup
                 </button>
                 <button type="button" onclick="toggleCreateForm()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">
@@ -384,7 +400,10 @@
                                         <form method="POST" action="{{ url_for('users.restore_backup', filename=backup.file_name) }}" class="inline"
                                               onsubmit="return confirm('Are you sure you want to restore this backup? This will overwrite current data.')">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <button type="submit" class="text-orange-600 hover:text-orange-900" title="Restore">
+                                            <button type="submit"
+                                                    class="{% if supports_application_backup %}text-orange-600 hover:text-orange-900{% else %}text-gray-300 cursor-not-allowed{% endif %}"
+                                                    title="{% if supports_application_backup %}Restore{% else %}{{ backup_warning }}{% endif %}"
+                                                    {% if not supports_application_backup %}disabled{% endif %}>
                                                 <i class="fas fa-undo"></i>
                                             </button>
                                         </form>

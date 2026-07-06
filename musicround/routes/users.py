@@ -14,7 +14,12 @@ from sqlalchemy.exc import IntegrityError
 from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
-from musicround.helpers.spotify_helper import get_spotify_token, get_current_user_spotify_token, get_spotify_user_info as spotify_helper_get_user_info
+from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
+from musicround.helpers.spotify_helper import (
+    clear_manual_spotify_bearer_token,
+    get_spotify_token,
+    get_spotify_user_info as spotify_helper_get_user_info,
+)
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 _LOGIN_FAILURES = {}
@@ -110,6 +115,31 @@ def automation_or_admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def _spotify_display_name(spotify_user_data, fallback=None):
+    """Return a stable display name from Spotify's mixed profile payload shapes."""
+    if not isinstance(spotify_user_data, dict):
+        return fallback
+    for key in ('display_name', 'name', 'id'):
+        value = spotify_user_data.get(key)
+        if value:
+            return value
+    return fallback
+
+
+def _clear_manual_spotify_session_token():
+    clear_manual_spotify_bearer_token()
+
+
+def _store_manual_spotify_session_token(bearer_token, token_source):
+    session['access_token'] = bearer_token
+    session['token_source'] = token_source
+    session['bearer_token_added'] = datetime.now().timestamp()
+    if token_source == 'client_credentials_manual':
+        session['client_token_expiry'] = (datetime.now() + timedelta(hours=1)).timestamp()
+    else:
+        session.pop('client_token_expiry', None)
+
+
 # Helper function for processing Spotify account linking
 def _process_spotify_link(user, token_payload, spotify_user_data):
     """Processes the linking of a Spotify account to a user."""
@@ -126,7 +156,12 @@ def _process_spotify_link(user, token_payload, spotify_user_data):
     update_oauth_tokens(user, token_payload, 'spotify') # Saves token, refresh_token, expiry to user model
 
     # Store comprehensive user info in session
-    session['spotify_user_info'] = spotify_user_data
+    spotify_display_name = _spotify_display_name(spotify_user_data, spotify_id)
+    session['spotify_user_info'] = {
+        **spotify_user_data,
+        'display_name': spotify_display_name,
+    }
+    session['spotify_display_name'] = spotify_display_name
 
     db.session.commit()
     flash('Your Spotify account has been successfully linked!', 'success')
@@ -538,12 +573,12 @@ def profile():
     
     # Get info about current tokens
     system_refresh_token = SystemSetting.get('fallback_spotify_refresh_token', '')
-    session_bearer = session.get('access_token', '') # This is the manually entered token or system token
-    token_source = session.get('token_source', '')
-    client_token_expiry = session.get('client_token_expiry', 0) # For system client_credentials token
     
     # Use centralized token management to get the best available token
     spotify_token, spotify_token_source = get_spotify_token()
+    session_bearer = session.get('access_token', '') # This is the manually entered token or system token
+    token_source = session.get('token_source', '')
+    client_token_expiry = session.get('client_token_expiry', 0) # For system client_credentials token
     
     # Fetch user info for the active token
     spotify_user_info = None # This is passed to the template
@@ -609,7 +644,11 @@ def profile():
                 else:
                     current_app.logger.error(f"Error fetching Spotify user info with manual bearer token: {resp.status_code} {resp.text}")
                     spotify_user_info = None
-                    if resp.status_code in [401, 403]: flash("Manually entered Spotify token is invalid or expired.", "warning")
+                    if resp.status_code in [401, 403]:
+                        _clear_manual_spotify_session_token()
+                        session_bearer = ''
+                        token_source = ''
+                        flash("Manually entered Spotify token is invalid or expired.", "warning")
 
             except Exception as user_info_error:
                 current_app.logger.error(f"Exception fetching Spotify user info with manual bearer token: {str(user_info_error)}")
@@ -628,7 +667,11 @@ def profile():
                         active_token_expiry = datetime.fromtimestamp(client_token_expiry) if client_token_expiry else None
                 else:
                     current_app.logger.warning(f"Manual/Session client credentials token validation failed. Status: {resp_cc.status_code}")
-                    if resp_cc.status_code in [401, 403]: flash("The client credentials token in session is invalid.", "warning")
+                    if resp_cc.status_code in [401, 403]:
+                        _clear_manual_spotify_session_token()
+                        session_bearer = ''
+                        token_source = ''
+                        flash("The client credentials token in session is invalid.", "warning")
 
             except Exception as cc_error:
                 current_app.logger.error(f"Exception validating client credentials token from session: {str(cc_error)}")
@@ -643,6 +686,11 @@ def profile():
         spotify_status = 'bearer' 
     elif token_source in ['client_credentials', 'client_credentials_manual'] and session_bearer:
         spotify_status = 'client_credentials'
+
+    spotify_status_payload = spotify_token_status(current_user, now=now)
+    dropbox_status_payload = dropbox_token_status(current_user, now=now)
+    spotify_token_notice = token_notice(spotify_status_payload)
+    dropbox_token_notice = token_notice(dropbox_status_payload)
     
     return render_template(
         'users/profile.html', 
@@ -658,7 +706,11 @@ def profile():
         active_username=active_username,
         active_user_id=active_user_id,
         active_user_image=active_user_image,
-        active_token_expiry=active_token_expiry
+        active_token_expiry=active_token_expiry,
+        spotify_token_notice=spotify_token_notice,
+        dropbox_token_notice=dropbox_token_notice,
+        spotify_token_status=spotify_status_payload,
+        dropbox_token_status=dropbox_status_payload,
     )
 
 @users_bp.route('/edit-profile', methods=['GET', 'POST'])
@@ -868,15 +920,24 @@ def spotify_link():
         return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
 
     # GET: Show management UI
-    spotify_user_details = None 
+    spotify_user_info = session.get('spotify_user_info') or None
+    spotify_display_name = _spotify_display_name(spotify_user_info, current_user.spotify_id)
+    if spotify_user_info and spotify_display_name and not spotify_user_info.get('display_name'):
+        spotify_user_info = {
+            **spotify_user_info,
+            'display_name': spotify_display_name,
+        }
+        session['spotify_user_info'] = spotify_user_info
+        session['spotify_display_name'] = spotify_display_name
+
+    spotify_user_details = None
     if current_user.spotify_id:
         spotify_user_details = {
             "id": current_user.spotify_id,
-            "display_name": session.get('spotify_display_name', current_user.spotify_id) 
+            "display_name": spotify_display_name,
         }
     
     now = datetime.now()
-    spotify_user_info = session.get('spotify_user_info')
     return render_template('users/manage_spotify.html', 
                            spotify_user_details=spotify_user_details, 
                            now=now, 
@@ -916,9 +977,7 @@ def update_bearer_token():
     """Update the Spotify bearer token in the session"""
     # Check if clearing token was requested
     if request.form.get('clear_token'):
-        session.pop('access_token', None)
-        session.pop('token_source', None)
-        session.pop('bearer_token_added', None)
+        _clear_manual_spotify_session_token()
         current_app.logger.info(f"User {current_user.id} cleared Spotify bearer token from session")
         flash('Spotify bearer token has been cleared', 'success')
         return redirect(url_for('users.profile'))
@@ -930,16 +989,11 @@ def update_bearer_token():
         return redirect(url_for('users.profile'))
     
     try:
-        # Store the token in session with timestamp and mark as manual initially
-        session['access_token'] = bearer_token
-        session['token_source'] = 'manual' # Initial assumption
-        session['bearer_token_added'] = datetime.now().timestamp()
-        
         current_app.logger.info(
-            "User %s added a manual bearer token to session. Validating token presence only.",
+            "User %s submitted a manual Spotify bearer token. Validating before storing.",
             current_user.id,
         )
-        
+
         try:
             resp_me = oauth.spotify.get('https://api.spotify.com/v1/me', token={'access_token': bearer_token, 'token_type': 'Bearer'})
             user_info = resp_me.json() if resp_me.ok else None
@@ -947,9 +1001,7 @@ def update_bearer_token():
             if user_info and 'id' in user_info:
                 # This is a user OAuth token
                 username = user_info.get('display_name') or user_info.get('id')
-                
-                # Update token source to reflect it's a user token
-                session['token_source'] = 'user_manual'
+                _store_manual_spotify_session_token(bearer_token, 'user_manual')
                 current_app.logger.info(f"Token identified as user OAuth token for: {username} (ID: {user_info.get('id')})")
                 flash(f'Successfully authenticated with Spotify as {username}', 'success')
                 current_app.logger.info(f"Manual bearer token added for Spotify user: {username} (ID: {user_info.get('id')})")
@@ -965,18 +1017,21 @@ def update_bearer_token():
 
                 if browse_results and 'albums' in browse_results:
                     # This looks like a client credentials token
-                    session['token_source'] = 'client_credentials_manual'
+                    _store_manual_spotify_session_token(bearer_token, 'client_credentials_manual')
                     current_app.logger.info("Token identified as client credentials token (manual)")
                     flash('Token saved as client credentials token. This type of token cannot access user-specific data.', 'warning')
                 else:
-                    flash('Token saved but validation failed (cannot fetch new releases). The token may be invalid or expired.', 'warning')
+                    _clear_manual_spotify_session_token()
+                    flash('Token validation failed. The token was not saved.', 'warning')
                     current_app.logger.warning(f"Manual token validation as client_credentials failed. Response: {resp_browse.status_code if not resp_browse.ok else 'OK, but no albums or browse_results was None'}")
             except Exception as e_browse:
+                _clear_manual_spotify_session_token()
                 current_app.logger.error(f"Error validating bearer token as client credentials: {e_browse}")
-                flash(f'Token saved but error during client credentials validation: {str(e_browse)}', 'warning')
+                flash('Token validation failed. The token was not saved.', 'warning')
     except Exception as e_main:
+        _clear_manual_spotify_session_token()
         current_app.logger.error(f"Error processing bearer token: {e_main}")
-        flash(f'Error processing token: {str(e_main)}', 'warning')
+        flash('Error processing token. The token was not saved.', 'warning')
     
     return redirect(url_for('users.profile'))
 
@@ -1037,7 +1092,7 @@ def setup():
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error promoting user to admin: {str(e)}")
-        flash(f'Error setting up admin privileges: {str(e)}', 'danger')
+        flash('Error setting up admin privileges. Please try again or check the server logs.', 'danger')
         return redirect(url_for('users.profile'))
 
 @users_bp.route('/audio-settings', methods=['GET', 'POST'])
@@ -1236,6 +1291,16 @@ def system_settings():
                 value = 'true' if key in request.form else 'false'
                 current_app.logger.debug(f"Setting {key} to {value}")
                 SystemSetting.set(key, value)
+            elif key == 'fallback_spotify_refresh_token':
+                value = request.form.get(key, '').strip()
+                if request.form.get('clear_fallback_spotify_refresh_token') == 'true':
+                    current_app.logger.info("Clearing fallback Spotify refresh token")
+                    SystemSetting.set(key, '')
+                elif value:
+                    current_app.logger.info("Updating fallback Spotify refresh token")
+                    SystemSetting.set(key, value)
+                else:
+                    current_app.logger.debug("Keeping existing fallback Spotify refresh token")
             else:
                 # Normal text/select fields
                 value = request.form.get(key, '')
@@ -1339,6 +1404,11 @@ def backup_manager():
     next_backup = backup_summary.get('next_backup')
     backup_location = backup_summary.get('backup_location')
     retention_days = backup_summary.get('retention_days', 30)
+    supports_application_backup = backup_summary.get('supports_application_backup', True)
+    backup_warning = backup_summary.get('backup_warning')
+    database_backend = backup_summary.get('database_backend', 'sqlite')
+    database_host = backup_summary.get('database_host')
+    database_name = backup_summary.get('database_name')
     
     # Generate configuration suggestion instead of Docker Compose labels
     config_suggestion = generate_backup_config_suggestion(retention_days=retention_days)
@@ -1363,6 +1433,11 @@ def backup_manager():
         next_backup=next_backup,
         backup_location=backup_location,
         retention_days=retention_days,
+        supports_application_backup=supports_application_backup,
+        backup_warning=backup_warning,
+        database_backend=database_backend,
+        database_host=database_host,
+        database_name=database_name,
         show_schedule_form=show_schedule_form,
         show_create_form=show_create_form,
         notification=notification,
@@ -1619,6 +1694,8 @@ def system_health():
     import flask
     import sqlite3
     from datetime import datetime
+    from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
+    from musicround.helpers.storage_health import round_mp3_dir, round_pdf_dir
     from musicround.models import Song, Round, User, db
     from musicround.version import VERSION_INFO
     
@@ -1632,18 +1709,30 @@ def system_health():
         database_stats["round_count"] = Round.query.count()
         database_stats["user_count"] = User.query.count()
         
-        # Get database file size
-        db_path = current_app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
-        if os.path.exists(db_path):
-            size_bytes = os.path.getsize(db_path)
-            size_mb = size_bytes / (1024 * 1024)
-            database_stats["file_size"] = f"{size_mb:.2f} MB"
+        db_uri = current_app.config['SQLALCHEMY_DATABASE_URI']
+        summary = database_summary(db_uri)
+        database_stats["backend"] = summary["backend"]
+        database_stats["database"] = summary["database"] or "Local SQLite file"
+        database_stats["host"] = summary["host"] or "local"
+        database_stats["redacted_uri"] = summary["redacted_uri"]
+
+        if is_sqlite_database_uri(db_uri):
+            db_path = db_uri.replace('sqlite:///', '')
+            if os.path.exists(db_path):
+                size_bytes = os.path.getsize(db_path)
+                size_mb = size_bytes / (1024 * 1024)
+                database_stats["file_size"] = f"{size_mb:.2f} MB"
+            else:
+                database_stats["file_size"] = "Unknown"
+                database_status = {"color": "yellow", "message": "SQLite database file not found at expected location."}
         else:
-            database_stats["file_size"] = "Unknown"
-            database_status = {"color": "yellow", "message": "Database file not found at expected location."}
+            database_stats["file_size"] = "Managed database"
     except Exception as e:
         current_app.logger.error(f"Error checking database status: {str(e)}")
-        database_status = {"color": "red", "message": f"Database error: {str(e)}"}
+        database_status = {
+            "color": "red",
+            "message": "Database status check failed. Check the server logs.",
+        }
     
     # Check storage status
     storage_status = {"color": "green", "message": "All storage locations are accessible and writable."}
@@ -1653,7 +1742,8 @@ def system_health():
     dirs_to_check = [
         {"path": '/data', "name": "Data Directory"},
         {"path": '/data/backups', "name": "Backups Directory"},
-        {"path": os.path.join(os.path.dirname(current_app.root_path), 'mp3'), "name": "MP3 Directory"},
+        {"path": round_mp3_dir(), "name": "Round MP3 Directory"},
+        {"path": round_pdf_dir(), "name": "Round PDF Directory"},
         {"path": os.path.join(current_app.root_path, 'static'), "name": "Static Files"}
     ]
     
@@ -1719,7 +1809,7 @@ def system_health():
                 api_status = {"color": "yellow", "message": "Some API services are unavailable."}
     except Exception as e:
         spotify_service["status"] = "error"
-        spotify_service["message"] = f"Error: {str(e)}"
+        spotify_service["message"] = "Spotify status check failed. Check the server logs."
         api_status = {"color": "yellow", "message": "Some API services have errors."}
     
     service_stats.append(spotify_service)
@@ -1740,7 +1830,7 @@ def system_health():
                 api_status = {"color": "yellow", "message": "Some API services have warnings."}
     except Exception as e:
         deezer_service["status"] = "error"
-        deezer_service["message"] = f"Error: {str(e)}"
+        deezer_service["message"] = "Deezer status check failed. Check the server logs."
         api_status = {"color": "yellow", "message": "Some API services have errors."}
     
     service_stats.append(deezer_service)
@@ -1763,7 +1853,10 @@ def system_health():
         memory_status = {"color": "gray", "message": "Memory usage information not available (psutil not installed)."}
     except Exception as e:
         # Other errors
-        memory_status = {"color": "gray", "message": f"Error checking memory: {str(e)}"}
+        memory_status = {
+            "color": "gray",
+            "message": "Memory status check failed. Check the server logs.",
+        }
         current_app.logger.error(f"Error checking memory: {str(e)}")
     
     # System information

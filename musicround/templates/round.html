@@ -54,6 +54,10 @@
       <form method="POST" action="{{ url_for('generate.save_round') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="round_criteria" value="{{ round_criteria }}">
+        {% if playlist_import %}
+          <input type="hidden" name="playlist_import" value="1">
+          <input type="hidden" name="expected_song_count" value="{{ expected_song_count or songs|length }}">
+        {% endif %}
         
         <div class="mb-4">
           <label for="round_name" class="block text-gray-700 text-sm font-bold mb-2">Round Name (Optional)</label>

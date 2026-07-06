@@ -1,4 +1,6 @@
 """Tests for generate blueprint helper functions and routes."""
+from types import SimpleNamespace
+
 import pytest
 from musicround.models import db, User, Song, Round, Tag
 
@@ -143,6 +145,21 @@ class TestGetAllTags:
         assert 'Classic' in result
         assert 'Modern' in result
 
+    def test_normalizes_and_deduplicates_tags(self, app):
+        """Test get_all_tags normalizes whitespace and duplicate casing."""
+        from musicround.routes.generate import get_all_tags
+        with app.app_context():
+            db.session.add_all([
+                Tag(name=' rock '),
+                Tag(name='Rock'),
+                Tag(name='Country'),
+            ])
+            db.session.commit()
+
+            result = get_all_tags()
+
+        assert result == ['Country', 'rock']
+
 
 class TestGetSongsByTag:
     """Tests for generate.get_songs_by_tag helper."""
@@ -168,6 +185,24 @@ class TestGetSongsByTag:
             result = get_songs_by_tag('TestTagGen')
         assert len(result) == 1
         assert result[0].title == 'Tagged Generate Song'
+
+    def test_matches_normalized_tag_name(self, app):
+        """Test get_songs_by_tag matches tags after trimming and case folding."""
+        from musicround.routes.generate import get_songs_by_tag
+        with app.app_context():
+            tag1 = Tag(name=' rock ')
+            tag2 = Tag(name='Rock')
+            song1 = Song(title='Trimmed Rock Song', artist='A', genre='Rock')
+            song2 = Song(title='Cased Rock Song', artist='B', genre='Rock')
+            db.session.add_all([tag1, tag2, song1, song2])
+            db.session.commit()
+            song1.tags.append(tag1)
+            song2.tags.append(tag2)
+            db.session.commit()
+
+            result = get_songs_by_tag('ROCK')
+
+        assert {song.title for song in result} == {'Trimmed Rock Song', 'Cased Rock Song'}
 
     def test_respects_limit(self, app):
         """Test get_songs_by_tag respects the limit parameter."""
@@ -420,3 +455,104 @@ class TestBuildMusicRoundRoute:
         assert body.index('First In Playlist') < body.index('Second In Database')
         assert 'Not In Playlist' not in body
         assert 'Deezer Playlist: playlist123' in body
+
+    def test_spotify_playlist_import_preserves_imported_song_order(self, app, monkeypatch):
+        """Spotify imported DB IDs should keep playlist order for review and export."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 3
+            first_song = Song(title='First In Playlist', artist='Artist A', spotify_id='first')
+            second_song = Song(title='Second In Playlist', artist='Artist B', spotify_id='second')
+            third_song = Song(title='Third In Playlist', artist='Artist C', spotify_id='third')
+            db.session.add_all([first_song, second_song, third_song])
+            db.session.commit()
+            ordered_ids = [third_song.id, first_song.id, second_song.id]
+
+        def fake_import_item(**_kwargs):
+            return {
+                'imported_count': 3,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': [],
+                'imported_song_ids': ordered_ids,
+            }
+
+        monkeypatch.setattr('musicround.routes.generate.ImportHelper.import_item', fake_import_item)
+        monkeypatch.setattr('musicround.routes.generate.get_spotify_token', lambda: ('token', 'system'))
+        monkeypatch.setattr('musicround.routes.generate.oauth', SimpleNamespace(spotify=object()))
+
+        from musicround.routes.generate import get_songs_from_spotify_playlist
+        with app.app_context():
+            songs = get_songs_from_spotify_playlist('playlist123')
+
+        assert [song.title for song in songs] == [
+            'Third In Playlist',
+            'First In Playlist',
+            'Second In Playlist',
+        ]
+
+    def test_spotify_playlist_import_ignores_duplicate_and_invalid_song_ids(self, app, monkeypatch):
+        """Spotify imported DB IDs should be sanitized without changing usable order."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 3
+            first_song = Song(title='First In Playlist', artist='Artist A', spotify_id='first')
+            second_song = Song(title='Second In Playlist', artist='Artist B', spotify_id='second')
+            db.session.add_all([first_song, second_song])
+            db.session.commit()
+            returned_ids = [second_song.id, 'not-an-id', second_song.id, first_song.id, 999999]
+
+        def fake_import_item(**_kwargs):
+            return {
+                'imported_count': 2,
+                'skipped_count': 0,
+                'error_count': 0,
+                'errors': [],
+                'imported_song_ids': returned_ids,
+            }
+
+        monkeypatch.setattr('musicround.routes.generate.ImportHelper.import_item', fake_import_item)
+        monkeypatch.setattr('musicround.routes.generate.get_spotify_token', lambda: ('token', 'system'))
+        monkeypatch.setattr('musicround.routes.generate.oauth', SimpleNamespace(spotify=object()))
+
+        from musicround.routes.generate import get_songs_from_spotify_playlist
+        with app.app_context():
+            songs = get_songs_from_spotify_playlist('playlist123')
+
+        assert [song.title for song in songs] == [
+            'Second In Playlist',
+            'First In Playlist',
+        ]
+
+    def test_import_spotify_playlist_rejects_partial_round(self, app, client, monkeypatch):
+        """Playlist import should not offer a saveable review if too few tracks resolve."""
+        with app.app_context():
+            app.config['SONGS_PER_ROUND'] = 2
+            resolved = Song(title='Only Resolved', artist='Artist A', spotify_id='one')
+            db.session.add(resolved)
+            db.session.commit()
+            resolved_id = resolved.id
+
+        def fake_get_songs_from_spotify_playlist(_playlist_id):
+            return [Song.query.get(resolved_id)]
+
+        monkeypatch.setattr(
+            'musicround.routes.generate.get_songs_from_spotify_playlist',
+            fake_get_songs_from_spotify_playlist,
+        )
+        _login(app, client)
+
+        response = client.post(
+            '/import-playlist',
+            data={
+                'platform': 'spotify',
+                'playlist_url': 'https://open.spotify.com/playlist/partial',
+                'round_name': 'Partial Spotify',
+            },
+            follow_redirects=True,
+        )
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'resolved 1 songs; expected exactly 2' in body
+        assert 'Only Resolved' not in body
+        with app.app_context():
+            assert Round.query.filter_by(name='Partial Spotify').first() is None

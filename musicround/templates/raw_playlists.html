@@ -66,19 +66,19 @@
                         <tbody class="divide-y divide-gray-200">
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Total Playlists</td>
-                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response.total }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response['total'] }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Items Returned</td>
-                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response.items|length }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.spotipy.raw_response['items']|length }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Has Next Page</td>
-                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response.next else "No" }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response['next'] else "No" }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Has Previous Page</td>
-                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response.previous else "No" }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.spotipy.raw_response['previous'] else "No" }}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -86,7 +86,7 @@
                 
                 <!-- Playlists -->
                 <div>
-                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.spotipy.raw_response.items|length }}):</h3>
+                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.spotipy.raw_response['items']|length }}):</h3>
                     <div class="overflow-y-auto max-h-96 border border-gray-200 rounded-lg">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
@@ -98,7 +98,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                {% for playlist in results.spotipy.raw_response.items %}
+                                {% for playlist in results.spotipy.raw_response['items'] %}
                                 <tr>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ loop.index }}</td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.id }}</td>
@@ -112,9 +112,9 @@
                 </div>
                 
                 <!-- Pagination links -->
-                {% if results.spotipy.raw_response.previous or results.spotipy.raw_response.next %}
+                {% if results.spotipy.raw_response['previous'] or results.spotipy.raw_response['next'] %}
                 <div class="mt-4 flex justify-between">
-                    {% if results.spotipy.raw_response.previous %}
+                    {% if results.spotipy.raw_response['previous'] %}
                     <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset-limit) }}"
                        class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
                        &laquo; Previous
@@ -123,7 +123,7 @@
                     <span></span>
                     {% endif %}
                     
-                    {% if results.spotipy.raw_response.next %}
+                    {% if results.spotipy.raw_response['next'] %}
                     <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset+limit) }}"
                        class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
                        Next &raquo;
@@ -171,19 +171,19 @@
                         <tbody class="divide-y divide-gray-200">
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Total Playlists</td>
-                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response.total }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response['total'] }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Items Returned</td>
-                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response.items|length }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ results.direct.raw_response['items']|length }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Has Next Page</td>
-                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response.next else "No" }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response['next'] else "No" }}</td>
                             </tr>
                             <tr>
                                 <td class="py-2 text-sm font-medium text-gray-700">Has Previous Page</td>
-                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response.previous else "No" }}</td>
+                                <td class="py-2 text-sm text-gray-900">{{ "Yes" if results.direct.raw_response['previous'] else "No" }}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -191,7 +191,7 @@
                 
                 <!-- Playlists -->
                 <div>
-                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.direct.raw_response.items|length }}):</h3>
+                    <h3 class="font-medium text-gray-800 mb-2">Playlists ({{ results.direct.raw_response['items']|length }}):</h3>
                     <div class="overflow-y-auto max-h-96 border border-gray-200 rounded-lg">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
@@ -203,7 +203,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                {% for playlist in results.direct.raw_response.items %}
+                                {% for playlist in results.direct.raw_response['items'] %}
                                 <tr>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ loop.index }}</td>
                                     <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{{ playlist.id }}</td>
@@ -217,9 +217,9 @@
                 </div>
                 
                 <!-- Pagination links -->
-                {% if results.direct.raw_response.previous or results.direct.raw_response.next %}
+                {% if results.direct.raw_response['previous'] or results.direct.raw_response['next'] %}
                 <div class="mt-4 flex justify-between">
-                    {% if results.direct.raw_response.previous %}
+                    {% if results.direct.raw_response['previous'] %}
                     <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset-limit) }}"
                        class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
                        &laquo; Previous
@@ -228,7 +228,7 @@
                     <span></span>
                     {% endif %}
                     
-                    {% if results.direct.raw_response.next %}
+                    {% if results.direct.raw_response['next'] %}
                     <a href="{{ url_for('import.get_raw_playlists', account=account, limit=limit, offset=offset+limit) }}"
                        class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm text-gray-700">
                        Next &raquo;
