@@ -437,7 +437,10 @@ def refresh_song_metadata(song_id):
             db.session.rollback()
             current_app.logger.error(f"Database commit error: {db_error}")
             current_app.logger.error(f"Traceback: {traceback.format_exc()}")
-            return jsonify({'error': f"Database error: {str(db_error)}"}), 500
+            return jsonify({
+                'error': 'Unable to save refreshed song metadata.',
+                'code': 'metadata_refresh_save_failed',
+            }), 500
         
         # Return updated song details including tags
         tag_list = [{'id': tag.id, 'name': tag.name} for tag in song.tags]
@@ -465,7 +468,10 @@ def refresh_song_metadata(song_id):
     except Exception as e:
         current_app.logger.error(f"Error refreshing metadata for song {song_id}: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': 'Unable to refresh song metadata.',
+            'code': 'metadata_refresh_failed',
+        }), 500
 
 # New API routes for tag operations
 

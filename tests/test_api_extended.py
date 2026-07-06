@@ -212,6 +212,57 @@ class TestSongTagsApi:
         response = client.post(f'/api/songs/{song_id}/refresh-metadata')
         assert response.status_code in (302, 401, 403)
 
+    def test_refresh_metadata_unexpected_error_hides_exception_text(self, app, client):
+        """Metadata provider failures should not leak exception text to clients."""
+        _create_user_and_login(app, client, 'metafail', 'metafail@example.com')
+        with app.app_context():
+            song = Song(title='Meta Fail', artist='Artist', genre='Rock', isrc='USMETA123456')
+            db.session.add(song)
+            db.session.commit()
+            song_id = song.id
+
+        with patch(
+            'musicround.routes.api.get_song_metadata_by_isrc',
+            side_effect=RuntimeError('provider-secret metadata traceback'),
+        ):
+            response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+
+        data = response.get_json()
+        assert response.status_code == 500
+        assert data == {
+            'error': 'Unable to refresh song metadata.',
+            'code': 'metadata_refresh_failed',
+        }
+        assert 'provider-secret' not in response.get_data(as_text=True)
+        assert 'traceback' not in data
+
+    def test_refresh_metadata_db_error_hides_exception_text(self, app, client):
+        """Metadata save failures should stay generic client-side."""
+        _create_user_and_login(app, client, 'metadbfail', 'metadbfail@example.com')
+        with app.app_context():
+            song = Song(title='Meta DB Fail', artist='Artist', genre='Rock', isrc='USMETA654321')
+            db.session.add(song)
+            db.session.commit()
+            song_id = song.id
+
+        with patch(
+            'musicround.routes.api.get_song_metadata_by_isrc',
+            return_value={'title': 'Updated Title', 'sources': ['test']},
+        ), patch(
+            'musicround.routes.api.db.session.commit',
+            side_effect=RuntimeError('database-secret /data/song_data.db'),
+        ):
+            response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+
+        data = response.get_json()
+        assert response.status_code == 500
+        assert data == {
+            'error': 'Unable to save refreshed song metadata.',
+            'code': 'metadata_refresh_save_failed',
+        }
+        assert 'database-secret' not in response.get_data(as_text=True)
+        assert '/data/song_data.db' not in response.get_data(as_text=True)
+
 
 class TestSongSearchApi:
     """Tests for /api/songs/search endpoint."""
