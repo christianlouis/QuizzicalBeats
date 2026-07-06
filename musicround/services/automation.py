@@ -52,6 +52,12 @@ class AutomationError(ValueError):
         self.details = details or {}
 
 
+AUTOMATION_STORAGE_ERROR = "Round artifact storage is unhealthy."
+AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
+AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
+AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
+
+
 def _round_song_ids(round_obj: Round) -> list[int]:
     return [int(song_id) for song_id in round_obj.songs.split(",") if song_id]
 
@@ -1218,7 +1224,11 @@ def generate_round_pdf(round_id: int) -> dict[str, Any]:
     try:
         require_round_artifact_storage(include_mp3=False, include_pdf=True)
     except RuntimeError as exc:
-        raise AutomationError(str(exc), details=check_round_artifact_storage(include_mp3=False)) from exc
+        current_app.logger.error("PDF generation blocked by unhealthy artifact storage: %s", exc)
+        raise AutomationError(
+            AUTOMATION_STORAGE_ERROR,
+            details=check_round_artifact_storage(include_mp3=False),
+        ) from exc
     pdf_data = generate_pdf(round_id)
     if isinstance(pdf_data, str):
         raise AutomationError(pdf_data)
@@ -1239,7 +1249,11 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
     try:
         require_round_artifact_storage(include_mp3=True, include_pdf=False)
     except RuntimeError as exc:
-        raise AutomationError(str(exc), details=check_round_artifact_storage(include_pdf=False)) from exc
+        current_app.logger.error("MP3 generation blocked by unhealthy artifact storage: %s", exc)
+        raise AutomationError(
+            AUTOMATION_STORAGE_ERROR,
+            details=check_round_artifact_storage(include_pdf=False),
+        ) from exc
     with current_app.test_request_context(headers={"X-Requested-With": "XMLHttpRequest"}):
         login_user(user)
         try:
@@ -1268,8 +1282,9 @@ def generate_round_assets(
     try:
         require_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf)
     except RuntimeError as exc:
+        current_app.logger.error("Round asset generation blocked by unhealthy artifact storage: %s", exc)
         raise AutomationError(
-            str(exc),
+            AUTOMATION_STORAGE_ERROR,
             details=check_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf),
         ) from exc
     assets: dict[str, Any] = {"round_id": round_id}
@@ -1742,14 +1757,16 @@ def inspect_round_package(
         for warning in pdf_result.get("warnings", []):
             issues.append(_quality_issue("pdf_quality_warning", warning))
     except Exception as exc:
-        issues.append(_quality_issue("pdf_inspection_failed", str(exc)))
+        current_app.logger.error("PDF inspection failed for round %s: %s", round_id, exc, exc_info=True)
+        issues.append(_quality_issue("pdf_inspection_failed", AUTOMATION_PDF_INSPECTION_ERROR))
 
     try:
         mp3_result = inspect_mp3_quality(round_id=round_id)
         for warning in mp3_result.get("warnings", []):
             issues.append(_quality_issue("mp3_quality_warning", warning))
     except Exception as exc:
-        issues.append(_quality_issue("mp3_inspection_failed", str(exc)))
+        current_app.logger.error("MP3 inspection failed for round %s: %s", round_id, exc, exc_info=True)
+        issues.append(_quality_issue("mp3_inspection_failed", AUTOMATION_MP3_INSPECTION_ERROR))
 
     if expected_ms is not None and mp3_result and mp3_result.get("duration_seconds") is not None:
         expected_seconds = expected_ms / 1000
@@ -2827,13 +2844,19 @@ def process_due_scheduled_round_emails(
         except Exception as exc:
             export.status = "failed"
             export.processed_at = datetime.utcnow()
-            export.error_message = str(exc)
+            current_app.logger.error(
+                "Scheduled round email export %s failed: %s",
+                export.id,
+                exc,
+                exc_info=True,
+            )
+            export.error_message = AUTOMATION_SCHEDULED_EMAIL_ERROR
             db.session.commit()
             details = getattr(exc, "details", None)
             results.append(
                 {
                     "export": _round_export_summary(export),
-                    "error": str(exc),
+                    "error": AUTOMATION_SCHEDULED_EMAIL_ERROR,
                     "details": details,
                 }
             )

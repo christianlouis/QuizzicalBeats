@@ -813,6 +813,29 @@ class TestAssetInspection:
             assert exc_info.value.details["ok"] is False
             assert RoundExport.query.filter_by(round_id=round_id).count() == 0
 
+    def test_generate_assets_storage_error_hides_exception_text(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Unsafe Storage", artist="Artist")
+            round_id = automation.create_round(
+                name="Unsafe Storage Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with patch(
+                "musicround.services.automation.require_round_artifact_storage",
+                side_effect=RuntimeError("filesystem secret token=storage-secret traceback"),
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.generate_round_assets(round_id, user_id=user.id)
+
+            message = str(exc_info.value)
+            assert message == automation.AUTOMATION_STORAGE_ERROR
+            assert exc_info.value.details
+            assert "storage-secret" not in message
+            assert "traceback" not in message
+
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():
             _configure_mail(app)
@@ -884,6 +907,50 @@ class TestAssetInspection:
             export = RoundExport.query.get(scheduled["export"]["id"])
             assert export.status == "success"
             assert export.processed_at is not None
+
+    def test_process_due_scheduled_round_email_hides_exception_text(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Due Failure", artist="Artist")
+            round_id = automation.create_round(
+                name="Due Failure Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                scheduled = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
+
+            with patch(
+                "musicround.services.automation.email_round",
+                side_effect=RuntimeError("smtp-secret token=mail-secret traceback"),
+            ):
+                result = automation.process_due_scheduled_round_emails(
+                    now="2026-07-09T19:01:00+02:00"
+                )
+
+            body = str(result)
+            assert result["processed_count"] == 1
+            assert result["results"][0]["error"] == automation.AUTOMATION_SCHEDULED_EMAIL_ERROR
+            assert "smtp-secret" not in body
+            assert "mail-secret" not in body
+            assert "traceback" not in body
+            export = RoundExport.query.get(scheduled["export"]["id"])
+            assert export.status == "failed"
+            assert export.error_message == automation.AUTOMATION_SCHEDULED_EMAIL_ERROR
 
 
 class TestTTSAutomation:
