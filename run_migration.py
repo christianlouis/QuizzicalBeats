@@ -3,7 +3,6 @@ Manually run the OAuth providers migration script
 """
 import os
 import sys
-from flask import Flask
 import logging
 
 # Set up logging
@@ -22,7 +21,7 @@ def run_spotify_oauth_migration():
     """Run the migration to add Spotify OAuth columns"""
     try:
         # Create a minimal Flask app with database connection
-        from musicround import db, create_app
+        from musicround import create_app
         app = create_app()
         
         with app.app_context():
