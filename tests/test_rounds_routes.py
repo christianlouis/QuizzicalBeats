@@ -494,6 +494,50 @@ class TestLegacyEmptyRoundRoutes:
         mock_refresh.assert_not_called()
         mock_upload.assert_not_called()
 
+    def test_dropbox_export_failure_hides_exception_details(self, app, client):
+        """Dropbox export failures should not expose provider or token details."""
+        _login(app, client)
+        song_id = _create_song(app, title='Dropbox Export Failure Song')
+        round_id = _create_round(app, [song_id], name='Dropbox Export Failure Round')
+        with app.app_context():
+            user = User.query.filter_by(username='roundsuser').one()
+            user.dropbox_token = 'dropbox-access-token'
+            user.dropbox_refresh_token = 'dropbox-refresh-token'
+            db.session.commit()
+
+        with patch(
+            'musicround.helpers.dropbox_helper.refresh_dropbox_token_if_needed',
+            return_value={'success': True, 'message': 'ok'},
+        ), patch(
+            'musicround.helpers.dropbox_helper.upload_to_dropbox',
+            return_value={
+                'success': False,
+                'message': 'provider-secret old-dropbox-access traceback',
+            },
+        ), patch('musicround.helpers.dropbox_helper.create_shared_link') as mock_link:
+            response = client.post(
+                f'/rounds/{round_id}/export-to-dropbox',
+                data={'include_mp3s': 'false', 'include_pdf': 'false'},
+            )
+
+        payload = response.get_json()
+        assert response.status_code == 200
+        assert payload['success'] is False
+        assert payload['message'] == (
+            'Round export to Dropbox failed. Please try again later or reconnect Dropbox.'
+        )
+        body = response.get_data(as_text=True)
+        assert 'provider-secret' not in body
+        assert 'old-dropbox-access' not in body
+        assert 'traceback' not in body
+        mock_link.assert_not_called()
+        with app.app_context():
+            export = RoundExport.query.filter_by(round_id=round_id, export_type='dropbox').one()
+            assert export.status == 'failed'
+            assert export.error_message == (
+                'Round export to Dropbox failed. Please try again later or reconnect Dropbox.'
+            )
+
 
 class TestRoundMp3Hints:
     """Tests for optional per-track hint audio in generated MP3s."""

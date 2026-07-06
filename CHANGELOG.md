@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sanitized round-delete failure responses so filesystem or database exception details are logged but not returned to users.
 - Sanitized song metadata refresh failures so provider and database exception details stay out of API responses.
 - Sanitized Spotify album, playlist, and search API proxy errors so provider bodies stay out of JSON responses.
+- Sanitized Dropbox round-export failure responses and export records so provider or filesystem exception details stay out of user-visible surfaces.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.

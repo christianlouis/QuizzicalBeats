@@ -1194,16 +1194,26 @@ def export_to_dropbox(round_id):
         return jsonify(response_data)
         
     except Exception as e:
-        current_app.logger.error(f"Error exporting round {round_id} to Dropbox: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error exporting round {round_id} to Dropbox: {str(e)}",
+            exc_info=True,
+        )
+        if str(e) == 'Round contains no songs':
+            error_msg = 'Round contains no songs'
+        else:
+            error_msg = (
+                "Round export to Dropbox failed. "
+                "Please try again later or reconnect Dropbox."
+            )
         
         # Update export record with error
         round_export.status = 'failed'
-        round_export.error_message = str(e)
+        round_export.error_message = error_msg
         db.session.commit()
         
         # Error response
         response_data['success'] = False
-        response_data['message'] = f"Error exporting to Dropbox: {str(e)}"
+        response_data['message'] = error_msg
         
         return jsonify(response_data)
 
