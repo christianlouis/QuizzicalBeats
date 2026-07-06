@@ -67,6 +67,11 @@ def _require_import_diagnostics_admin():
     flash('Admin access required for Spotify diagnostics.', 'danger')
     return redirect(url_for('core.view_songs'))
 
+
+def _safe_spotify_diagnostic_error(client_name='Spotify'):
+    """Return a browser-safe diagnostic error message."""
+    return f"{client_name} diagnostic check failed. Check the server logs."
+
 def fetch_all_user_playlists(oauth_client, token, user_id, limit=50):
     """
     Fetch all playlists from a specific Spotify user account with pagination using Authlib.
@@ -580,7 +585,7 @@ def test_spotify_client():
         import traceback
         current_app.logger.error(f"Error testing spotipy: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['spotipy']['error'] = str(e)
+        results['spotipy']['error'] = _safe_spotify_diagnostic_error('Spotify')
     
     # Test direct implementation
     try:
@@ -609,7 +614,7 @@ def test_spotify_client():
         import traceback
         current_app.logger.error(f"Error testing direct client: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['direct']['error'] = str(e)
+        results['direct']['error'] = _safe_spotify_diagnostic_error('Direct Spotify')
     
     # Compare playlists between implementations
     comparison = {
@@ -693,7 +698,7 @@ def get_raw_playlists():
         import traceback
         current_app.logger.error(f"Error getting raw Spotify playlists: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['spotipy']['error'] = str(e)
+        results['spotipy']['error'] = _safe_spotify_diagnostic_error('Spotify')
     
     # Test direct API raw response
     try:
@@ -713,7 +718,7 @@ def get_raw_playlists():
         import traceback
         current_app.logger.error(f"Error getting raw direct playlists: {e}")
         current_app.logger.error(traceback.format_exc())
-        results['direct']['error'] = str(e)
+        results['direct']['error'] = _safe_spotify_diagnostic_error('Direct Spotify')
     
     # Add direct auth link to template data
     direct_auth_url = url_for('import.direct_spotify_auth')

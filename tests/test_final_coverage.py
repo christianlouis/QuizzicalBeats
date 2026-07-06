@@ -282,6 +282,58 @@ class TestImportRoutesAccess:
         assert captured['token']['access_token'] == 'db-spotify-token'
         assert captured['user_id'] == 'spotify'
 
+    def test_spotify_client_diagnostic_hides_exception_details(self, app, client, monkeypatch):
+        """Diagnostic client errors should not render provider or token details."""
+        from musicround.routes import import_routes
+
+        _login(app, client, username='diag_error_admin', email='diagerr@example.com', is_admin=True)
+        with app.app_context():
+            user = User.query.filter_by(username='diag_error_admin').one()
+            user.spotify_token = 'db-spotify-token'
+            db.session.commit()
+
+        monkeypatch.setattr(import_routes.oauth, 'spotify', object(), raising=False)
+
+        def fail_fetch(oauth_client, token, user_id, limit=50):
+            raise RuntimeError('provider body token=diag-client-secret traceback')
+
+        monkeypatch.setattr(import_routes, 'fetch_all_user_playlists', fail_fetch)
+
+        response = client.get('/import/test-spotify-client')
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Spotify diagnostic check failed. Check the server logs.' in body
+        assert 'diag-client-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
+    def test_raw_playlists_diagnostic_hides_exception_details(self, app, client, monkeypatch):
+        """Raw playlist diagnostics should not render provider or token details."""
+        from musicround.routes import import_routes
+
+        _login(app, client, username='raw_diag_admin', email='rawdiag@example.com', is_admin=True)
+
+        class FailingSpotify:
+            def get(self, *args, **kwargs):
+                raise RuntimeError('provider body token=raw-playlist-secret traceback')
+
+        monkeypatch.setattr(import_routes, 'get_spotify_token', lambda: ('db-spotify-token', 'user'))
+        monkeypatch.setattr(
+            'musicround.routes.import_routes.oauth.spotify',
+            FailingSpotify(),
+            raising=False,
+        )
+
+        response = client.get('/import/raw-playlists')
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Spotify diagnostic check failed. Check the server logs.' in body
+        assert 'raw-playlist-secret' not in body
+        assert 'provider body' not in body
+        assert 'traceback' not in body
+
     def test_direct_auth_invalid_token_is_not_stored(self, app, client, monkeypatch):
         """Invalid direct bearer tokens must not remain in the session."""
         class FakeClient:
