@@ -50,6 +50,15 @@ def _safe_dropbox_api_error(status_code, message='Dropbox API error'):
     })
 
 
+def _safe_spotify_api_error(status_code, message='Spotify API error'):
+    """Return a stable Spotify API error without provider raw bodies or traces."""
+    return jsonify({
+        'error': message,
+        'code': 'spotify_api_error',
+        'status_code': status_code,
+    })
+
+
 def _bool_arg(name):
     value = request.args.get(name)
     if value is None:
@@ -660,7 +669,7 @@ def get_spotify_album(album_id):
         return jsonify(album_data)
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error fetching Spotify album: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify album: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -740,7 +749,7 @@ def get_spotify_playlist(playlist_id):
         return jsonify(playlist_data)
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error fetching Spotify playlist: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error fetching Spotify playlist: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -778,7 +787,7 @@ def spotify_search():
 
     except requests.exceptions.HTTPError as http_err:
         current_app.logger.error(f"HTTP error during Spotify search: {http_err} - {http_err.response.text}")
-        return jsonify({'error': f'Spotify API error: {http_err.response.status_code}', 'details': http_err.response.json() if http_err.response.content else None}), http_err.response.status_code
+        return _safe_spotify_api_error(http_err.response.status_code), http_err.response.status_code
     except Exception as e:
         current_app.logger.error(f"Error during Spotify search: {str(e)}")
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")

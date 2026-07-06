@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from musicround.models import db, User, Song, Tag
 
@@ -399,6 +400,72 @@ class TestSongSearchApi:
         data = response.get_json()
         assert len(data) >= 1
         assert any(s['artist'] == 'SpecificArtistABC' for s in data)
+
+
+class TestSpotifyApiErrors:
+    """Spotify proxy endpoints should not expose provider error bodies."""
+
+    def _spotify_http_error(self):
+        response = MagicMock()
+        response.status_code = 401
+        response.text = 'provider-secret spotify-access-token traceback'
+        response.content = response.text.encode('utf-8')
+        response.json.return_value = {
+            'error': {
+                'message': 'provider-secret spotify-access-token traceback',
+            }
+        }
+        return requests.exceptions.HTTPError(response=response)
+
+    def test_spotify_album_error_hides_provider_body(self, app, client):
+        _create_user_and_login(app, client, 'spotifyalbumerr', 'spotifyalbumerr@example.com')
+        fake_response = MagicMock()
+        fake_response.raise_for_status.side_effect = self._spotify_http_error()
+
+        with patch('musicround.routes.api.get_spotify_token', return_value=('spotify-token', 'manual')), \
+                patch('musicround.routes.api.requests.get', return_value=fake_response):
+            response = client.get('/api/spotify/album/album-id')
+
+        data = response.get_json()
+        assert response.status_code == 401
+        assert data == {
+            'error': 'Spotify API error',
+            'code': 'spotify_api_error',
+            'status_code': 401,
+        }
+        assert 'provider-secret' not in response.get_data(as_text=True)
+        assert 'spotify-access-token' not in response.get_data(as_text=True)
+        assert 'details' not in data
+
+    def test_spotify_playlist_error_hides_provider_body(self, app, client):
+        _create_user_and_login(app, client, 'spotifyplaylisterr', 'spotifyplaylisterr@example.com')
+        fake_response = MagicMock()
+        fake_response.raise_for_status.side_effect = self._spotify_http_error()
+
+        with patch('musicround.routes.api.get_spotify_token', return_value=('spotify-token', 'manual')), \
+                patch('musicround.routes.api.requests.get', return_value=fake_response):
+            response = client.get('/api/spotify/playlist/playlist-id')
+
+        data = response.get_json()
+        assert response.status_code == 401
+        assert data['code'] == 'spotify_api_error'
+        assert 'provider-secret' not in response.get_data(as_text=True)
+        assert 'details' not in data
+
+    def test_spotify_search_error_hides_provider_body(self, app, client):
+        _create_user_and_login(app, client, 'spotifysearcherr', 'spotifysearcherr@example.com')
+        fake_response = MagicMock()
+        fake_response.raise_for_status.side_effect = self._spotify_http_error()
+
+        with patch('musicround.routes.api.get_spotify_token', return_value=('spotify-token', 'manual')), \
+                patch('musicround.routes.api.requests.get', return_value=fake_response):
+            response = client.get('/api/spotify/search?q=beatles&type=track')
+
+        data = response.get_json()
+        assert response.status_code == 401
+        assert data['code'] == 'spotify_api_error'
+        assert 'provider-secret' not in response.get_data(as_text=True)
+        assert 'details' not in data
 
 
 class TestDropboxFolderApi:
