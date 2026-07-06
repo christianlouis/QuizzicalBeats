@@ -1,6 +1,9 @@
 """Security tests for Flask-Admin views."""
 
-from musicround.models import SystemSetting, User, db
+from flask import get_flashed_messages
+
+from musicround.models import Song, SystemSetting, User, db
+from musicround.routes.db_admin import SongModelView, UserModelView
 
 
 SENSITIVE_USER_VALUES = [
@@ -156,3 +159,54 @@ def test_system_settings_can_replace_and_clear_fallback_refresh_token(app, clien
     assert clear_response.status_code == 302
     with app.app_context():
         assert SystemSetting.get('fallback_spotify_refresh_token') == ''
+
+
+def test_admin_song_action_failure_hides_exception_details(app, monkeypatch):
+    with app.app_context():
+        song = Song(title='Admin Action Song', artist='Admin Artist')
+        db.session.add(song)
+        db.session.commit()
+        song_id = song.id
+
+        def fail_commit():
+            raise RuntimeError('database down token=admin-song-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+        view = SongModelView(Song, db.session)
+
+        with app.test_request_context('/admin/song/action/'):
+            view.action_reset_used_count([song_id])
+            messages = get_flashed_messages(with_categories=True)
+
+    rendered = ' '.join(message for _, message in messages)
+    assert 'Error resetting used count. Please try again or check the server logs.' in rendered
+    assert 'database down' not in rendered
+    assert 'admin-song-secret' not in rendered
+    assert 'traceback' not in rendered
+
+
+def test_admin_user_action_failures_hide_exception_details(app, monkeypatch):
+    with app.app_context():
+        user = User(username='admin_action_user', email='admin_action_user@example.com')
+        user.password = 'AdminActionPass123!'
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+        def fail_commit():
+            raise RuntimeError('database down token=admin-user-secret traceback')
+
+        monkeypatch.setattr(db.session, 'commit', fail_commit)
+        view = UserModelView(User, db.session)
+
+        with app.test_request_context('/admin/user/action/'):
+            view.action_activate_users([user_id])
+            view.action_deactivate_users([user_id])
+            messages = get_flashed_messages(with_categories=True)
+
+    rendered = ' '.join(message for _, message in messages)
+    assert 'Error activating users. Please try again or check the server logs.' in rendered
+    assert 'Error deactivating users. Please try again or check the server logs.' in rendered
+    assert 'database down' not in rendered
+    assert 'admin-user-secret' not in rendered
+    assert 'traceback' not in rendered
