@@ -990,5 +990,9 @@ def retry_import_job(job_id):
     try:
         result = automation.retry_import_job(job_id, reset_attempts=reset_attempts)
     except automation.AutomationError as exc:
-        return jsonify({'error': str(exc), 'details': exc.details}), 400
+        current_app.logger.error("Import job retry failed for job %s: %s", job_id, exc, exc_info=True)
+        return jsonify({
+            'error': 'Import job retry failed. Check the server logs.',
+            'code': 'import_job_retry_failed',
+        }), 400
     return jsonify(result)

@@ -475,6 +475,32 @@ class TestImportQueueStatusRoute:
         assert data['job']['status'] == 'pending'
         assert data['job']['attempt_count'] == 0
 
+    def test_retry_import_job_error_hides_automation_details(self, app, client, monkeypatch):
+        """Retry endpoint errors should not expose stored job/provider details."""
+        from musicround.routes.import_routes import automation
+
+        _login_admin(app, client)
+
+        def fail_retry(job_id, reset_attempts=False):
+            raise automation.AutomationError(
+                'retry provider failed token=retry-secret traceback',
+                details={'error_message': 'old provider token=retry-secret traceback'},
+            )
+
+        monkeypatch.setattr(automation, 'retry_import_job', fail_retry)
+
+        response = client.post('/import/jobs/123/retry', json={'reset_attempts': True})
+
+        body = response.get_data(as_text=True)
+        data = response.get_json()
+        assert response.status_code == 400
+        assert data == {
+            'error': 'Import job retry failed. Check the server logs.',
+            'code': 'import_job_retry_failed',
+        }
+        assert 'retry-secret' not in body
+        assert 'traceback' not in body
+
 
 class TestUserRoutesExtended:
     """Additional user route tests for more coverage."""

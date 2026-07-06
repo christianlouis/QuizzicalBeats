@@ -529,6 +529,41 @@ class TestImportRoutesAccess:
         assert b'action="/import/direct-official-playlists"' in response.data
         assert b'action="/import/official-playlists"' not in response.data
 
+    def test_update_audio_features_direct_client_init_error_hides_token(self, app, client, monkeypatch):
+        """SpotifyDirectClient init errors must not expose bearer tokens in JSON."""
+        _login(app, client)
+        with app.app_context():
+            song = Song(
+                title='Needs Features',
+                artist='Artist',
+                genre='Rock',
+                spotify_id='spotify-feature-track',
+            )
+            db.session.add(song)
+            db.session.commit()
+            song_id = song.id
+
+        with client.session_transaction() as sess:
+            sess['access_token'] = 'spotify-access-secret'
+
+        def fail_client(*args, **kwargs):
+            raise RuntimeError('provider init failed token=spotify-access-secret traceback')
+
+        monkeypatch.setattr('musicround.helpers.spotify_direct.SpotifyDirectClient', fail_client)
+
+        response = client.post(
+            '/api/songs/update-audio-features',
+            json={'song_ids': [song_id]},
+        )
+
+        body = response.get_data(as_text=True)
+        data = response.get_json()
+        assert response.status_code == 500
+        assert data['error'] == 'SPOTIFY_DIRECT_CLIENT_INIT_FAILED'
+        assert 'spotify-access-secret' not in body
+        assert 'provider init failed' not in body
+        assert 'traceback' not in body
+
     def test_queue_status_requires_login(self, client):
         """Test that queue status requires authentication."""
         response = client.get('/import/queue-status')

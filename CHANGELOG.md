@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Normalized legacy JSON Spotify token payloads into raw user token columns and kept the Authlib token bridge compatible with old rows.
 - Sanitized Dropbox folder-list/create error responses and `/healthz` database probe failures so provider bodies, driver errors, and credentials stay out of JSON responses.
 - Sanitized automation storage, inspection, and scheduled-email failure payloads so MCP and export records keep repair context without exposing raw exception text.
+- Sanitized Spotify direct-client initialization and import-job retry error responses so bearer tokens and stored provider details stay out of browser JSON.
 - Stopped rendering the fallback Spotify refresh token in the system-settings form; leaving the field blank now keeps the stored secret unless admins explicitly clear it.
 - Disabled the OAuth diagnostics route by default and restricted it to admins when explicitly enabled.
 - Made token generation reject invalid lengths instead of returning weak or empty tokens.

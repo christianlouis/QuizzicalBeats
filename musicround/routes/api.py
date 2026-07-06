@@ -936,7 +936,7 @@ def update_audio_features():
         return jsonify({
             'success': False,
             'message': 'Failed to initialize Spotify client',
-            'error': str(e)
+            'error': 'SPOTIFY_DIRECT_CLIENT_INIT_FAILED',
         }), 500
     
     # Process songs in batches
