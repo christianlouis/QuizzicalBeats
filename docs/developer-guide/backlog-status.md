@@ -22,7 +22,6 @@ issue after verification or continue with the remaining follow-up.
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
 | #69 Add review workflow for low-confidence text imports | Ready to close after deploy smoke | Browser review UI, exact eight-song create gate, MCP/parser review payloads | Smoke paste one unresolved and one complete eight-song text list. |
-| #75 Add chart and festival seed source registry | Ready to close | `SeedSource`, `SeedSourceRun`, admin views, MCP registry/run tools, read-only source candidate fetcher, default chart/festival source seeding | Close after the seed-source MCP tools are visible in the deployed app. |
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
@@ -42,12 +41,12 @@ issue after verification or continue with the remaining follow-up.
 - #72 Recent usage and fatigue summary for agents
 - #73 MCP drafting for intro, replay, and outro scripts
 - #74 Reviewable TTS script records and generation handoff
+- #75 Chart and festival seed source registry
 - #79 Round ownership and sharing roles
 
 ## Next Local Work Blocks
 
 1. Smoke #69 in the browser with one unresolved and one complete eight-song
    text list, then close it if the review loop behaves correctly.
-2. Close #75 after deploy smoke confirms the seed-source MCP tools are visible.
-3. For #126/#12, continue with live deployment configuration only through the
+2. For #126/#12, continue with live deployment configuration only through the
    existing 1Password-backed secret flow and credential-safe Kubernetes checks.
