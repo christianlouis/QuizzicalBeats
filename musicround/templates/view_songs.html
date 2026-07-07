@@ -245,10 +245,10 @@
                                     {% set preview_url = song.preview_url or song.spotify_preview_url or song.deezer_preview_url or song.apple_preview_url or song.youtube_preview_url %}
                                     {% if preview_url %}
                                     <button type="button"
-                                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                                            class="preview-load-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
                                             data-preview-url="{{ preview_url|e }}"
-                                            title="Load preview"
-                                            aria-label="Load preview">
+                                            title="Load preview for {{ song.title|e }} by {{ song.artist|e }}"
+                                            aria-label="Load preview for {{ song.title|e }} by {{ song.artist|e }}">
                                         <i class="fas fa-play"></i>
                                     </button>
                                     {% else %}
@@ -258,15 +258,17 @@
                                 <td class="px-4 py-3">
                                     <div class="flex space-x-2">
                                         <button type="button" 
-                                                class="edit-song-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all" 
-                                                title="Edit song">
+                                                class="edit-song-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                                                title="Edit {{ song.title|e }} by {{ song.artist|e }}"
+                                                aria-label="Edit {{ song.title|e }} by {{ song.artist|e }}">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" 
-                                                class="delete-song-btn text-red-600 hover:text-red-800 px-2 py-1 rounded-md border border-transparent hover:border-red-200 hover:bg-red-50 transition-all"
+                                                class="delete-song-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-red-600 hover:text-red-800 px-2 py-1 rounded-md border border-transparent hover:border-red-200 hover:bg-red-50 transition-all"
                                                 data-song-id="{{ song.id }}"
                                                 data-song-title="{{ song.title }}"
-                                                title="Delete song">
+                                                title="Delete {{ song.title|e }} by {{ song.artist|e }}"
+                                                aria-label="Delete {{ song.title|e }} by {{ song.artist|e }}">
                                             <i class="fas fa-trash-alt"></i>
                                         </button>
                                     </div>
@@ -707,17 +709,19 @@
                 return $('<div>').text(value || '').html();
             }
 
-            function renderPreviewCell(previewUrl) {
+            function renderPreviewCell(previewUrl, title, artist) {
                 if (!previewUrl) {
                     return '<span class="text-gray-400">No preview</span>';
                 }
                 const escapedUrl = escapeHtml(previewUrl);
+                const label = `Load preview for ${title || 'song'}${artist ? ` by ${artist}` : ''}`;
+                const escapedLabel = escapeHtml(label);
                 return `
                     <button type="button"
-                            class="preview-load-btn text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
+                            class="preview-load-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-teal-600 hover:text-teal-800 px-2 py-1 rounded-md border border-transparent hover:border-teal-200 hover:bg-teal-50 transition-all"
                             data-preview-url="${escapedUrl}"
-                            title="Load preview"
-                            aria-label="Load preview">
+                            title="${escapedLabel}"
+                            aria-label="${escapedLabel}">
                         <i class="fas fa-play"></i>
                     </button>
                 `;
@@ -1277,10 +1281,16 @@
                     
                     // Update audio preview without eagerly creating table audio players.
                     const audioCell = row.find('td:nth-child(7)');
-                    audioCell.html(renderPreviewCell(data.preview_url));
+                    audioCell.html(renderPreviewCell(data.preview_url, data.title, data.artist));
                     
-                    // Update delete button song title attribute
+                    // Update action button labels for assistive tech.
                     row.find('.delete-song-btn').data('song-title', data.title);
+                    row.find('.delete-song-btn')
+                        .attr('title', `Delete ${data.title || 'song'} by ${data.artist || 'unknown artist'}`)
+                        .attr('aria-label', `Delete ${data.title || 'song'} by ${data.artist || 'unknown artist'}`);
+                    row.find('.edit-song-btn')
+                        .attr('title', `Edit ${data.title || 'song'} by ${data.artist || 'unknown artist'}`)
+                        .attr('aria-label', `Edit ${data.title || 'song'} by ${data.artist || 'unknown artist'}`);
                     
                     // Update the row in our arrays
                     for (let i = 0; i < allRows.length; i++) {

@@ -695,6 +695,9 @@ class TestCoreViewSongs:
         assert response.status_code == 200
         assert b'preview-load-btn' in response.data
         assert b'data-preview-url="https://example.com/preview.mp3"' in response.data
+        assert b'aria-label="Load preview for Preview Test by Preview Artist"' in response.data
+        assert b'aria-label="Edit Preview Test by Preview Artist"' in response.data
+        assert b'aria-label="Delete Preview Test by Preview Artist"' in response.data
         assert b'<audio controls class="preview-audio w-full max-w-[180px]" src=' not in response.data
 
     def test_view_songs_paginates_server_side(self, app, client):

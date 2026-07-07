@@ -348,6 +348,29 @@ class TestRoundDetailRoute:
         response = client.get(f'/rounds/{round_id}')
         assert response.status_code == 200
 
+    def test_round_detail_lazy_loads_named_preview_controls(self, app, client):
+        """Round detail should keep previews lazy and label the play control."""
+        _login(app, client)
+        with app.app_context():
+            song = Song(
+                title='Round Preview',
+                artist='Round Artist',
+                genre='Pop',
+                preview_url='https://example.com/round-preview.mp3',
+            )
+            db.session.add(song)
+            db.session.commit()
+            song_id = song.id
+        round_id = _create_round(app, [song_id], name='Preview Round')
+
+        response = client.get(f'/rounds/{round_id}')
+
+        assert response.status_code == 200
+        assert b'round-preview-load-btn' in response.data
+        assert b'data-preview-url="https://example.com/round-preview.mp3"' in response.data
+        assert b'aria-label="Load preview for Round Preview by Round Artist"' in response.data
+        assert b'<audio controls class="w-full max-w-[200px]"' not in response.data
+
     def test_round_detail_shows_review_and_audio_scripts(self, app, client):
         """Round detail should surface review state and script drafts."""
         _login(app, client)
