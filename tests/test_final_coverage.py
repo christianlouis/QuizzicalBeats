@@ -766,7 +766,7 @@ class TestCoreViewSongs:
         unused = client.get('/view-songs?used_max=0')
         missing_genre = client.get('/view-songs?genre=__missing__')
         rock_genre = client.get('/view-songs?genre=Rock')
-        hip_hop_genre = client.get('/view-songs?genre=Hip+Hop')
+        hip_hop_genre = client.get('/view-songs?genre=Hip+++Hop')
 
         assert b'Missing Preview' in missing_preview.data
         assert b'Has Preview' not in missing_preview.data
