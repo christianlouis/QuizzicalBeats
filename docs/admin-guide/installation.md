@@ -64,6 +64,10 @@ Then start the app with the managed database profile:
 docker compose --profile managed-db up -d
 ```
 
+The managed database profile intentionally does not provide a default
+`PGPASSWORD`. Set it before starting the profile; otherwise the local Postgres
+service will refuse to initialize instead of using a known password.
+
 Do not set `SQLALCHEMY_DATABASE_URI` at the same time unless you intentionally
 want the full URI to take precedence over the `PG*` variables.
 
