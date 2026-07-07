@@ -69,6 +69,9 @@
                     <div class="flex flex-wrap gap-2 text-sm">
                         <span class="px-2 py-1 rounded-full bg-green-100 text-green-800 font-semibold">{{ resolution.resolved_count }} resolved</span>
                         <span class="px-2 py-1 rounded-full {% if resolution.unresolved_count %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-800{% endif %} font-semibold">{{ resolution.unresolved_count }} unresolved</span>
+                        {% if resolution.skipped_count %}
+                        <span class="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 font-semibold">{{ resolution.skipped_count }} skipped</span>
+                        {% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -87,6 +90,22 @@
             </div>
             {% endif %}
 
+            {% if resolution.summary %}
+            <div class="mx-4 mb-4 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                <div class="rounded bg-gray-50 px-3 py-2"><span class="font-semibold">{{ resolution.summary.accepted_count }}</span> accepted</div>
+                <div class="rounded bg-gray-50 px-3 py-2"><span class="font-semibold">{{ resolution.summary.edited_count }}</span> edited</div>
+                <div class="rounded bg-gray-50 px-3 py-2"><span class="font-semibold">{{ resolution.summary.replaced_count }}</span> replaced</div>
+                <div class="rounded bg-gray-50 px-3 py-2"><span class="font-semibold">{{ resolution.summary.skipped_count }}</span> skipped</div>
+                <div class="rounded bg-gray-50 px-3 py-2"><span class="font-semibold">{{ resolution.summary.unresolved_count }}</span> unresolved</div>
+            </div>
+            {% endif %}
+
+            <form method="POST" action="{{ url_for('generate.import_text_playlist') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="playlist_text" value="{{ playlist_text|e }}"/>
+                <input type="hidden" name="round_name" value="{{ round_name|e }}"/>
+                <input type="hidden" name="min_confidence" value="{{ min_confidence }}"/>
+
             <div class="overflow-x-auto">
                 <table class="w-full table-auto">
                     <thead class="bg-gray-100 text-gray-700">
@@ -96,16 +115,19 @@
                             <th class="px-4 py-3 text-left font-semibold">Parsed</th>
                             <th class="px-4 py-3 text-left font-semibold">Catalog Match</th>
                             <th class="px-4 py-3 text-left font-semibold">Status</th>
+                            <th class="px-4 py-3 text-left font-semibold">Review</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
-                        {% for row in resolution.resolved + resolution.unresolved %}
-                        <tr class="{% if row.song %}bg-white{% else %}bg-red-50{% endif %}">
+                        {% for row in resolution.rows %}
+                        <tr class="{% if row.song %}bg-white{% elif row.status == 'skipped' %}bg-yellow-50{% else %}bg-red-50{% endif %}">
                             <td class="px-4 py-3 text-sm text-gray-600">{{ row.line_number }}</td>
                             <td class="px-4 py-3 text-sm text-gray-700">{{ row.raw_line }}</td>
                             <td class="px-4 py-3">
-                                <div class="font-medium text-gray-900">{{ row.artist or 'Unknown artist' }}</div>
-                                <div class="text-sm text-gray-600">{{ row.title or 'Unknown title' }}</div>
+                                <input type="text" name="row_{{ row.line }}_artist" value="{{ row.artist or '' }}"
+                                       class="mb-2 w-full rounded border border-gray-300 px-2 py-1 text-sm" placeholder="Artist">
+                                <input type="text" name="row_{{ row.line }}_title" value="{{ row.title or '' }}"
+                                       class="w-full rounded border border-gray-300 px-2 py-1 text-sm" placeholder="Title">
                                 <div class="text-xs text-gray-500">Confidence {{ '%.0f'|format(row.confidence * 100) }}%</div>
                             </td>
                             <td class="px-4 py-3">
@@ -113,12 +135,18 @@
                                 <div class="font-medium text-gray-900">{{ row.song.artist }} - {{ row.song.title }}</div>
                                 <div class="text-xs text-gray-500">Song #{{ row.song.id }}{% if row.song.used_count is not none %}, used {{ row.song.used_count }}x{% endif %}</div>
                                 {% else %}
-                                <span class="text-sm text-gray-500">No catalog match</span>
+                                <input type="number" name="row_{{ row.line }}_song_id"
+                                       class="w-28 rounded border border-gray-300 px-2 py-1 text-sm"
+                                       placeholder="Song ID"
+                                       value="{{ row.song_id or '' }}">
+                                <div class="mt-1 text-xs text-gray-500">Set Song ID to replace this row.</div>
                                 {% endif %}
                             </td>
                             <td class="px-4 py-3">
                                 {% if row.song %}
                                 <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Resolved</span>
+                                {% elif row.status == 'skipped' %}
+                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Skipped</span>
                                 {% else %}
                                 <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Needs review</span>
                                 {% if row.issues %}
@@ -126,11 +154,45 @@
                                 {% endif %}
                                 {% endif %}
                             </td>
+                            <td class="px-4 py-3">
+                                {% set selected_action = row.action if row.action in ['accept', 'edit', 'skip', 'replace'] else ('accept' if row.song else 'edit') %}
+                                <div class="space-y-1 text-sm">
+                                    <label class="flex items-center gap-2">
+                                        <input type="radio" name="row_{{ row.line }}_action" value="accept" {% if selected_action == 'accept' %}checked{% endif %}>
+                                        Accept
+                                    </label>
+                                    <label class="flex items-center gap-2">
+                                        <input type="radio" name="row_{{ row.line }}_action" value="edit" {% if selected_action == 'edit' %}checked{% endif %}>
+                                        Edit
+                                    </label>
+                                    <label class="flex items-center gap-2">
+                                        <input type="radio" name="row_{{ row.line }}_action" value="replace" {% if selected_action == 'replace' %}checked{% endif %}>
+                                        Replace
+                                    </label>
+                                    <label class="flex items-center gap-2">
+                                        <input type="radio" name="row_{{ row.line }}_action" value="skip" {% if selected_action == 'skip' %}checked{% endif %}>
+                                        Skip
+                                    </label>
+                                </div>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
+                <div class="m-4 flex flex-col sm:flex-row gap-3 justify-end">
+                    <button type="submit" name="action" value="apply_review"
+                            class="bg-navy-700 hover:bg-navy-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors">
+                        Apply Review
+                    </button>
+                    {% if resolution.ready_for_round and resolution.resolved_count == expected_song_count %}
+                    <button type="submit" name="action" value="create"
+                            class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors">
+                        Create Round
+                    </button>
+                    {% endif %}
+                </div>
+            </form>
             {% else %}
             <div class="p-8 text-center text-gray-500">
                 <p>Paste songs and review them before creating a round.</p>

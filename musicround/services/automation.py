@@ -2961,7 +2961,9 @@ def _playlist_candidate(
         confidence = min(confidence, 0.35)
     return {
         "line": line_number,
+        "line_number": line_number,
         "raw": raw_line.strip(),
+        "raw_line": raw_line.strip(),
         "title": title or None,
         "artist": artist or None,
         "confidence": confidence,
@@ -3069,6 +3071,8 @@ def resolve_text_playlist(
         if match:
             item["song"] = _song_summary(match)
             item["song_id"] = match.id
+            item["status"] = "resolved"
+            item["action"] = "accepted"
             resolved.append(item)
         else:
             item["song"] = None
@@ -3077,18 +3081,230 @@ def resolve_text_playlist(
                 item.setdefault("issues", []).append("below_min_confidence")
             elif candidate["artist"]:
                 item.setdefault("issues", []).append("not_found_in_catalog")
+            item["status"] = "needs_review"
+            item["action"] = "review_required"
             unresolved.append(item)
+
+    rows = sorted(resolved + unresolved, key=lambda item: item["line"])
+    return {
+        "parsed": parsed,
+        "resolved_count": len(resolved),
+        "unresolved_count": len(unresolved),
+        "skipped_count": 0,
+        "resolved": resolved,
+        "unresolved": unresolved,
+        "skipped": [],
+        "rows": rows,
+        "ready_for_round": parsed["count"] > 0 and not unresolved,
+        "source_positions": [
+            {
+                "position": index + 1,
+                "source_line": item["line"],
+                "source_raw": item["raw"],
+                "song_id": item["song_id"],
+                "resolved": True,
+                "status": "resolved",
+                "artist": item.get("artist"),
+                "title": item.get("title"),
+                "action": item.get("action"),
+                "reason": None,
+            }
+            for index, item in enumerate(resolved)
+        ],
+        "summary": {
+            "accepted_count": len(resolved),
+            "edited_count": 0,
+            "replaced_count": 0,
+            "skipped_count": 0,
+            "unresolved_count": len(unresolved),
+        },
+        "hints": [
+            "Resolve or correct every unresolved row before creating a round.",
+            "Use add_song or import_catalog_item to add missing catalog entries.",
+        ],
+    }
+
+
+def _review_decision_for_line(
+    review_decisions: list[dict[str, Any]] | dict[int | str, dict[str, Any]] | None,
+    line: int,
+) -> dict[str, Any]:
+    if not review_decisions:
+        return {}
+    if isinstance(review_decisions, dict):
+        decision = review_decisions.get(line) or review_decisions.get(str(line)) or {}
+        return decision if isinstance(decision, dict) else {}
+    for decision in review_decisions:
+        try:
+            decision_line = int(decision.get("line"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if decision_line == line:
+            return decision
+    return {}
+
+
+def _song_for_review_replacement(decision: dict[str, Any]) -> Song | None:
+    raw_song_id = decision.get("song_id") or decision.get("replacement_song_id")
+    if not raw_song_id:
+        return None
+    try:
+        song_id = int(raw_song_id)
+    except (TypeError, ValueError):
+        return None
+    return db.session.get(Song, song_id)
+
+
+def _reviewed_text_source_position(
+    item: dict[str, Any],
+    position: int | None,
+    *,
+    resolved: bool,
+    status: str,
+    action: str,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    song_id = item.get("song_id")
+    return {
+        "position": position,
+        "source_line": item.get("line"),
+        "source_raw": item.get("raw"),
+        "song_id": song_id,
+        "resolved": resolved,
+        "status": status,
+        "artist": item.get("artist"),
+        "title": item.get("title"),
+        "action": action,
+        "reason": reason,
+    }
+
+
+def resolve_text_playlist_review(
+    text: str,
+    review_decisions: list[dict[str, Any]] | dict[int | str, dict[str, Any]] | None = None,
+    limit: int = 100,
+    min_confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Resolve a text playlist after explicit row-level review decisions."""
+    parsed = parse_text_playlist(text, limit=limit)
+    resolved: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    summary = {
+        "accepted_count": 0,
+        "edited_count": 0,
+        "replaced_count": 0,
+        "skipped_count": 0,
+        "unresolved_count": 0,
+    }
+
+    for candidate in parsed["candidates"]:
+        decision = _review_decision_for_line(review_decisions, candidate["line"])
+        explicit_action = (decision.get("action") or "").strip().lower()
+        action = explicit_action or ("review_required" if candidate["needs_review"] else "accept")
+        item = dict(candidate)
+        item["song"] = None
+        item["song_id"] = None
+        item["action"] = action
+
+        if action == "skip":
+            item["status"] = "skipped"
+            item["issues"] = list(item.get("issues") or []) + ["skipped_by_reviewer"]
+            skipped.append(item)
+            rows.append(item)
+            summary["skipped_count"] += 1
+            continue
+
+        match = None
+        if action == "replace":
+            match = _song_for_review_replacement(decision)
+            if not match:
+                item["status"] = "needs_review"
+                item["issues"] = list(item.get("issues") or []) + ["replacement_song_not_found"]
+                unresolved.append(item)
+                rows.append(item)
+                continue
+            item["title"] = match.title
+            item["artist"] = match.artist
+            summary["replaced_count"] += 1
+        elif action == "edit":
+            edited_title = (decision.get("title") or "").strip()
+            edited_artist = (decision.get("artist") or "").strip()
+            item["title"] = edited_title or None
+            item["artist"] = edited_artist or None
+            item["issues"] = []
+            if not item["title"]:
+                item["issues"].append("missing_title")
+            if not item["artist"]:
+                item["issues"].append("missing_artist")
+            match = _catalog_match_for_candidate(item) if not item["issues"] else None
+            summary["edited_count"] += 1
+        elif action == "accept":
+            if candidate["needs_review"] and not explicit_action:
+                item["status"] = "needs_review"
+                item["issues"] = list(item.get("issues") or []) + ["explicit_review_required"]
+                unresolved.append(item)
+                rows.append(item)
+                continue
+            match = _catalog_match_for_candidate(item)
+            summary["accepted_count"] += 1
+        else:
+            item["status"] = "needs_review"
+            item["issues"] = list(item.get("issues") or []) + ["review_required"]
+            unresolved.append(item)
+            rows.append(item)
+            continue
+
+        if match:
+            item["song"] = _song_summary(match)
+            item["song_id"] = match.id
+            item["status"] = "resolved"
+            resolved.append(item)
+        else:
+            item["status"] = "needs_review"
+            if not item.get("issues"):
+                item["issues"] = ["not_found_in_catalog"]
+            unresolved.append(item)
+        rows.append(item)
+
+    summary["unresolved_count"] = len(unresolved)
+    source_positions = [
+        _reviewed_text_source_position(
+            item,
+            index + 1,
+            resolved=True,
+            status="resolved",
+            action=item.get("action") or "accept",
+        )
+        for index, item in enumerate(resolved)
+    ] + [
+        _reviewed_text_source_position(
+            item,
+            None,
+            resolved=False,
+            status=item.get("status") or "needs_review",
+            action=item.get("action") or "review_required",
+            reason="skipped_by_reviewer" if item.get("status") == "skipped" else "not_resolved",
+        )
+        for item in skipped + unresolved
+    ]
 
     return {
         "parsed": parsed,
         "resolved_count": len(resolved),
         "unresolved_count": len(unresolved),
+        "skipped_count": len(skipped),
         "resolved": resolved,
         "unresolved": unresolved,
-        "ready_for_round": parsed["count"] > 0 and not unresolved,
+        "skipped": skipped,
+        "rows": rows,
+        "ready_for_round": bool(resolved) and not unresolved,
+        "source_positions": source_positions,
+        "summary": summary,
         "hints": [
-            "Resolve or correct every unresolved row before creating a round.",
-            "Use add_song or import_catalog_item to add missing catalog entries.",
+            "Low-confidence rows require an explicit accept, edit, skip, or replacement decision.",
+            "Skipped rows are reported and do not count toward the eight-song round.",
         ],
     }
 
@@ -3099,9 +3315,18 @@ def create_round_from_text_playlist(
     count: int = 8,
     min_confidence: float = 0.8,
     user_id: int | None = None,
+    review_decisions: list[dict[str, Any]] | dict[int | str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create a manual round from a parsed text playlist only when all rows resolve."""
-    resolved = resolve_text_playlist(text, limit=max(count, 1), min_confidence=min_confidence)
+    if review_decisions:
+        resolved = resolve_text_playlist_review(
+            text,
+            review_decisions=review_decisions,
+            limit=max(count * 2, 1),
+            min_confidence=min_confidence,
+        )
+    else:
+        resolved = resolve_text_playlist(text, limit=max(count, 1), min_confidence=min_confidence)
     if resolved["unresolved_count"]:
         raise AutomationError(
             "Text playlist has unresolved rows.",
@@ -3136,6 +3361,7 @@ def create_round_from_text_playlist(
         "created": True,
         "resolution": resolved,
         "round": round_result["round"],
+        "resolved_positions": resolved.get("source_positions", []),
     }
 
 

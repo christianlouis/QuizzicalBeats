@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implemented, partial, open, or live-operational follow-up slices.
 - Added a browser text-playlist review workflow that blocks round creation
   until exactly eight pasted rows resolve to catalog songs.
+- Added row-level accept, edit, skip, and replace decisions for low-confidence
+  text-playlist imports, including skipped-row summaries and source-position
+  mappings for repair workflows.
 - Added browser round sharing controls for owners/admins to grant and revoke
   viewer/editor/producer access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration

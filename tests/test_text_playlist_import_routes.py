@@ -94,3 +94,84 @@ def test_text_playlist_create_redirects_to_round_detail(app, client):
         assert round_.user_id is not None
         assert round_.visibility == 'private'
         assert len(round_.song_id_list) == 8
+
+
+def test_text_playlist_review_can_edit_low_confidence_row(app, client):
+    _login(app, client)
+    with app.app_context():
+        for index in range(8):
+            _create_song(f'Title {index}', f'Artist {index}')
+
+    playlist_text = '\n'.join(
+        [f'Artist {index} - Title {index}' for index in range(7)] + ['Title 7']
+    )
+    data = {
+        'action': 'create',
+        'round_name': 'Edited Text Import',
+        'playlist_text': playlist_text,
+        'row_8_action': 'edit',
+        'row_8_artist': 'Artist 7',
+        'row_8_title': 'Title 7',
+    }
+    response = client.post('/import-text-playlist', data=data)
+
+    assert response.status_code == 302
+    with app.app_context():
+        round_ = Round.query.one()
+        assert round_.name == 'Edited Text Import'
+        assert len(round_.song_id_list) == 8
+
+
+def test_text_playlist_review_reports_skipped_rows_before_create(app, client):
+    _login(app, client)
+    with app.app_context():
+        for index in range(8):
+            _create_song(f'Title {index}', f'Artist {index}')
+
+    playlist_text = '\n'.join(
+        ['Unknown Song Without Artist'] + [f'Artist {index} - Title {index}' for index in range(8)]
+    )
+    response = client.post(
+        '/import-text-playlist',
+        data={
+            'action': 'apply_review',
+            'round_name': 'Skip Review',
+            'playlist_text': playlist_text,
+            'row_1_action': 'skip',
+        },
+    )
+
+    assert response.status_code == 200
+    assert b'8 resolved' in response.data
+    assert b'1 skipped' in response.data
+    assert b'Review decisions applied; this text playlist is ready to create.' in response.data
+    with app.app_context():
+        assert Round.query.count() == 0
+
+
+def test_text_playlist_review_can_replace_with_song_id(app, client):
+    _login(app, client)
+    with app.app_context():
+        for index in range(7):
+            _create_song(f'Title {index}', f'Artist {index}')
+        replacement = _create_song('Replacement', 'Catalog Artist')
+        replacement_id = replacement.id
+
+    playlist_text = '\n'.join(
+        [f'Artist {index} - Title {index}' for index in range(7)] + ['Unknown - Missing']
+    )
+    response = client.post(
+        '/import-text-playlist',
+        data={
+            'action': 'create',
+            'round_name': 'Replacement Text Import',
+            'playlist_text': playlist_text,
+            'row_8_action': 'replace',
+            'row_8_song_id': str(replacement_id),
+        },
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        round_ = Round.query.one()
+        assert round_.song_id_list[-1] == replacement_id

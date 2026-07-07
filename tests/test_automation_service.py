@@ -2202,6 +2202,62 @@ class TestAgentPlanningAutomation:
             assert result["resolved"][0]["song_id"] == song.id
             assert result["ready_for_round"] is True
 
+    def test_resolve_text_playlist_review_preserves_order_and_skips_rows(self, app):
+        with app.app_context():
+            first = _create_song(title="One", artist="A")
+            second = _create_song(title="Two", artist="B")
+
+            result = automation.resolve_text_playlist_review(
+                "A - One\nUnknown Song Without Artist\nB - Two",
+                review_decisions={2: {"line": 2, "action": "skip"}},
+            )
+
+            assert result["resolved_count"] == 2
+            assert result["skipped_count"] == 1
+            assert result["unresolved_count"] == 0
+            assert [item["song_id"] for item in result["resolved"]] == [first.id, second.id]
+            assert result["source_positions"][0]["source_line"] == 1
+            assert result["source_positions"][1]["source_line"] == 3
+            assert result["source_positions"][2]["reason"] == "skipped_by_reviewer"
+
+    def test_resolve_text_playlist_review_edits_and_replaces_rows(self, app):
+        with app.app_context():
+            edited = _create_song(title="Edited Title", artist="Edited Artist")
+            replacement = _create_song(title="Replacement", artist="Catalog Artist")
+
+            result = automation.resolve_text_playlist_review(
+                "Missing Artist Title\nUnknown - Missing",
+                review_decisions={
+                    1: {
+                        "line": 1,
+                        "action": "edit",
+                        "artist": "Edited Artist",
+                        "title": "Edited Title",
+                    },
+                    2: {
+                        "line": 2,
+                        "action": "replace",
+                        "song_id": replacement.id,
+                    },
+                },
+            )
+
+            assert result["resolved_count"] == 2
+            assert result["unresolved_count"] == 0
+            assert [item["song_id"] for item in result["resolved"]] == [edited.id, replacement.id]
+            assert result["summary"]["edited_count"] == 1
+            assert result["summary"]["replaced_count"] == 1
+
+    def test_resolve_text_playlist_review_requires_explicit_low_confidence_action(self, app):
+        with app.app_context():
+            _create_song(title="Mystery Song Without Artist", artist="Known Artist")
+
+            result = automation.resolve_text_playlist_review("Mystery Song Without Artist")
+
+            assert result["resolved_count"] == 0
+            assert result["unresolved_count"] == 1
+            assert "review_required" in result["unresolved"][0]["issues"]
+
     def test_create_round_from_text_playlist_requires_exact_count(self, app):
         with app.app_context():
             user = _create_user(username="textowner", email="textowner@example.test")

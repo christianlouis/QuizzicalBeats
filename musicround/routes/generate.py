@@ -678,6 +678,25 @@ def _text_import_confidence():
     return min(max(confidence, 0.5), 1.0)
 
 
+def _text_import_review_decisions():
+    decisions = {}
+    for key, value in request.form.items():
+        if not key.startswith('row_') or not key.endswith('_action'):
+            continue
+        try:
+            line = int(key[len('row_'):-len('_action')])
+        except ValueError:
+            continue
+        decisions[line] = {
+            'line': line,
+            'action': value,
+            'title': request.form.get(f'row_{line}_title', ''),
+            'artist': request.form.get(f'row_{line}_artist', ''),
+            'song_id': request.form.get(f'row_{line}_song_id', ''),
+        }
+    return decisions
+
+
 @generate_bp.route('/import-text-playlist', methods=['GET', 'POST'])
 @login_required
 def import_text_playlist():
@@ -700,12 +719,22 @@ def import_text_playlist():
                 resolution=resolution,
             )
 
+        action = request.form.get('action')
+        review_decisions = _text_import_review_decisions()
         try:
-            resolution = automation.resolve_text_playlist(
-                playlist_text,
-                limit=500,
-                min_confidence=min_confidence,
-            )
+            if action in {'apply_review', 'create'} and review_decisions:
+                resolution = automation.resolve_text_playlist_review(
+                    playlist_text,
+                    review_decisions=review_decisions,
+                    limit=500,
+                    min_confidence=min_confidence,
+                )
+            else:
+                resolution = automation.resolve_text_playlist(
+                    playlist_text,
+                    limit=500,
+                    min_confidence=min_confidence,
+                )
         except AutomationError as exc:
             flash(str(exc), 'error')
             return render_template(
@@ -717,7 +746,7 @@ def import_text_playlist():
                 resolution=resolution,
             )
 
-        if request.form.get('action') == 'create':
+        if action == 'create':
             if not resolution['ready_for_round']:
                 flash('Resolve every text row before creating a round.', 'error')
             elif resolution['resolved_count'] != expected_song_count:
@@ -734,6 +763,7 @@ def import_text_playlist():
                         count=expected_song_count,
                         min_confidence=min_confidence,
                         user_id=current_user.id,
+                        review_decisions=review_decisions or None,
                     )
                 except AutomationError as exc:
                     resolution = (exc.details or {}).get('resolution', resolution)
@@ -741,6 +771,17 @@ def import_text_playlist():
                 else:
                     flash('Text playlist round created after review.', 'success')
                     return redirect(url_for('rounds.round_detail', round_id=created['round']['id']))
+        elif action == 'apply_review':
+            if resolution['unresolved_count']:
+                flash('Review decisions applied; unresolved rows still need edits or replacements.', 'warning')
+            elif resolution['resolved_count'] != expected_song_count:
+                flash(
+                    f'Review decisions applied; {resolution["resolved_count"]} songs resolve after '
+                    f'{resolution.get("skipped_count", 0)} skipped rows.',
+                    'warning',
+                )
+            else:
+                flash('Review decisions applied; this text playlist is ready to create.', 'success')
 
     return render_template(
         'import_text_playlist.html',
