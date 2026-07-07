@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Made the implicit SQLite fallback follow `DATA_DIR` so local/dev deployments no longer create `/data/song_data.db` when a different app-data directory is configured.
 - Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.
 - Stopped headered CSV playlist imports from treating the header row as a song and now flags missing artist/title cells for review.
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.

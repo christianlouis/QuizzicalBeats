@@ -106,6 +106,10 @@ ROUND_PDF_DIR=/data/pdfs
 # SQLALCHEMY_DATABASE_URI=postgresql://username:password@localhost/musicround
 ```
 
+When `SQLALCHEMY_DATABASE_URI` is omitted, the local SQLite fallback is created
+as `song_data.db` inside `DATA_DIR`. Production deployments should configure
+PostgreSQL instead and enable `DATABASE_REQUIRE_MANAGED=true`.
+
 ### OAuth Provider Configuration
 
 ```bash
