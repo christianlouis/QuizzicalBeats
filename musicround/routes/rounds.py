@@ -37,6 +37,9 @@ ROUND_MP3_PREVIEW_PROCESSING_ERROR = "Song preview audio could not be processed.
 ROUND_MP3_EXPORT_ERROR = "MP3 generation failed. Check the server logs."
 ROUND_PDF_GENERATION_ERROR = "PDF generation failed. Check the server logs."
 ROUND_QUALITY_SESSION_REPORT_MAX_CHARS = 2000
+ROUND_MP3_STATUS_EXISTS = 'exists'
+ROUND_MP3_STATUS_GENERATED = 'generated'
+ROUND_MP3_STATUS_REGENERATED = 'regenerated'
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -566,22 +569,63 @@ def update_round_review(round_id):
 def round_quality(round_id):
     """Return package quality and repair guidance for a round."""
     _get_visible_round_or_404(round_id)
+    invalid_parameters = []
+
+    def parse_int_query_arg(name, default, minimum=None, maximum=None):
+        raw_value = request.args.get(name)
+        if raw_value in (None, ''):
+            return default
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            invalid_parameters.append({'name': name, 'value': raw_value})
+            return default
+        if minimum is not None:
+            value = max(minimum, value)
+        if maximum is not None:
+            value = min(maximum, value)
+        return value
+
+    def parse_float_query_arg(name, default):
+        raw_value = request.args.get(name)
+        if raw_value in (None, ''):
+            return default
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            invalid_parameters.append({'name': name, 'value': raw_value})
+            return default
+
+    expected_song_count = parse_int_query_arg(
+        'expected_song_count',
+        default=8,
+        minimum=1,
+        maximum=25,
+    )
+    min_preview_seconds = parse_float_query_arg('min_preview_seconds', 20.0)
+    max_preview_seconds = parse_float_query_arg('max_preview_seconds', 35.0)
+    duration_tolerance_seconds = parse_float_query_arg(
+        'duration_tolerance_seconds',
+        automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+    )
+    if invalid_parameters:
+        return _automation_error_response(
+            AutomationError(
+                'Quality parameter values must be numeric.',
+                details={'invalid_parameters': invalid_parameters},
+            ),
+            400,
+        )
+
     try:
         result = automation.round_repair_report(
             round_id=round_id,
             user_id=current_user.id,
-            expected_song_count=_int_arg('expected_song_count', default=8, minimum=1, maximum=25),
-            min_preview_seconds=float(request.args.get('min_preview_seconds', 20.0)),
-            max_preview_seconds=float(request.args.get('max_preview_seconds', 35.0)),
-            duration_tolerance_seconds=float(
-                request.args.get(
-                    'duration_tolerance_seconds',
-                    automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
-                )
-            ),
+            expected_song_count=expected_song_count,
+            min_preview_seconds=min_preview_seconds,
+            max_preview_seconds=max_preview_seconds,
+            duration_tolerance_seconds=duration_tolerance_seconds,
         )
-    except ValueError:
-        return _automation_error_response(AutomationError('Quality parameter values must be numeric.'), 400)
     except AutomationError as exc:
         return _automation_error_response(exc, 400)
     return jsonify({'success': True, **result})
@@ -742,7 +786,7 @@ def round_mp3(round_id):
             return jsonify({
                 'success': True, 
                 'message': 'MP3 file already exists',
-                'mp3_status': 'exists',
+                'mp3_status': ROUND_MP3_STATUS_EXISTS,
                 'download_url': download_url
             })
         else:
@@ -864,7 +908,7 @@ def round_mp3(round_id):
                 return jsonify({
                     'success': True,
                     'message': 'MP3 file successfully regenerated' if force_regenerate else 'MP3 file successfully generated',
-                    'mp3_status': 'regenerated' if force_regenerate else 'generated',
+                    'mp3_status': ROUND_MP3_STATUS_REGENERATED if force_regenerate else ROUND_MP3_STATUS_GENERATED,
                     'download_url': download_url
                 })
             else:

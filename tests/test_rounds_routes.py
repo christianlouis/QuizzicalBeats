@@ -533,12 +533,24 @@ class TestRoundDetailRoute:
         song_id = _create_song(app, title='Quality Parameter Song')
         round_id = _create_round(app, [song_id], name='Quality Parameter Round')
 
-        response = client.get(f'/rounds/{round_id}/quality?duration_tolerance_seconds=wide')
+        response = client.get(
+            f'/rounds/{round_id}/quality'
+            '?expected_song_count=many'
+            '&min_preview_seconds=short'
+            '&duration_tolerance_seconds=wide'
+        )
 
         assert response.status_code == 400
         assert response.get_json() == {
             'success': False,
             'error': 'Quality parameter values must be numeric.',
+            'details': {
+                'invalid_parameters': [
+                    {'name': 'expected_song_count', 'value': 'many'},
+                    {'name': 'min_preview_seconds', 'value': 'short'},
+                    {'name': 'duration_tolerance_seconds', 'value': 'wide'},
+                ],
+            },
         }
 
     def test_replacement_endpoints_proxy_automation(self, app, client):
