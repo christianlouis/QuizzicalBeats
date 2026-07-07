@@ -66,6 +66,68 @@ def test_database_status_json_reports_legacy_sqlite_safely(monkeypatch, capsys):
     assert "/data/song_data.db" not in captured.out
 
 
+def test_database_status_json_reports_unconfigured_without_fallback(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """JSON status should not create or reveal the local SQLite fallback path."""
+    import run
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.delenv("DATABASE_REQUIRE_MANAGED", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "status", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["status"] == "ok"
+    assert payload["database"]["backend"] == "unconfigured"
+    assert payload["database"]["redacted_uri"] == "unconfigured"
+    assert str(data_dir) not in captured.out
+    assert str(data_dir) not in captured.err
+    assert not data_dir.exists()
+
+
+def test_database_preflight_json_blocks_unconfigured_without_fallback(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """JSON preflight should fail managed cutover without creating SQLite state."""
+    import run
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.delenv("DATABASE_REQUIRE_MANAGED", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "preflight", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 78
+    assert payload["ok"] is False
+    assert payload["status"] == "error"
+    assert payload["managed_required"] is True
+    assert payload["database"]["backend"] == "unconfigured"
+    assert payload["issues"][0]["code"] == "managed_database_requirement_failed"
+    assert str(data_dir) not in captured.out
+    assert str(data_dir) not in captured.err
+    assert not data_dir.exists()
+    assert "Traceback" not in captured.err
+
+
 def test_database_preflight_json_blocks_legacy_sqlite(monkeypatch, capsys):
     """JSON preflight should keep the same blocking semantics as text output."""
     import run

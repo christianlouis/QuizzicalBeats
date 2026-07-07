@@ -21,6 +21,19 @@ def _create_database_cli_app():
     db.init_app(app)
     return app
 
+
+def _configured_database_uri_without_fallback(app):
+    """Resolve explicit database config without creating the local fallback."""
+    from musicround.helpers.database_config import database_uri_from_postgres_env
+
+    configured_uri = os.environ.get("SQLALCHEMY_DATABASE_URI") or app.config.get(
+        "SQLALCHEMY_DATABASE_URI"
+    )
+    if configured_uri:
+        return configured_uri
+    return database_uri_from_postgres_env(os.environ)
+
+
 def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='Quizzical Beats Management Script')
@@ -164,20 +177,39 @@ def main():
         configured_managed_required = bool(app.config.get('DATABASE_REQUIRE_MANAGED'))
         preflight_requires_managed = args.database_action == 'preflight' and not allow_sqlite
         diagnostic_managed_required = preflight_requires_managed or configured_managed_required
-        if json_output and diagnostic_managed_required:
-            app.config['DATABASE_REQUIRE_MANAGED'] = False
-        elif args.database_action == 'preflight':
-            app.config['DATABASE_REQUIRE_MANAGED'] = preflight_requires_managed
-        try:
-            _configure_database_uri(app)
-        except RuntimeError as exc:
-            print(f"Database configuration error: {exc}", file=sys.stderr)
-            return 78
-        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
+        if json_output:
+            try:
+                db_uri = _configured_database_uri_without_fallback(app)
+            except ValueError as exc:
+                print(f"Database configuration error: {exc}", file=sys.stderr)
+                return 78
+            if db_uri:
+                app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
+        else:
+            if args.database_action == 'preflight':
+                app.config['DATABASE_REQUIRE_MANAGED'] = preflight_requires_managed
+            try:
+                _configure_database_uri(app)
+            except RuntimeError as exc:
+                print(f"Database configuration error: {exc}", file=sys.stderr)
+                return 78
+            db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
         summary = database_summary(db_uri)
         readiness = postgres_env_readiness(os.environ)
         issues = []
-        if diagnostic_managed_required and summary["backend"] == "sqlite":
+        if diagnostic_managed_required and summary["backend"] == "unconfigured":
+            issues.append(
+                {
+                    "code": "managed_database_requirement_failed",
+                    "severity": "error",
+                    "message": "managed database is required but no database is configured",
+                    "hint": (
+                        "configure a managed SQL URI or complete PG* credentials "
+                        "via secrets for production"
+                    ),
+                }
+            )
+        elif diagnostic_managed_required and summary["backend"] == "sqlite":
             issues.append(
                 {
                     "code": "managed_database_requirement_failed",
