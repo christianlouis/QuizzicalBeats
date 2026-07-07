@@ -34,7 +34,7 @@ DEFAULT_DATABASE_DIR = '/data'
 
 
 def _default_database_dir(app):
-    return app.config.get('DATA_DIR') or os.environ.get('DATA_DIR') or DEFAULT_DATABASE_DIR
+    return os.environ.get('DATA_DIR') or app.config.get('DATA_DIR') or DEFAULT_DATABASE_DIR
 
 
 def _default_database_path(app):

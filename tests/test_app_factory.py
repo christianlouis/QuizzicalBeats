@@ -137,9 +137,31 @@ def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
 def test_configure_database_uri_uses_configured_data_dir(monkeypatch, tmp_path):
     """SQLite fallback should follow DATA_DIR when deployments override it."""
     monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
+    monkeypatch.delenv('DATA_DIR', raising=False)
     created_paths = []
     app = Flask(__name__)
     app.config['DATA_DIR'] = str(tmp_path)
+
+    monkeypatch.setattr('musicround.os.path.exists', lambda path: False)
+    monkeypatch.setattr(
+        'musicround.os.makedirs',
+        lambda path, exist_ok=False: created_paths.append((path, exist_ok)),
+    )
+
+    _configure_database_uri(app)
+
+    assert app.config['SQLALCHEMY_DATABASE_URI'] == f"sqlite:///{tmp_path}/song_data.db"
+    assert app.config['DATABASE_BACKEND'] == 'sqlite'
+    assert created_paths == [(str(tmp_path), True)]
+
+
+def test_configure_database_uri_prefers_env_data_dir(monkeypatch, tmp_path):
+    """SQLite fallback should follow DATA_DIR from the runtime environment."""
+    monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
+    monkeypatch.setenv('DATA_DIR', str(tmp_path))
+    created_paths = []
+    app = Flask(__name__)
+    app.config['DATA_DIR'] = '/data'
 
     monkeypatch.setattr('musicround.os.path.exists', lambda path: False)
     monkeypatch.setattr(

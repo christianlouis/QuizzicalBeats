@@ -91,7 +91,7 @@ For optimal metadata quality, we recommend configuring at least Spotify and Last
 
 ```bash
 # SQLite (default)
-SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+SQLALCHEMY_DATABASE_URI=sqlite:////data/song_data.db
 SQLALCHEMY_TRACK_MODIFICATIONS=False
 
 # Application file storage
@@ -177,7 +177,7 @@ Then edit the `.env` file with your actual configuration values:
 # Example .env file (simplified)
 SECRET_KEY=your-secure-secret-key
 DEBUG=True
-SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+SQLALCHEMY_DATABASE_URI=sqlite:////data/song_data.db
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
 # Add other variables as needed
