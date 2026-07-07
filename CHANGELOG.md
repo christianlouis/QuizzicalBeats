@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Relaxed the round package duration gate so small MP3 length differences are
+  reported as review warnings while full missing-song-scale mismatches still
+  block delivery.
+- Split round quality feedback into blocking issues and warnings for browser,
+  email, scheduled-email, and MCP flows.
+- Made the round detail MP3 flow clearer: click reuses or creates an MP3, while
+  Shift-click or the modal regenerate action forces a fresh render.
 - Stopped Docker Compose from hard-coding the SQLite database URI so `.env`
   PostgreSQL component variables can exercise the managed-database path.
 - Made the implicit SQLite fallback follow `DATA_DIR` so local/dev deployments no longer create `/data/song_data.db` when a different app-data directory is configured.

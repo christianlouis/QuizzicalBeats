@@ -286,8 +286,8 @@
                 <i class="fas fa-file-audio fa-3x"></i>
             </div>
             <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Generate MP3</h3>
-            <p class="text-gray-600 mb-4 text-center text-sm">Create or refresh the audio file with all songs to play during your quiz.</p>
-            <button id="generate-mp3-btn" title="Shift-click to regenerate the MP3" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+            <p class="text-gray-600 mb-4 text-center text-sm">Create the audio file with all songs to play during your quiz. Shift-click to force a fresh render.</p>
+            <button id="generate-mp3-btn" title="Click to use or create the MP3. Shift-click to regenerate it." class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
                 <i class="fas fa-music mr-2"></i> Generate MP3
             </button>
         </div>
@@ -1017,8 +1017,12 @@
         function renderQualityReport(data) {
             const report = data.report || {};
             const quality = data.quality || {};
-            const badgeClass = report.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+            const warnings = report.warnings || [];
+            const badgeClass = report.ok
+                ? (warnings.length ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800')
+                : 'bg-red-100 text-red-800';
             const blockers = (report.blockers || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+            const warningItems = warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('');
             const actions = (report.actions || []).map(item => `<li>${escapeHtml(item.message)}</li>`).join('');
             const failed = (report.failed_positions || []).map(item => {
                 const position = Number(item.position) || '';
@@ -1030,6 +1034,7 @@
                     <span>${escapeHtml(report.summary || '')}</span>
                 </div>
                 ${blockers ? `<div class="mb-3"><h3 class="font-semibold text-red-800">Blockers</h3><ul class="list-disc pl-5">${blockers}</ul></div>` : ''}
+                ${warningItems ? `<div class="mb-3"><h3 class="font-semibold text-yellow-800">Warnings</h3><ul class="list-disc pl-5">${warningItems}</ul></div>` : ''}
                 ${actions ? `<div class="mb-3"><h3 class="font-semibold text-navy-800">Repair Actions</h3><ul class="list-disc pl-5">${actions}</ul></div>` : ''}
                 ${failed ? `<div><h3 class="font-semibold text-orange-800 mb-2">Failed Positions</h3>${failed}</div>` : ''}
             `;
@@ -1171,7 +1176,7 @@
                 if (data.success) {
                     if (data.mp3_status === 'exists') {
                         mp3StatusTitle.textContent = 'MP3 Already Exists';
-                        mp3StatusMessage.textContent = 'An MP3 is already available. Download it or regenerate it.';
+                        mp3StatusMessage.textContent = 'An MP3 is already available. Download it, use Shift-click on Generate MP3, or press Regenerate MP3 here to force a fresh render.';
                         regenerateMp3Btn.classList.remove('hidden');
                     } else {
                         mp3StatusTitle.textContent = forceRegenerate ? 'MP3 Regenerated Successfully' : 'MP3 Generated Successfully';

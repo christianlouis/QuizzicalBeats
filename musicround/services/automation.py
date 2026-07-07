@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import csv
+import math
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -63,6 +64,8 @@ AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
+MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
+MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
@@ -1571,8 +1574,9 @@ def _quality_issue(
     message: str,
     song: Song | None = None,
     details: dict[str, Any] | None = None,
+    severity: str = "error",
 ) -> dict[str, Any]:
-    issue: dict[str, Any] = {"code": code, "severity": "error", "message": message}
+    issue: dict[str, Any] = {"code": code, "severity": severity, "message": message}
     if song:
         issue["song"] = {
             "id": song.id,
@@ -1584,6 +1588,10 @@ def _quality_issue(
     if details:
         issue["details"] = details
     return issue
+
+
+def _blocking_quality_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [issue for issue in issues if issue.get("severity", "error") != "warning"]
 
 
 def _download_preview_audio(
@@ -1743,30 +1751,45 @@ def _round_repair_report(quality: dict[str, Any]) -> dict[str, Any]:
     status = quality.get("status", "blocked")
     ok = bool(quality.get("ok"))
     issues = quality.get("issues", [])
+    blocking_issues = _blocking_quality_issues(issues)
+    warning_issues = [issue for issue in issues if issue.get("severity") == "warning"]
     remediation = quality.get("remediation", [])
     preview_checks = quality.get("preview_checks", [])
 
     if ok:
         headline = f"{round_label} is ready to send."
+        warning_suffix = (
+            f" {len(warning_issues)} warning(s) should be reviewed."
+            if warning_issues
+            else ""
+        )
         summary = (
             f"{quality.get('resolved_song_count', quality.get('song_count', 0))} songs, "
-            "all previews and generated assets passed the package gate."
+            "all blocking preview and generated asset checks passed the package gate."
+            f"{warning_suffix}"
         )
     else:
         headline = f"{round_label} is blocked: {status}."
         summary = (
-            f"{len(issues)} issue(s) found. Expected "
+            f"{len(blocking_issues)} blocker(s) found. Expected "
             f"{quality.get('expected_song_count')} songs, found "
             f"{quality.get('resolved_song_count', quality.get('song_count'))} playable songs."
         )
 
     blockers: list[str] = []
-    for issue in issues:
+    warnings: list[str] = []
+    for issue in blocking_issues:
         song = issue.get("song")
         prefix = ""
         if song:
             prefix = f"{song.get('artist')} - {song.get('title')}: "
         blockers.append(f"{prefix}{issue.get('message')}")
+    for issue in warning_issues:
+        song = issue.get("song")
+        prefix = ""
+        if song:
+            prefix = f"{song.get('artist')} - {song.get('title')}: "
+        warnings.append(f"{prefix}{issue.get('message')}")
 
     failed_positions = []
     for check in preview_checks:
@@ -1834,6 +1857,9 @@ def _round_repair_report(quality: dict[str, Any]) -> dict[str, Any]:
     if blockers:
         markdown_lines.extend(["", "## Blockers"])
         markdown_lines.extend(f"- {blocker}" for blocker in blockers)
+    if warnings:
+        markdown_lines.extend(["", "## Warnings"])
+        markdown_lines.extend(f"- {warning}" for warning in warnings)
     if actions:
         markdown_lines.extend(["", "## Repair actions"])
         markdown_lines.extend(f"- {action['message']}" for action in actions)
@@ -1845,6 +1871,7 @@ def _round_repair_report(quality: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "ok": ok,
         "blockers": blockers,
+        "warnings": warnings,
         "failed_positions": failed_positions,
         "actions": actions,
         "next_step": next_step,
@@ -1861,6 +1888,19 @@ def inspect_round_package(
     duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
 ) -> dict[str, Any]:
     """Validate a generated round bundle before it is allowed to leave by email."""
+    if expected_song_count < 1:
+        raise AutomationError("expected_song_count must be at least 1.")
+    if not math.isfinite(min_preview_seconds) or not math.isfinite(max_preview_seconds):
+        raise AutomationError("preview duration limits must be finite.")
+    if min_preview_seconds < 0 or max_preview_seconds < 0:
+        raise AutomationError("preview duration limits must not be negative.")
+    if min_preview_seconds > max_preview_seconds:
+        raise AutomationError("min_preview_seconds must not exceed max_preview_seconds.")
+    if not math.isfinite(duration_tolerance_seconds):
+        raise AutomationError("duration_tolerance_seconds must be finite.")
+    if duration_tolerance_seconds < 0:
+        raise AutomationError("duration_tolerance_seconds must not be negative.")
+
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
@@ -1885,6 +1925,7 @@ def inspect_round_package(
     preview_checks: list[dict[str, Any]] = []
     remediation: list[dict[str, Any]] = []
     total_preview_ms = 0
+    preview_ms_by_position: dict[int, int] = {}
     service_health = {
         "artifact_storage": artifact_storage_service_health(),
         "spotify": spotify_service_health(user),
@@ -2002,6 +2043,7 @@ def inspect_round_package(
             elif audio:
                 duration_seconds = len(audio) / 1000
                 total_preview_ms += len(audio)
+                preview_ms_by_position[index] = len(audio)
                 check["duration_seconds"] = round(duration_seconds, 3)
                 check["ok"] = True
                 if duration_seconds < min_preview_seconds:
@@ -2071,13 +2113,24 @@ def inspect_round_package(
             + sum((components.get("hint_audio_ms") or {}).values())
             + 2 * total_preview_ms
         )
+        track_slot_ms = []
+        number_audio_ms = components.get("number_audio_ms") or []
+        hint_audio_ms = components.get("hint_audio_ms") or {}
+        for position, preview_ms in preview_ms_by_position.items():
+            number_ms = number_audio_ms[position - 1] if position - 1 < len(number_audio_ms) else 0
+            track_slot_ms.append((2 * preview_ms) + (2 * number_ms) + hint_audio_ms.get(position, 0))
+        if track_slot_ms:
+            components["expected_track_slot_seconds"] = [
+                round(value / 1000, 3) for value in track_slot_ms
+            ]
+            components["minimum_expected_track_slot_seconds"] = round(min(track_slot_ms) / 1000, 3)
 
     pdf_result: dict[str, Any] | None = None
     mp3_result: dict[str, Any] | None = None
     try:
         pdf_result = inspect_pdf_quality(round_id=round_id)
         for warning in pdf_result.get("warnings", []):
-            issues.append(_quality_issue("pdf_quality_warning", warning))
+            issues.append(_quality_issue("pdf_quality_warning", warning, severity="warning"))
     except Exception as exc:
         current_app.logger.error("PDF inspection failed for round %s: %s", round_id, exc, exc_info=True)
         issues.append(_quality_issue("pdf_inspection_failed", AUTOMATION_PDF_INSPECTION_ERROR))
@@ -2085,7 +2138,7 @@ def inspect_round_package(
     try:
         mp3_result = inspect_mp3_quality(round_id=round_id)
         for warning in mp3_result.get("warnings", []):
-            issues.append(_quality_issue("mp3_quality_warning", warning))
+            issues.append(_quality_issue("mp3_quality_warning", warning, severity="warning"))
     except Exception as exc:
         current_app.logger.error("MP3 inspection failed for round %s: %s", round_id, exc, exc_info=True)
         issues.append(_quality_issue("mp3_inspection_failed", AUTOMATION_MP3_INSPECTION_ERROR))
@@ -2095,6 +2148,17 @@ def inspect_round_package(
         actual_seconds = float(mp3_result["duration_seconds"])
         delta_seconds = actual_seconds - expected_seconds
         if abs(delta_seconds) > duration_tolerance_seconds:
+            minimum_slot_seconds = components.get("minimum_expected_track_slot_seconds")
+            missing_slot_threshold = (
+                max(
+                    duration_tolerance_seconds,
+                    MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS,
+                    minimum_slot_seconds * MP3_DURATION_MISSING_SLOT_FACTOR,
+                )
+                if minimum_slot_seconds
+                else max(duration_tolerance_seconds, MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS)
+            )
+            severity = "error" if abs(delta_seconds) >= missing_slot_threshold else "warning"
             issue = _quality_issue(
                 "round_mp3_duration_mismatch",
                 (
@@ -2107,7 +2171,9 @@ def inspect_round_package(
                     "expected_seconds": round(expected_seconds, 3),
                     "delta_seconds": round(delta_seconds, 3),
                     "tolerance_seconds": duration_tolerance_seconds,
+                    "blocking_threshold_seconds": round(missing_slot_threshold, 3),
                 },
+                severity=severity,
             )
             issues.append(issue)
             remediation.append(
@@ -2118,12 +2184,13 @@ def inspect_round_package(
                 }
             )
 
-    issue_codes = {issue["code"] for issue in issues}
-    if not issues:
+    blocking_issues = _blocking_quality_issues(issues)
+    blocking_issue_codes = {issue["code"] for issue in blocking_issues}
+    if not blocking_issues:
         status = "ok"
-    elif issue_codes & {"actual_song_count_mismatch", "resolved_song_count_mismatch"}:
+    elif blocking_issue_codes & {"actual_song_count_mismatch", "resolved_song_count_mismatch"}:
         status = "needs_more_songs" if len(songs) < expected_song_count else "blocked"
-    elif issue_codes & {
+    elif blocking_issue_codes & {
         "missing_deezer_id",
         "missing_preview_url",
         "preview_too_short",
@@ -2131,13 +2198,13 @@ def inspect_round_package(
         "preview_download_failed",
     }:
         status = "needs_substitution"
-    elif issue_codes & {
+    elif blocking_issue_codes & {
         "artifact_storage_missing",
         "artifact_storage_not_directory",
         "artifact_storage_not_writable",
     }:
         status = "storage_unhealthy"
-    elif issue_codes & {"pdf_inspection_failed", "mp3_inspection_failed", "round_mp3_duration_mismatch"}:
+    elif blocking_issue_codes & {"pdf_inspection_failed", "mp3_inspection_failed", "round_mp3_duration_mismatch"}:
         status = "render_failed"
     else:
         status = "blocked"
@@ -2159,9 +2226,11 @@ def inspect_round_package(
         "pdf": pdf_result,
         "mp3": mp3_result,
         "issues": issues,
-        "hints": [issue["message"] for issue in issues],
+        "warnings": [issue for issue in issues if issue.get("severity") == "warning"],
+        "blocking_issue_count": len(blocking_issues),
+        "hints": [issue["message"] for issue in blocking_issues],
         "remediation": remediation,
-        "ok": not issues,
+        "ok": not blocking_issues,
     }
     result["report"] = _round_repair_report(result)
     return result
