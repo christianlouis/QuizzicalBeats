@@ -41,6 +41,8 @@ from musicround.models import (
     RoundAudioScript,
     RoundExport,
     RoundShare,
+    SeedSource,
+    SeedSourceRun,
     Song,
     Tag,
     User,
@@ -228,6 +230,46 @@ def _planned_quiz_round_summary(plan: PlannedQuizRound) -> dict[str, Any]:
         "created_at": _datetime_payload(plan.created_at),
         "updated_at": _datetime_payload(plan.updated_at),
     }
+
+
+def _seed_source_run_summary(run: SeedSourceRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "seed_source_id": run.seed_source_id,
+        "status": run.status,
+        "started_at": _datetime_payload(run.started_at),
+        "completed_at": _datetime_payload(run.completed_at),
+        "songs_seen": run.songs_seen,
+        "songs_imported": run.songs_imported,
+        "error_message": run.error_message,
+        "notes": run.notes,
+    }
+
+
+def _seed_source_summary(source: SeedSource, include_runs: bool = False) -> dict[str, Any]:
+    latest_run = (
+        source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()).first()
+    )
+    payload = {
+        "id": source.id,
+        "name": source.name,
+        "source_type": source.source_type,
+        "provider": source.provider,
+        "url": source.url,
+        "cadence": source.cadence,
+        "active": source.active,
+        "priority": source.priority,
+        "notes": source.notes,
+        "created_at": _datetime_payload(source.created_at),
+        "updated_at": _datetime_payload(source.updated_at),
+        "latest_run": _seed_source_run_summary(latest_run) if latest_run else None,
+    }
+    if include_runs:
+        payload["runs"] = [
+            _seed_source_run_summary(run)
+            for run in source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()).limit(20).all()
+        ]
+    return payload
 
 
 def _find_user(user_id: int | None = None) -> User:
@@ -938,6 +980,112 @@ def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
         "revoked": True,
         "share": removed,
         "round": _round_summary(round_obj) if round_obj else None,
+    }
+
+
+def register_seed_source(
+    name: str,
+    source_type: str,
+    provider: str | None = None,
+    url: str | None = None,
+    cadence: str | None = None,
+    priority: int = 100,
+    active: bool = True,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a catalog seed source for chart/festival ingestion."""
+    normalized_name = (name or "").strip()
+    normalized_type = (source_type or "").strip().lower()
+    normalized_provider = (provider or "").strip() or None
+    if not normalized_name:
+        raise AutomationError("name must not be empty.")
+    if normalized_type not in {"chart", "festival", "editorial", "curated", "playlist"}:
+        raise AutomationError("source_type must be chart, festival, editorial, curated, or playlist.")
+    if priority < 0 or priority > 1000:
+        raise AutomationError("priority must be between 0 and 1000.")
+
+    source = SeedSource.query.filter_by(
+        name=normalized_name,
+        provider=normalized_provider,
+    ).first()
+    created = source is None
+    if source is None:
+        source = SeedSource(name=normalized_name, provider=normalized_provider)
+        db.session.add(source)
+
+    source.source_type = normalized_type
+    source.url = (url or "").strip() or None
+    source.cadence = (cadence or "").strip() or None
+    source.priority = priority
+    source.active = bool(active)
+    source.notes = (notes or "").strip() or None
+    source.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    return {"created": created, "seed_source": _seed_source_summary(source, include_runs=True)}
+
+
+def list_seed_sources(
+    source_type: str | None = None,
+    active: bool | None = True,
+    include_runs: bool = False,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """List configured chart/festival seed sources for agent planning."""
+    if limit < 1 or limit > 500:
+        raise AutomationError("limit must be between 1 and 500.")
+    query = SeedSource.query
+    if source_type:
+        query = query.filter(SeedSource.source_type == source_type.strip().lower())
+    if active is not None:
+        query = query.filter(SeedSource.active.is_(bool(active)))
+    sources = (
+        query
+        .order_by(SeedSource.priority.asc(), SeedSource.name.asc(), SeedSource.id.asc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(sources),
+        "sources": [_seed_source_summary(source, include_runs=include_runs) for source in sources],
+    }
+
+
+def record_seed_source_run(
+    seed_source_id: int,
+    status: str,
+    songs_seen: int = 0,
+    songs_imported: int = 0,
+    error_message: str | None = None,
+    notes: str | None = None,
+    completed: bool = True,
+) -> dict[str, Any]:
+    """Record an import/read attempt for a seed source."""
+    source = db.session.get(SeedSource, seed_source_id)
+    if not source:
+        raise AutomationError(f"Seed source {seed_source_id} was not found.")
+    normalized_status = (status or "").strip().lower()
+    if normalized_status not in {"planned", "running", "success", "partial", "failed"}:
+        raise AutomationError("status must be planned, running, success, partial, or failed.")
+    if songs_seen < 0 or songs_imported < 0:
+        raise AutomationError("song counts must not be negative.")
+
+    run = SeedSourceRun(
+        seed_source_id=source.id,
+        status=normalized_status,
+        songs_seen=songs_seen,
+        songs_imported=songs_imported,
+        error_message=(error_message or "").strip() or None,
+        notes=(notes or "").strip() or None,
+        completed_at=datetime.utcnow() if completed else None,
+    )
+    db.session.add(run)
+    source.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "recorded": True,
+        "seed_source": _seed_source_summary(source),
+        "run": _seed_source_run_summary(run),
     }
 
 
@@ -2328,6 +2476,7 @@ def create_round_from_text_playlist(
     name: str | None = None,
     count: int = 8,
     min_confidence: float = 0.8,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Create a manual round from a parsed text playlist only when all rows resolve."""
     resolved = resolve_text_playlist(text, limit=max(count, 1), min_confidence=min_confidence)
@@ -2359,6 +2508,7 @@ def create_round_from_text_playlist(
         round_type="manual",
         count=count,
         song_ids=song_ids,
+        user_id=user_id,
     )
     return {
         "created": True,

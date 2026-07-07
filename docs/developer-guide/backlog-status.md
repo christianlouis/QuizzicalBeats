@@ -28,14 +28,14 @@ issue after verification or continue with the remaining follow-up.
 | #66 Add retry and dead-letter handling for import jobs | Ready to close | `musicround/helpers/import_queue.py`, `musicround/services/automation.py`, `tests/test_import_queue.py` | Verify one failed import can be retried in production. |
 | #67 Expose import progress events for active jobs | Ready to close | `musicround/mcp_server.py`, `musicround/services/automation.py`, `musicround/templates/import_queue_status.html` | Optional browser auto-refresh polish can be a separate issue. |
 | #68 Add text and CSV playlist parser service | Ready to close | `musicround/services/automation.py`, `musicround/mcp_server.py`, `tests/test_automation_service.py` | None for parser/MCP scope. |
-| #69 Add review workflow for low-confidence text imports | Partial | Parser returns reviewable unresolved rows through MCP | Browser review UI remains open; keep issue or split browser UI follow-up. |
+| #69 Add review workflow for low-confidence text imports | Ready to close after deploy smoke | Browser review UI, exact eight-song create gate, MCP/parser review payloads | Smoke paste one unresolved and one complete eight-song text list. |
 | #70 Add quizmaster preference model and MCP summary | Ready to close | `UserPreferences`, `quizmaster_context`, MCP docs | Verify one real quizmaster context call in MCP after deploy. |
 | #71 Add planned quiz date model for scheduled round generation | Ready to close | `PlannedQuizRound`, browser calendar, MCP planning tools | Verify upcoming production quiz dates render after deploy. |
 | #72 Add recent usage and fatigue summary API for agents | Ready to close | `recent_usage_summary`, `round_analytics_summary`, `round_planning_brief` | None for API/MCP scope. |
 | #73 Add MCP tool to draft round intro, replay, and outro scripts | Ready to close | `draft_round_audio_scripts`, MCP docs, round detail actions | Verify one draft for a real round after deploy. |
 | #74 Store and review generated TTS scripts before audio assignment | Ready to close | `RoundAudioScript`, review routes, `generate_tts_from_script` | Verify approved script-to-audio assignment with configured TTS provider. |
-| #75 Add chart and festival seed source registry | Open | Roadmap only | Build source registry model/service and seed-source admin review. |
-| #79 Add round ownership and sharing roles | Partial | `RoundShare`, owner filtering, edit checks, MCP share tools | Invite UI, public links, audit log, and richer roles remain open. |
+| #75 Add chart and festival seed source registry | Partial | `SeedSource`, `SeedSourceRun`, admin views, MCP registry/run tools | Scrapers/importers for individual chart/festival providers remain separate slices. |
+| #79 Add round ownership and sharing roles | Partial | `RoundShare`, owner filtering, edit checks, MCP share tools, browser share/revoke UI | Public links, audit log, and richer roles remain open. |
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
@@ -44,9 +44,8 @@ issue after verification or continue with the remaining follow-up.
 
 1. Close or comment the "ready to close" issues after a release smoke confirms
    the linked browser/MCP behavior.
-2. For #69, build the browser review page for unresolved text playlist rows.
-3. For #75, add a chart/festival source registry and ingestion-run model before
-   adding scrapers.
-4. For #79, add invite/search UI and access-audit events around `RoundShare`.
+2. For #75, add first provider-specific source fetchers on top of the registry.
+3. For #79, add access-audit events and optional public read-only links around
+   `RoundShare`.
 5. For #126/#12, continue with live deployment configuration only through the
    existing 1Password-backed secret flow and credential-safe Kubernetes checks.

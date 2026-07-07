@@ -504,6 +504,74 @@ class TestRoundDetailRoute:
         with app.app_context():
             assert db.session.get(Round, round_id).name == 'Editor Updated Round'
 
+    def test_round_owner_can_share_and_revoke_from_detail(self, app, client):
+        """Owners should be able to manage explicit round shares in the browser."""
+        _login(app, client, username='share_owner_ui', email='share_owner_ui@example.com')
+        _login(app, client, username='share_target_ui', email='share_target_ui@example.com')
+        song_id = _create_song(app, title='Share UI Song')
+        owner_id = _user_id(app, 'share_owner_ui')
+        target_id = _user_id(app, 'share_target_ui')
+        _login(app, client, username='share_owner_ui', email='share_owner_ui@example.com')
+        round_id = _create_round(app, [song_id], name='Owner Share UI Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        add_response = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': 'share_target_ui', 'role': 'editor'},
+            follow_redirects=True,
+        )
+
+        assert add_response.status_code == 200
+        assert b'share_target_ui' in add_response.data
+        assert b'Editor' in add_response.data
+        with app.app_context():
+            share = RoundShare.query.filter_by(round_id=round_id, user_id=target_id).one()
+            assert share.role == 'editor'
+            assert db.session.get(Round, round_id).visibility == 'shared'
+
+        delete_response = client.post(
+            f'/rounds/{round_id}/shares/{target_id}/delete',
+            follow_redirects=True,
+        )
+
+        assert delete_response.status_code == 200
+        assert b'This round is not shared with other quizmasters.' in delete_response.data
+        with app.app_context():
+            assert RoundShare.query.filter_by(round_id=round_id, user_id=target_id).count() == 0
+            assert db.session.get(Round, round_id).visibility == 'private'
+
+    def test_shared_editor_cannot_manage_round_shares(self, app, client):
+        """Edit access should not grant share administration."""
+        _login(app, client, username='share_admin_owner', email='share_admin_owner@example.com')
+        _login(app, client, username='share_admin_editor', email='share_admin_editor@example.com')
+        _login(app, client, username='share_admin_target', email='share_admin_target@example.com')
+        song_id = _create_song(app, title='Share Admin Song')
+        owner_id = _user_id(app, 'share_admin_owner')
+        editor_id = _user_id(app, 'share_admin_editor')
+        client.get('/users/logout')
+        _login(app, client, username='share_admin_editor', email='share_admin_editor@example.com')
+        round_id = _create_round(app, [song_id], name='Editor No Share Admin Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=editor_id, role='editor'))
+            db.session.commit()
+
+        detail = client.get(f'/rounds/{round_id}')
+        blocked = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': 'share_admin_target', 'role': 'viewer'},
+        )
+
+        assert detail.status_code == 200
+        assert b'id="round-share-form"' not in detail.data
+        assert blocked.status_code == 403
+
     def test_update_round_review_marks_approval(self, app, client):
         """Review route should persist approved state and notes."""
         _login(app, client)

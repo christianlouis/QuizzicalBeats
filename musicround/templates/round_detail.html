@@ -79,6 +79,61 @@
         </div>
     </div>
 
+    <div class="bg-white shadow-md rounded-lg p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+            <div class="flex-1">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-2">Sharing</h2>
+                <p class="text-sm text-gray-600 mb-4">Give another quizmaster read-only or edit access to this round.</p>
+                {% if round_shares %}
+                <div class="space-y-2">
+                    {% for share in round_shares %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 rounded-md p-3">
+                        <div>
+                            <div class="font-semibold text-gray-900">{{ share.user.username }}</div>
+                            <div class="text-sm text-gray-500">{{ share.user.email }}</div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'editor' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ share.role|capitalize }}
+                            </span>
+                            {% if can_manage_shares %}
+                            <form method="POST" action="{{ url_for('rounds.delete_round_share', round_id=round.id, user_id=share.user_id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="text-red-600 hover:text-red-800 text-sm font-semibold">
+                                    <i class="fas fa-times mr-1"></i>Remove
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500">This round is not shared with other quizmasters.</p>
+                {% endif %}
+            </div>
+            {% if can_manage_shares %}
+            <form id="round-share-form" method="POST" action="{{ url_for('rounds.add_round_share', round_id=round.id) }}" class="lg:w-96 border border-gray-200 rounded-md p-4 bg-gray-50">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="share_user_query">Username or email</label>
+                    <input id="share_user_query" name="user_query" type="text" class="px-3 py-2 border border-gray-300 rounded-md w-full" placeholder="quizmaster@example.com">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="share_role">Role</label>
+                    <select id="share_role" name="role" class="px-3 py-2 border border-gray-300 rounded-md w-full">
+                        <option value="viewer">Viewer</option>
+                        <option value="editor">Editor</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                    <i class="fas fa-user-plus mr-2"></i>Share Round
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div class="bg-white shadow-md rounded-lg p-6 lg:col-span-2">
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">

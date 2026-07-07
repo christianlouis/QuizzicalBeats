@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added an agentic backlog-status crosswalk that maps open GitHub issues to
   implemented, partial, open, or live-operational follow-up slices.
+- Added a browser text-playlist review workflow that blocks round creation
+  until exactly eight pasted rows resolve to catalog songs.
+- Added browser round sharing controls for owners/admins to grant and revoke
+  viewer/editor access from the round detail page.
+- Added a chart/festival seed-source registry with run history, Flask-Admin
+  views, migrations, and MCP automation helpers.
 - Added a browser round-ops workflow with round calendar, catalog/fatigue analytics, quizmaster planning briefs, round review/approval state, package quality inspection, actionable replacement suggestions, and browser review of announcement and per-track hint script drafts.
 - Added a public-safe `/healthz` endpoint and reusable service-health payloads for database, artifact storage, Spotify, Dropbox, and email checks.
 - Added import queue and worker health to service-health payloads, including pending/dead-letter job warnings.

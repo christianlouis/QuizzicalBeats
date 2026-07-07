@@ -496,6 +496,67 @@ class SystemSetting(db.Model):
         return {s.key: s.value for s in SystemSetting.query.all()}
 
 
+class SeedSource(db.Model):
+    """
+    Curated chart, festival, and editorial sources used to seed the song catalog.
+    """
+    __tablename__ = 'seed_source'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    source_type = db.Column(db.String(50), nullable=False)
+    provider = db.Column(db.String(100), nullable=True)
+    url = db.Column(db.String(500), nullable=True)
+    cadence = db.Column(db.String(50), nullable=True)
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    priority = db.Column(db.Integer, default=100, nullable=False)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('name', 'provider', name='uq_seed_source_name_provider'),
+        db.Index('idx_seed_source_type_active', 'source_type', 'active', 'priority'),
+    )
+
+    runs = db.relationship('SeedSourceRun', back_populates='seed_source', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return (
+            f"SeedSource(id={self.id}, name='{self.name}', "
+            f"type='{self.source_type}', provider='{self.provider}')"
+        )
+
+
+class SeedSourceRun(db.Model):
+    """
+    Import/read status for a configured seed source.
+    """
+    __tablename__ = 'seed_source_run'
+
+    id = db.Column(db.Integer, primary_key=True)
+    seed_source_id = db.Column(db.Integer, db.ForeignKey('seed_source.id', ondelete='CASCADE'), nullable=False)
+    status = db.Column(db.String(30), default='planned', nullable=False)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    songs_seen = db.Column(db.Integer, default=0, nullable=False)
+    songs_imported = db.Column(db.Integer, default=0, nullable=False)
+    error_message = db.Column(db.Text, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_seed_source_run_source_status', 'seed_source_id', 'status', 'started_at'),
+    )
+
+    seed_source = db.relationship('SeedSource', back_populates='runs')
+
+    def __repr__(self):
+        return (
+            f"SeedSourceRun(seed_source_id={self.seed_source_id}, "
+            f"status='{self.status}', imported={self.songs_imported})"
+        )
+
+
 class ImportJobRecord(db.Model):
     """
     Database model for tracking import jobs

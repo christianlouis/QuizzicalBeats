@@ -10,7 +10,19 @@ try:
 except ImportError:
     _FLASK_ADMIN_V2 = False
 from flask_login import current_user, login_required
-from musicround.models import Song, Tag, SongTag, Round, User, Role, UserPreferences, SystemSetting, db
+from musicround.models import (
+    SeedSource,
+    SeedSourceRun,
+    Song,
+    Tag,
+    SongTag,
+    Round,
+    User,
+    Role,
+    UserPreferences,
+    SystemSetting,
+    db,
+)
 from functools import wraps
 import os
 import json
@@ -187,6 +199,20 @@ class SystemSettingModelView(AuthModelView):
     column_details_list = ['id', 'key']
     column_export_list = ['id', 'key']
 
+
+class SeedSourceModelView(AuthModelView):
+    column_searchable_list = ['name', 'provider', 'url']
+    column_filters = ['source_type', 'provider', 'active', 'cadence']
+    column_list = ['id', 'name', 'source_type', 'provider', 'active', 'priority', 'cadence', 'updated_at']
+    column_default_sort = ('priority', False)
+
+
+class SeedSourceRunModelView(AuthModelView):
+    column_searchable_list = ['error_message', 'notes']
+    column_filters = ['status', 'seed_source_id']
+    column_list = ['id', 'seed_source_id', 'status', 'songs_seen', 'songs_imported', 'started_at', 'completed_at']
+    column_default_sort = ('started_at', True)
+
 # Initialize the admin interface
 admin = None
 
@@ -219,6 +245,8 @@ def init_admin(app):
     admin.add_view(TagModelView(Tag, db.session, category="Music Data"))
     admin.add_view(SongTagModelView(SongTag, db.session, category="Music Data"))
     admin.add_view(RoundModelView(Round, db.session, category="Music Data"))
+    admin.add_view(SeedSourceModelView(SeedSource, db.session, category="Music Data"))
+    admin.add_view(SeedSourceRunModelView(SeedSourceRun, db.session, category="Music Data"))
     
     # User management
     admin.add_view(UserModelView(User, db.session, category="User Management"))

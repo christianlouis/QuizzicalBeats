@@ -7,6 +7,8 @@ from musicround.models import Song, Round, Tag, db
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.spotify_helper import get_spotify_token
+from musicround.services import automation
+from musicround.services.automation import AutomationError
 
 generate_bp = Blueprint('generate', __name__)
 
@@ -665,6 +667,89 @@ def import_playlist():
                                expected_song_count=expected_song_count)
     
     return render_template('import_playlist.html')
+
+
+def _text_import_confidence():
+    raw_value = request.form.get('min_confidence', request.args.get('min_confidence', '0.8'))
+    try:
+        confidence = float(raw_value)
+    except (TypeError, ValueError):
+        return 0.8
+    return min(max(confidence, 0.5), 1.0)
+
+
+@generate_bp.route('/import-text-playlist', methods=['GET', 'POST'])
+@login_required
+def import_text_playlist():
+    """Review pasted text or CSV playlist rows before creating a quiz round."""
+    expected_song_count = current_app.config.get('SONGS_PER_ROUND', songs_per_round)
+    playlist_text = request.form.get('playlist_text', '')
+    round_name = request.form.get('round_name', '')
+    min_confidence = _text_import_confidence()
+    resolution = None
+
+    if request.method == 'POST':
+        if not playlist_text.strip():
+            flash('Paste at least one song row before reviewing the text playlist.', 'error')
+            return render_template(
+                'import_text_playlist.html',
+                expected_song_count=expected_song_count,
+                playlist_text=playlist_text,
+                round_name=round_name,
+                min_confidence=min_confidence,
+                resolution=resolution,
+            )
+
+        try:
+            resolution = automation.resolve_text_playlist(
+                playlist_text,
+                limit=500,
+                min_confidence=min_confidence,
+            )
+        except AutomationError as exc:
+            flash(str(exc), 'error')
+            return render_template(
+                'import_text_playlist.html',
+                expected_song_count=expected_song_count,
+                playlist_text=playlist_text,
+                round_name=round_name,
+                min_confidence=min_confidence,
+                resolution=resolution,
+            )
+
+        if request.form.get('action') == 'create':
+            if not resolution['ready_for_round']:
+                flash('Resolve every text row before creating a round.', 'error')
+            elif resolution['resolved_count'] != expected_song_count:
+                flash(
+                    f'Text playlist resolved {resolution["resolved_count"]} songs; '
+                    f'expected exactly {expected_song_count}.',
+                    'error',
+                )
+            else:
+                try:
+                    created = automation.create_round_from_text_playlist(
+                        playlist_text,
+                        name=round_name or None,
+                        count=expected_song_count,
+                        min_confidence=min_confidence,
+                        user_id=current_user.id,
+                    )
+                except AutomationError as exc:
+                    resolution = (exc.details or {}).get('resolution', resolution)
+                    flash(str(exc), 'error')
+                else:
+                    flash('Text playlist round created after review.', 'success')
+                    return redirect(url_for('rounds.round_detail', round_id=created['round']['id']))
+
+    return render_template(
+        'import_text_playlist.html',
+        expected_song_count=expected_song_count,
+        playlist_text=playlist_text,
+        round_name=round_name,
+        min_confidence=min_confidence,
+        resolution=resolution,
+    )
 
 @generate_bp.route('/save_round', methods=['POST'])
 @login_required

@@ -54,6 +54,9 @@ The MCP server exposes these tools:
 | `share_round` | Share a round with another quizmaster as viewer or editor. |
 | `list_round_shares` | List explicit share grants for a round. |
 | `revoke_round_share` | Remove a user's share grant from a round. |
+| `register_seed_source` | Create or update a chart, festival, editorial, curated, or playlist seed source. |
+| `list_seed_sources` | List configured catalog seed sources for agent planning. |
+| `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |
