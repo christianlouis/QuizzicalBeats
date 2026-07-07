@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit, urlunsplit
 
 
 def bool_from_config(value) -> bool:
@@ -120,7 +120,7 @@ def redact_database_uri(uri: str | None) -> str:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     port = f":{parts.port}" if parts.port else ""
-    username = f"{quote(parts.username, safe='%')}:***@" if parts.username else ""
+    username = f"{quote(unquote(parts.username), safe='')}:***@" if parts.username else ""
     netloc = f"{username}{host}{port}"
     path = parts.path or ""
     return urlunsplit((parts.scheme, netloc, path, "", ""))

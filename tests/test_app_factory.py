@@ -200,6 +200,17 @@ def test_database_uri_redaction_preserves_valid_escaped_username():
     assert 'super-secret' not in redacted
 
 
+def test_database_uri_redaction_requotes_literal_percent_username():
+    """Literal percent characters should stay percent-encoded after redaction."""
+    uri = 'postgresql+psycopg2://user%25name:super-secret@postgres.example:5432/qb'
+
+    redacted = redact_database_uri(uri)
+
+    assert redacted == 'postgresql+psycopg2://user%25name:***@postgres.example:5432/qb'
+    assert 'user%name' not in redacted
+    assert 'super-secret' not in redacted
+
+
 def test_database_uri_from_postgres_env_quotes_secret_components():
     """Generated URIs must be valid and never include raw secret text."""
     environ = {
