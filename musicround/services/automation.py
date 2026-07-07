@@ -2446,14 +2446,32 @@ def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
     )
     missing_preview_count = Song.query.filter(
         Song.preview_url.is_(None),
-        Song.deezer_preview_url.is_(None),
         Song.spotify_preview_url.is_(None),
+        Song.deezer_preview_url.is_(None),
+        Song.apple_preview_url.is_(None),
+        Song.youtube_preview_url.is_(None),
     ).count()
 
-    genre_rows = db.session.query(Song.genre, db.func.count(Song.id)).group_by(Song.genre).all()
+    genre_rows = db.session.query(Song.genre).all()
+    unknown_genre_count = 0
+    genre_counts_by_key: dict[str, int] = {}
+    genre_labels_by_key: dict[str, str] = {}
+    for (raw_genre,) in genre_rows:
+        genre_label = " ".join((raw_genre or "").strip().split())
+        if not genre_label or genre_label.casefold() == "unknown":
+            unknown_genre_count += 1
+            continue
+
+        genre_key = genre_label.casefold()
+        genre_labels_by_key.setdefault(genre_key, genre_label)
+        genre_counts_by_key[genre_key] = genre_counts_by_key.get(genre_key, 0) + 1
+
     genre_counts = {
-        genre or "Unknown": count
-        for genre, count in sorted(genre_rows, key=lambda item: (-(item[1] or 0), item[0] or ""))
+        genre_labels_by_key[genre_key]: count
+        for genre_key, count in sorted(
+            genre_counts_by_key.items(),
+            key=lambda item: (-item[1], genre_labels_by_key[item[0]].casefold()),
+        )
     }
 
     return {
@@ -2463,6 +2481,7 @@ def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
         "round_count": Round.query.count(),
         "recent_round_count": recent_rounds,
         "missing_preview_count": missing_preview_count,
+        "unknown_genre_count": unknown_genre_count,
         "genre_counts": genre_counts,
         "most_used_songs": [_song_summary(song) for song in most_used],
         "unused_candidates": [_song_summary(song) for song in stale_candidates],
