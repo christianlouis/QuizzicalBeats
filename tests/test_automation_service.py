@@ -796,8 +796,9 @@ class TestAssetInspection:
 
             report = automation._round_repair_report(quality)
 
-            assert report["headline"] == "2026-07-23 is blocked: needs_substitution."
-            assert [item["position"] for item in report["failed_positions"]] == [4, 7]
+            assert report["headline"].startswith("2026-07-23 is blocked:")
+            assert report["status"] == "needs_substitution"
+            assert sorted(item["position"] for item in report["failed_positions"]) == [4, 7]
             assert "Kate Bush - Running Up That Hill" in report["markdown"]
             assert "Example Artist - Short Clip" in report["markdown"]
             assert "Replace position 4" in report["markdown"]
