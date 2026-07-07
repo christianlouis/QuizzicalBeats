@@ -12,6 +12,8 @@ from musicround.models import (
     RoundAudioScript,
     RoundExport,
     RoundShare,
+    SeedSource,
+    SeedSourceRun,
     Song,
 )
 
@@ -295,6 +297,27 @@ def test_add_round_review_workflow_to_legacy_database(tmp_path):
     }.issubset(round_columns)
     assert "idx_round_review_status" in _index_names(database_path, "round")
     assert "review_status" in Round.__table__.columns.keys()
+
+
+def test_add_seed_source_registry_to_legacy_database(tmp_path):
+    """Legacy databases get seed source registry and run-status tables."""
+    database_path = tmp_path / "legacy-seed-source.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_seed_source_registry
+
+        assert add_seed_source_registry.run_migration() is True
+        assert add_seed_source_registry.run_migration() is None
+
+    assert "seed_source" in _table_names(database_path)
+    assert "seed_source_run" in _table_names(database_path)
+    assert "idx_seed_source_type_active" in _index_names(database_path, "seed_source")
+    assert "idx_seed_source_run_source_status" in _index_names(database_path, "seed_source_run")
+    assert "notes" in _column_names(database_path, "seed_source")
+    assert SeedSource.__tablename__ == "seed_source"
+    assert SeedSourceRun.__tablename__ == "seed_source_run"
+    assert "idx_seed_source_type_active" in {index.name for index in SeedSource.__table__.indexes}
+    assert "idx_seed_source_run_source_status" in {index.name for index in SeedSourceRun.__table__.indexes}
 
 
 def test_add_planned_quiz_rounds_to_legacy_database(tmp_path):

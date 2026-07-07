@@ -20,6 +20,8 @@ from musicround.models import (
     RoundAudioScript,
     RoundExport,
     RoundShare,
+    SeedSource,
+    SeedSourceRun,
     Song,
     SongTag,
     Tag,
@@ -1705,6 +1707,7 @@ class TestAgentPlanningAutomation:
 
     def test_create_round_from_text_playlist_requires_exact_count(self, app):
         with app.app_context():
+            user = _create_user(username="textowner", email="textowner@example.test")
             _create_song(title="One", artist="A")
             _create_song(title="Two", artist="B")
 
@@ -1712,10 +1715,12 @@ class TestAgentPlanningAutomation:
                 "A - One\nB - Two",
                 name="Text Round",
                 count=2,
+                user_id=user.id,
             )
 
             assert result["created"] is True
             assert result["round"]["name"] == "Text Round"
+            assert result["round"]["owner_user_id"] == user.id
             assert result["round"]["song_ids"]
 
     def test_create_round_from_text_playlist_returns_review_payload(self, app):
@@ -1775,6 +1780,58 @@ class TestAgentPlanningAutomation:
                 warning["song"]["id"] != old_song.id
                 for warning in result["selected_song_warnings"]
             )
+
+    def test_seed_source_registry_records_runs(self, app):
+        with app.app_context():
+            registered = automation.register_seed_source(
+                name="Graspop headliners",
+                source_type="festival",
+                provider="manual",
+                url="https://example.test/graspop",
+                cadence="annual",
+                priority=20,
+                notes="Metal and rock headliner source",
+            )
+            source_id = registered["seed_source"]["id"]
+            run = automation.record_seed_source_run(
+                source_id,
+                status="success",
+                songs_seen=120,
+                songs_imported=80,
+                notes="Initial registry smoke",
+            )
+            listed = automation.list_seed_sources(source_type="festival", include_runs=True)
+
+            assert registered["created"] is True
+            assert run["run"]["songs_imported"] == 80
+            assert listed["count"] == 1
+            assert listed["sources"][0]["name"] == "Graspop headliners"
+            assert listed["sources"][0]["latest_run"]["status"] == "success"
+            assert listed["sources"][0]["runs"][0]["songs_seen"] == 120
+            assert SeedSource.query.count() == 1
+            assert SeedSourceRun.query.count() == 1
+
+    def test_seed_source_registry_updates_existing_source(self, app):
+        with app.app_context():
+            first = automation.register_seed_source(
+                name="Billboard Hot 100",
+                source_type="chart",
+                provider="billboard",
+                priority=10,
+            )
+            second = automation.register_seed_source(
+                name="Billboard Hot 100",
+                source_type="chart",
+                provider="billboard",
+                priority=5,
+                active=False,
+            )
+
+            assert first["created"] is True
+            assert second["created"] is False
+            assert second["seed_source"]["priority"] == 5
+            assert second["seed_source"]["active"] is False
+            assert SeedSource.query.count() == 1
 
     def test_quizmaster_context_includes_preferences_and_recent_usage(self, app):
         with app.app_context():

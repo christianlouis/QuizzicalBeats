@@ -246,6 +246,42 @@ before it is turned into quizmaster audio.
 | created_at         | DateTime     | Creation timestamp                               |
 | updated_at         | DateTime     | Last update timestamp                            |
 
+### SeedSource
+
+The `SeedSource` table stores chart, festival, editorial, curated, and playlist
+sources that agents can use when planning catalog enrichment.
+
+| Column      | Type         | Description                                      |
+|-------------|--------------|--------------------------------------------------|
+| id          | Integer      | Primary key                                      |
+| name        | String(200)  | Human-readable source name                       |
+| source_type | String(50)   | chart, festival, editorial, curated, or playlist |
+| provider    | String(100)  | Source owner/provider                            |
+| url         | String(500)  | Source URL                                       |
+| cadence     | String(50)   | Expected refresh cadence                         |
+| active      | Boolean      | Whether agents should consider the source        |
+| priority    | Integer      | Lower values are considered first                |
+| notes       | Text         | Review notes and source constraints              |
+| created_at  | DateTime     | Creation timestamp                               |
+| updated_at  | DateTime     | Last update timestamp                            |
+
+### SeedSourceRun
+
+The `SeedSourceRun` table records read/import attempts for configured seed
+sources.
+
+| Column         | Type       | Description                                  |
+|----------------|------------|----------------------------------------------|
+| id             | Integer    | Primary key                                  |
+| seed_source_id | Integer    | Foreign key to SeedSource                    |
+| status         | String(30) | planned, running, success, partial, failed   |
+| started_at     | DateTime   | Run start timestamp                          |
+| completed_at   | DateTime   | Run completion timestamp                     |
+| songs_seen     | Integer    | Candidate songs seen in the source           |
+| songs_imported | Integer    | Songs imported or linked from the source     |
+| error_message  | Text       | Safe failure summary                         |
+| notes          | Text       | Run notes                                    |
+
 ### RoundExport
 
 The `RoundExport` table tracks exports of rounds to various destinations.

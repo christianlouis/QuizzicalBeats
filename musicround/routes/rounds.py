@@ -14,7 +14,7 @@ import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
 from sqlalchemy import or_
-from musicround.models import PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, Song, db
+from musicround.models import PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, Song, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -213,6 +213,12 @@ def _can_edit_round(round_obj):
         return True
     share = round_obj.shares.filter_by(user_id=current_user.id).first()
     return bool(share and share.role == 'editor')
+
+
+def _can_manage_round_shares(round_obj):
+    if current_user.is_admin:
+        return True
+    return bool(round_obj.user_id and round_obj.user_id == current_user.id)
 
 
 def _get_visible_round_or_404(round_id):
@@ -483,6 +489,12 @@ def round_detail(round_id):
             .limit(10)
             .all()
         )
+        round_shares = (
+            RoundShare.query.filter_by(round_id=rnd.id)
+            .join(User)
+            .order_by(User.username.asc(), RoundShare.id.asc())
+            .all()
+        )
 
         return render_template(
             'round_detail.html',
@@ -493,6 +505,8 @@ def round_detail(round_id):
             round_quality_report=round_quality_report,
             audio_scripts=audio_scripts,
             scheduled_exports=scheduled_exports,
+            round_shares=round_shares,
+            can_manage_shares=_can_manage_round_shares(rnd),
         )
     else:
         return 'Round not found'
@@ -562,6 +576,59 @@ def update_round_review(round_id):
             'approved_at': rnd.approved_at.isoformat() if rnd.approved_at else None,
         })
     flash('Round review status updated', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/shares', methods=['POST'])
+@login_required
+def add_round_share(round_id):
+    """Grant another quizmaster access to a round."""
+    rnd = _get_visible_round_or_404(round_id)
+    if not _can_manage_round_shares(rnd):
+        abort(403)
+
+    user_query = (request.form.get('user_query') or '').strip()
+    role = (request.form.get('role') or 'viewer').strip().lower()
+    if role not in {'viewer', 'editor'}:
+        flash('Share role must be viewer or editor.', 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
+    if not user_query:
+        flash('Enter a username or email address to share with.', 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+    target_user = User.query.filter(
+        or_(User.username == user_query, User.email == user_query)
+    ).first()
+    if not target_user:
+        flash('No quizmaster found for that username or email address.', 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
+    if rnd.user_id == target_user.id:
+        flash('Round owners already have full access.', 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+    try:
+        automation.share_round(round_id, target_user.id, role=role)
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash(f'Round shared with {target_user.username} as {role}.', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/shares/<int:user_id>/delete', methods=['POST'])
+@login_required
+def delete_round_share(round_id, user_id):
+    """Remove another quizmaster's access to a round."""
+    rnd = _get_visible_round_or_404(round_id)
+    if not _can_manage_round_shares(rnd):
+        abort(403)
+
+    try:
+        automation.revoke_round_share(round_id, user_id)
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash('Round share removed.', 'success')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 

@@ -322,6 +322,71 @@ def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+def register_seed_source(
+    name: str,
+    source_type: str,
+    provider: str | None = None,
+    url: str | None = None,
+    cadence: str | None = None,
+    priority: int = 100,
+    active: bool = True,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a chart, festival, editorial, curated, or playlist seed source."""
+    return _with_app_context(
+        automation.register_seed_source,
+        name=name,
+        source_type=source_type,
+        provider=provider,
+        url=url,
+        cadence=cadence,
+        priority=priority,
+        active=active,
+        notes=notes,
+    )
+
+
+@mcp.tool()
+def list_seed_sources(
+    source_type: str | None = None,
+    active: bool | None = True,
+    include_runs: bool = False,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """List configured catalog seed sources for agent planning."""
+    return _with_app_context(
+        automation.list_seed_sources,
+        source_type=source_type,
+        active=active,
+        include_runs=include_runs,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def record_seed_source_run(
+    seed_source_id: int,
+    status: str,
+    songs_seen: int = 0,
+    songs_imported: int = 0,
+    error_message: str | None = None,
+    notes: str | None = None,
+    completed: bool = True,
+) -> dict[str, Any]:
+    """Record a seed-source read/import attempt for later planning context."""
+    return _with_app_context(
+        automation.record_seed_source_run,
+        seed_source_id=seed_source_id,
+        status=status,
+        songs_seen=songs_seen,
+        songs_imported=songs_imported,
+        error_message=error_message,
+        notes=notes,
+        completed=completed,
+    )
+
+
+@mcp.tool()
 def suggest_replacement_songs(
     round_id: int,
     position: int,
@@ -700,6 +765,7 @@ def create_round_from_text_playlist(
     name: str | None = None,
     count: int = 8,
     min_confidence: float = 0.8,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Create a complete manual round from text rows that all resolve to catalog songs."""
     try:
@@ -709,6 +775,7 @@ def create_round_from_text_playlist(
             name=name,
             count=count,
             min_confidence=min_confidence,
+            user_id=user_id,
         )
     except automation.AutomationError as exc:
         if exc.details:
