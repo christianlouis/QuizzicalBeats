@@ -13,6 +13,7 @@ from musicround.config import Config
 from musicround.helpers.database_config import (
     bool_from_config,
     database_backend,
+    database_uri_from_postgres_env,
     database_summary,
     managed_database_requirement_error,
 )
@@ -39,6 +40,12 @@ def _configure_database_uri(app):
     configured_uri = os.environ.get('SQLALCHEMY_DATABASE_URI') or app.config.get(
         'SQLALCHEMY_DATABASE_URI'
     )
+    if not configured_uri:
+        try:
+            configured_uri = database_uri_from_postgres_env(os.environ)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
     if configured_uri:
         managed_error = managed_database_requirement_error(configured_uri, require_managed)
         if managed_error:

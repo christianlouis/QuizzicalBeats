@@ -77,8 +77,9 @@ def database_service_health() -> dict[str, Any]:
                 "Database is still configured to use the legacy /data SQLite file.",
                 severity="warning",
                 hint=(
-                    "Move SQLALCHEMY_DATABASE_URI to the managed database secret "
-                    "and enable DATABASE_REQUIRE_MANAGED=True for production."
+                    "Configure SQLALCHEMY_DATABASE_URI or complete PG* managed "
+                    "database credentials via secrets and enable "
+                    "DATABASE_REQUIRE_MANAGED=True for production."
                 ),
             )
         )

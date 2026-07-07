@@ -39,6 +39,7 @@ def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     assert "Database backend: sqlite" in output
     assert "Managed database required: False" in output
     assert "legacy /data SQLite database is configured" in output
+    assert "complete PG* credentials" in output
 
 
 def test_database_status_returns_safe_error_when_managed_guard_fails(monkeypatch, capsys):

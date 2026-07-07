@@ -224,7 +224,7 @@ class TestSystemHealthRoute:
         assert health['ok'] is True
         assert health['status'] == 'warning'
         assert health['issues'][0]['code'] == 'legacy_sqlite_data_store'
-        assert 'managed database secret' in health['issues'][0]['details']['hint']
+        assert 'complete PG* managed database credentials' in health['issues'][0]['details']['hint']
 
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""

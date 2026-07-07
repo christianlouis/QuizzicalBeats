@@ -81,7 +81,8 @@ def main():
         if is_legacy_data_sqlite_uri(db_uri):
             print(
                 "Warning: legacy /data SQLite database is configured; "
-                "move SQLALCHEMY_DATABASE_URI to the managed database secret for production."
+                "configure a managed SQL URI or complete PG* credentials via "
+                "secrets for production."
             )
         return 0
     elif args.command == 'health':
