@@ -759,12 +759,14 @@ class TestCoreViewSongs:
             db.session.add(Song(title='Spaced Unknown Genre', artist='Analytics', genre=' Unknown ', used_count=0))
             db.session.add(Song(title='Blank Genre', artist='Analytics', genre='   ', used_count=0))
             db.session.add(Song(title='Spaced Rock', artist='Analytics', genre=' Rock ', used_count=0))
+            db.session.add(Song(title='Spaced Hip Hop', artist='Analytics', genre=' Hip   Hop ', used_count=0))
             db.session.commit()
 
         missing_preview = client.get('/view-songs?has_preview=false')
         unused = client.get('/view-songs?used_max=0')
         missing_genre = client.get('/view-songs?genre=__missing__')
         rock_genre = client.get('/view-songs?genre=Rock')
+        hip_hop_genre = client.get('/view-songs?genre=Hip+Hop')
 
         assert b'Missing Preview' in missing_preview.data
         assert b'Has Preview' not in missing_preview.data
@@ -776,3 +778,5 @@ class TestCoreViewSongs:
         assert b'Has Preview' not in missing_genre.data
         assert b'Spaced Rock' in rock_genre.data
         assert b'Unknown Genre' not in rock_genre.data
+        assert b'Spaced Hip Hop' in hip_hop_genre.data
+        assert b'Spaced Rock' not in hip_hop_genre.data

@@ -383,6 +383,7 @@ def view_songs():
     per_page = _int_arg('per_page', default=25, minimum=1, maximum=200)
     query_text = (request.args.get('q') or '').strip()
     genre = (request.args.get('genre') or '').strip()
+    normalized_genre_filter = " ".join(genre.split()).lower()
     has_preview = (request.args.get('has_preview') or '').strip().lower()
     year = _int_arg('year')
     used_min = _int_arg('used_min', minimum=0)
@@ -392,7 +393,12 @@ def view_songs():
     if query_text:
         pattern = f'%{query_text}%'
         query = query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
-    normalized_genre = func.lower(func.trim(Song.genre))
+    normalized_genre = Song.genre
+    for whitespace in ("\t", "\n", "\r"):
+        normalized_genre = func.replace(normalized_genre, whitespace, " ")
+    for _ in range(6):
+        normalized_genre = func.replace(normalized_genre, "  ", " ")
+    normalized_genre = func.lower(func.trim(normalized_genre))
     if genre == '__missing__':
         query = query.filter(
             or_(
@@ -401,8 +407,8 @@ def view_songs():
                 normalized_genre == 'unknown',
             )
         )
-    elif genre:
-        query = query.filter(normalized_genre == genre.casefold())
+    elif normalized_genre_filter:
+        query = query.filter(normalized_genre == normalized_genre_filter)
     preview_filters = [
         Song.preview_url.isnot(None),
         Song.spotify_preview_url.isnot(None),
