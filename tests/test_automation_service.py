@@ -2330,6 +2330,82 @@ class TestAgentPlanningAutomation:
             assert second["seed_source"]["active"] is False
             assert SeedSource.query.count() == 1
 
+    def test_fetch_seed_source_candidates_from_manual_text_records_read_only_run(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Manual festival list",
+                source_type="festival",
+                provider="manual",
+            )["seed_source"]
+
+            result = automation.fetch_seed_source_candidates(
+                source["id"],
+                text="Electric Callboy - Hypa Hypa\nMammoth WVH - Another Celebration",
+            )
+
+            assert result["ok"] is True
+            assert result["imported"] is False
+            assert result["count"] == 2
+            assert result["candidates"][0]["artist"] == "Electric Callboy"
+            assert result["candidates"][0]["title"] == "Hypa Hypa"
+            assert result["run"]["status"] == "success"
+            assert result["run"]["songs_seen"] == 2
+            assert result["run"]["songs_imported"] == 0
+            assert SeedSourceRun.query.count() == 1
+
+    def test_fetch_seed_source_candidates_reads_json_payload(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Chart JSON",
+                source_type="chart",
+                provider="example",
+                url="https://example.test/chart.json",
+            )["seed_source"]
+
+            response = type("Response", (), {})()
+            response.status_code = 200
+            response.headers = {"content-type": "application/json"}
+            response.text = (
+                '{"tracks": ['
+                '{"artist": "Chappell Roan", "title": "Good Luck, Babe!"},'
+                '{"artist_name": "Sabrina Carpenter", "track_title": "Espresso"}'
+                ']}'
+            )
+
+            with patch("musicround.services.automation.requests.get", return_value=response) as mock_get:
+                result = automation.fetch_seed_source_candidates(source["id"], limit=10)
+
+            mock_get.assert_called_once_with("https://example.test/chart.json", timeout=20.0)
+            assert result["count"] == 2
+            assert [item["artist"] for item in result["candidates"]] == [
+                "Chappell Roan",
+                "Sabrina Carpenter",
+            ]
+            assert result["ready_for_import"] is True
+
+    def test_fetch_seed_source_candidates_hides_provider_fetch_error_body(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Broken chart",
+                source_type="chart",
+                provider="example",
+                url="https://example.test/private-token-chart",
+            )["seed_source"]
+            response = type("Response", (), {})()
+            response.status_code = 500
+            response.headers = {"content-type": "text/plain"}
+            response.text = "provider-secret-token traceback"
+
+            with patch("musicround.services.automation.requests.get", return_value=response):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.fetch_seed_source_candidates(source["id"])
+
+            assert str(exc_info.value) == automation.AUTOMATION_SEED_SOURCE_FETCH_ERROR
+            run = SeedSourceRun.query.one()
+            assert run.status == "failed"
+            assert run.error_message == automation.AUTOMATION_SEED_SOURCE_FETCH_ERROR
+            assert "provider-secret-token" not in run.error_message
+
     def test_quizmaster_context_includes_preferences_and_recent_usage(self, app):
         with app.app_context():
             user = _create_user(username="christian", email="christian@example.test")

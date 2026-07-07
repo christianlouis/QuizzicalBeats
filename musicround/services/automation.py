@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import csv
+import json
 import math
 import secrets
 import tempfile
@@ -73,6 +74,7 @@ AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
 AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
+AUTOMATION_SEED_SOURCE_FETCH_ERROR = "Seed source fetch failed. Check the server logs."
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
@@ -1377,6 +1379,152 @@ def record_seed_source_run(
         "recorded": True,
         "seed_source": _seed_source_summary(source),
         "run": _seed_source_run_summary(run),
+    }
+
+
+def _seed_source_candidate_from_mapping(
+    row: dict[str, Any],
+    line_number: int,
+) -> dict[str, Any] | None:
+    title_keys = ("title", "song", "song_title", "track", "track_title", "name")
+    artist_keys = ("artist", "artists", "artist_name", "performer", "act")
+    normalized = {str(key).strip().casefold().replace(" ", "_"): value for key, value in row.items()}
+    title = next((normalized[key] for key in title_keys if normalized.get(key)), None)
+    artist = next((normalized[key] for key in artist_keys if normalized.get(key)), None)
+    raw = json.dumps(row, sort_keys=True, ensure_ascii=True)
+    return _playlist_candidate(line_number, raw, str(title or ""), str(artist or ""))
+
+
+def _seed_source_candidates_from_json_payload(
+    payload: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ("candidates", "tracks", "songs", "items", "results", "entries"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                payload = value
+                break
+        else:
+            payload = [payload]
+    if not isinstance(payload, list):
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for line_number, row in enumerate(payload, start=1):
+        if len(candidates) >= limit:
+            break
+        if isinstance(row, dict):
+            candidate = _seed_source_candidate_from_mapping(row, line_number)
+        elif isinstance(row, str):
+            title, artist, confidence, issues = _split_playlist_line(row)
+            candidate = _playlist_candidate(line_number, row, title, artist, confidence, issues)
+        else:
+            candidate = None
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) -> dict[str, Any]:
+    content_type = (content_type or "").casefold()
+    if "json" in content_type or text.lstrip().startswith(("{", "[")):
+        try:
+            candidates = _seed_source_candidates_from_json_payload(json.loads(text), limit)
+        except json.JSONDecodeError:
+            candidates = []
+        if candidates:
+            low_confidence = [candidate for candidate in candidates if candidate["needs_review"]]
+            return {
+                "count": len(candidates),
+                "candidates": candidates,
+                "low_confidence_count": len(low_confidence),
+                "low_confidence": low_confidence,
+                "ready_for_import": bool(candidates) and not low_confidence,
+                "hints": ["Review source candidates before importing songs."],
+            }
+    return parse_text_playlist(text, limit=limit)
+
+
+def fetch_seed_source_candidates(
+    seed_source_id: int,
+    text: str | None = None,
+    limit: int = 100,
+    timeout_seconds: float = 20.0,
+    record_run: bool = True,
+) -> dict[str, Any]:
+    """Read a seed source into reviewable candidates without importing songs."""
+    if limit < 1 or limit > 500:
+        raise AutomationError("limit must be between 1 and 500.")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 60:
+        raise AutomationError("timeout_seconds must be between 0 and 60.")
+
+    source = db.session.get(SeedSource, seed_source_id)
+    if not source:
+        raise AutomationError(f"Seed source {seed_source_id} was not found.")
+
+    content_type = None
+    payload_text = (text or "").strip()
+    try:
+        if not payload_text:
+            if not source.url:
+                raise AutomationError("seed source has no URL; pass text for manual review.")
+            response = requests.get(source.url, timeout=timeout_seconds)
+            if response.status_code >= 400:
+                raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR)
+            content_type = response.headers.get("content-type")
+            payload_text = response.text
+        parsed = _parse_seed_source_payload(payload_text, content_type, limit)
+    except AutomationError as exc:
+        if record_run:
+            record_seed_source_run(
+                source.id,
+                status="failed",
+                error_message=AUTOMATION_SEED_SOURCE_FETCH_ERROR
+                if str(exc) == AUTOMATION_SEED_SOURCE_FETCH_ERROR
+                else str(exc),
+                completed=True,
+            )
+        raise
+    except Exception as exc:
+        current_app.logger.error("Seed source fetch failed for %s: %s", source.id, exc, exc_info=True)
+        if record_run:
+            record_seed_source_run(
+                source.id,
+                status="failed",
+                error_message=AUTOMATION_SEED_SOURCE_FETCH_ERROR,
+                completed=True,
+            )
+        raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR) from exc
+
+    run = None
+    if record_run:
+        run_status = "partial" if parsed["low_confidence_count"] else "success"
+        run = record_seed_source_run(
+            source.id,
+            status=run_status,
+            songs_seen=parsed["count"],
+            songs_imported=0,
+            notes="Fetched candidates only; no songs were imported.",
+            completed=True,
+        )["run"]
+
+    return {
+        "ok": True,
+        "seed_source": _seed_source_summary(source),
+        "provider": source.provider,
+        "source_type": source.source_type,
+        "count": parsed["count"],
+        "candidates": parsed["candidates"],
+        "low_confidence_count": parsed["low_confidence_count"],
+        "low_confidence": parsed["low_confidence"],
+        "ready_for_import": parsed["ready_for_import"],
+        "imported": False,
+        "run": run,
+        "hints": [
+            "This read-only step does not import songs.",
+            "Review candidates, resolve low-confidence rows, then use explicit import or round-creation tools.",
+        ],
     }
 
 

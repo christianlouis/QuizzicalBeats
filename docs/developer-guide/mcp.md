@@ -62,6 +62,7 @@ The MCP server exposes these tools:
 | `register_seed_source` | Create or update a chart, festival, editorial, curated, or playlist seed source. |
 | `list_seed_sources` | List configured catalog seed sources for agent planning. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
+| `fetch_seed_source_candidates` | Read a seed source URL or pasted text into reviewable candidates without importing songs. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |

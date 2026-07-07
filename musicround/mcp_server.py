@@ -442,6 +442,25 @@ def record_seed_source_run(
 
 
 @mcp.tool()
+def fetch_seed_source_candidates(
+    seed_source_id: int,
+    text: str | None = None,
+    limit: int = 100,
+    timeout_seconds: float = 20.0,
+    record_run: bool = True,
+) -> dict[str, Any]:
+    """Read a seed source into reviewable candidates without importing songs."""
+    return _with_app_context(
+        automation.fetch_seed_source_candidates,
+        seed_source_id=seed_source_id,
+        text=text,
+        limit=limit,
+        timeout_seconds=timeout_seconds,
+        record_run=record_run,
+    )
+
+
+@mcp.tool()
 def suggest_replacement_songs(
     round_id: int,
     position: int,
