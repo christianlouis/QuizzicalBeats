@@ -61,6 +61,7 @@ The MCP server exposes these tools:
 | `get_public_round` | Fetch read-only round data for an active public round token. |
 | `register_seed_source` | Create or update a chart, festival, editorial, curated, or playlist seed source. |
 | `list_seed_sources` | List configured catalog seed sources for agent planning. |
+| `seed_default_seed_sources` | Create or update the default mainstream chart and rock/metal festival source registry. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
 | `fetch_seed_source_candidates` | Read a seed source URL or pasted text into reviewable candidates without importing songs. |
 | `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |

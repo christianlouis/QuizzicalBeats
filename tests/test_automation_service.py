@@ -2330,6 +2330,28 @@ class TestAgentPlanningAutomation:
             assert second["seed_source"]["active"] is False
             assert SeedSource.query.count() == 1
 
+    def test_seed_default_seed_sources_is_idempotent_and_covers_core_sources(self, app):
+        with app.app_context():
+            first = automation.seed_default_seed_sources()
+            second = automation.seed_default_seed_sources()
+            listed = automation.list_seed_sources(active=True, limit=50)
+
+            names = {source["name"] for source in listed["sources"]}
+            source_types = {source["source_type"] for source in listed["sources"]}
+            providers = {source["provider"] for source in listed["sources"]}
+
+            assert first["count"] >= 10
+            assert first["created_count"] == first["count"]
+            assert second["created_count"] == 0
+            assert second["updated_count"] == second["count"]
+            assert "Billboard Hot 100" in names
+            assert "Offizielle Deutsche Charts Singles" in names
+            assert "Graspop Metal Meeting Line-Up" in names
+            assert "Wacken Open Air Line-Up" in names
+            assert {"chart", "festival"}.issubset(source_types)
+            assert {"billboard", "graspop", "wacken"}.issubset(providers)
+            assert SeedSource.query.count() == first["count"]
+
     def test_fetch_seed_source_candidates_from_manual_text_records_read_only_run(self, app):
         with app.app_context():
             source = automation.register_seed_source(

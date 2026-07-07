@@ -419,6 +419,14 @@ def list_seed_sources(
 
 
 @mcp.tool()
+def seed_default_seed_sources() -> dict[str, Any]:
+    """Create or update the default chart and festival seed-source registry."""
+    return _with_app_context(
+        automation.seed_default_seed_sources,
+    )
+
+
+@mcp.tool()
 def record_seed_source_run(
     seed_source_id: int,
     status: str,

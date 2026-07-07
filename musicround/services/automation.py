@@ -79,6 +79,98 @@ DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
+DEFAULT_SEED_SOURCE_DEFINITIONS = [
+    {
+        "name": "Billboard Hot 100",
+        "source_type": "chart",
+        "provider": "billboard",
+        "url": "https://www.billboard.com/charts/hot-100/",
+        "cadence": "weekly",
+        "priority": 10,
+        "notes": "US mainstream singles chart for broad recognizability.",
+    },
+    {
+        "name": "Billboard 200",
+        "source_type": "chart",
+        "provider": "billboard",
+        "url": "https://www.billboard.com/charts/billboard-200/",
+        "cadence": "weekly",
+        "priority": 20,
+        "notes": "US albums chart for artist and album-era research.",
+    },
+    {
+        "name": "Official Singles Chart",
+        "source_type": "chart",
+        "provider": "official-charts",
+        "url": "https://www.officialcharts.com/charts/singles-chart/",
+        "cadence": "weekly",
+        "priority": 30,
+        "notes": "UK singles chart for quiz-friendly mainstream picks.",
+    },
+    {
+        "name": "Official Albums Chart",
+        "source_type": "chart",
+        "provider": "official-charts",
+        "url": "https://www.officialcharts.com/charts/albums-chart/",
+        "cadence": "weekly",
+        "priority": 40,
+        "notes": "UK albums chart for recurring artist and album context.",
+    },
+    {
+        "name": "Offizielle Deutsche Charts Singles",
+        "source_type": "chart",
+        "provider": "germany-official-charts",
+        "url": "https://www.offiziellecharts.de/charts/single",
+        "cadence": "weekly",
+        "priority": 50,
+        "notes": "German singles chart for local mainstream coverage.",
+    },
+    {
+        "name": "Spotify Charts",
+        "source_type": "chart",
+        "provider": "spotify",
+        "url": "https://charts.spotify.com/",
+        "cadence": "weekly",
+        "priority": 60,
+        "notes": "Streaming chart entry point for current-popularity research.",
+    },
+    {
+        "name": "Wacken Open Air Line-Up",
+        "source_type": "festival",
+        "provider": "wacken",
+        "url": "https://www.wacken.com/en/program/",
+        "cadence": "annual",
+        "priority": 110,
+        "notes": "Metal and hard-rock festival source for headliner research.",
+    },
+    {
+        "name": "Graspop Metal Meeting Line-Up",
+        "source_type": "festival",
+        "provider": "graspop",
+        "url": "https://www.graspop.be/en/line-up/",
+        "cadence": "annual",
+        "priority": 120,
+        "notes": "Metal festival source for European headliner research.",
+    },
+    {
+        "name": "Download Festival Line-Up",
+        "source_type": "festival",
+        "provider": "download",
+        "url": "https://downloadfestival.co.uk/line-up/",
+        "cadence": "annual",
+        "priority": 130,
+        "notes": "UK rock and metal festival source for headliner research.",
+    },
+    {
+        "name": "Rock am Ring Line-Up",
+        "source_type": "festival",
+        "provider": "rock-am-ring",
+        "url": "https://www.rock-am-ring.com/en/lineup/",
+        "cadence": "annual",
+        "priority": 140,
+        "notes": "German rock festival source for local and international headliners.",
+    },
+]
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
@@ -1341,6 +1433,28 @@ def list_seed_sources(
     return {
         "count": len(sources),
         "sources": [_seed_source_summary(source, include_runs=include_runs) for source in sources],
+    }
+
+
+def seed_default_seed_sources() -> dict[str, Any]:
+    """Create or update default chart and festival source registry entries."""
+    seeded = []
+    created_count = 0
+    for definition in DEFAULT_SEED_SOURCE_DEFINITIONS:
+        result = register_seed_source(**definition)
+        created_count += 1 if result["created"] else 0
+        seeded.append(result["seed_source"])
+
+    return {
+        "ok": True,
+        "count": len(seeded),
+        "created_count": created_count,
+        "updated_count": len(seeded) - created_count,
+        "sources": seeded,
+        "hints": [
+            "Default sources are registry metadata only; no songs are imported.",
+            "Use fetch_seed_source_candidates for read-only source review before building provider-specific importers.",
+        ],
     }
 
 
