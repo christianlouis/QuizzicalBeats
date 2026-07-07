@@ -910,6 +910,64 @@ class TestAssetInspection:
                 for issue in result["issues"]
             )
 
+    def test_inspect_round_package_blocks_material_mp3_duration_shortfall(self, app):
+        with app.app_context():
+            user = _create_user()
+            songs = [
+                _create_song(title=f"Song {index}", artist="Artist", deezer_id=str(index))
+                for index in range(1, 9)
+            ]
+            round_id = automation.create_round(
+                name="Missing Replay Duration",
+                round_type="manual",
+                song_ids=[song.id for song in songs],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=(
+                        "https://example.test/preview.mp3",
+                        AudioSegment.silent(duration=20000),
+                        None,
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {
+                            "custom_audio_ms": {
+                                "intro": 1000,
+                                "replay": 1000,
+                                "outro": 1000,
+                            },
+                            "number_audio_ms": [1000] * 8,
+                        },
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={
+                        "warnings": [],
+                        "ok": True,
+                        "duration_seconds": 299,
+                    },
+                ),
+            ):
+                result = automation.inspect_round_package(round_id, user_id=user.id)
+
+            assert result["expected_duration_seconds"] == 339
+            assert result["status"] == "render_failed"
+            assert any(
+                issue["code"] == "round_mp3_duration_mismatch"
+                for issue in result["issues"]
+            )
+
     def test_inspect_round_package_warns_for_large_mp3_duration_mismatch(self, app):
         with app.app_context():
             user = _create_user()
