@@ -527,6 +527,7 @@ class TestRoundDetailRoute:
 
         assert add_response.status_code == 200
         assert b'share_target_ui' in add_response.data
+        assert b'share_target_ui@example.com' in add_response.data
         assert b'Editor' in add_response.data
         with app.app_context():
             share = RoundShare.query.filter_by(round_id=round_id, user_id=target_id).one()
@@ -570,6 +571,8 @@ class TestRoundDetailRoute:
 
         assert detail.status_code == 200
         assert b'id="round-share-form"' not in detail.data
+        assert b'share_admin_editor' in detail.data
+        assert b'share_admin_editor@example.com' not in detail.data
         assert blocked.status_code == 403
 
     def test_update_round_review_marks_approval(self, app, client):
