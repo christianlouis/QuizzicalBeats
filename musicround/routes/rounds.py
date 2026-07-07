@@ -581,7 +581,7 @@ def round_quality(round_id):
             ),
         )
     except ValueError:
-        return _automation_error_response(AutomationError('Preview duration values must be numeric.'), 400)
+        return _automation_error_response(AutomationError('Quality parameter values must be numeric.'), 400)
     except AutomationError as exc:
         return _automation_error_response(exc, 400)
     return jsonify({'success': True, **result})
@@ -732,8 +732,7 @@ def round_mp3(round_id):
     current_app.logger.info(f"Checking MP3 generation status for round {round_id}")
     force_regenerate = _bool_form_value('force', False)
 
-    # Check if the MP3 has already been generated and if the file exists
-    # We'll generate a new file if either the flag is False or the file doesn't exist
+    # Reuse the existing MP3 unless the caller explicitly requested regeneration.
     if not force_regenerate and round.mp3_generated and os.path.exists(mp3_file_path):
         current_app.logger.info(f"MP3 file already exists and is up to date at: {mp3_file_path}")
         download_url = url_for('rounds.download_mp3', round_id=round_id)
@@ -742,7 +741,8 @@ def round_mp3(round_id):
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({
                 'success': True, 
-                'message': 'MP3 file already exists', 
+                'message': 'MP3 file already exists',
+                'mp3_status': 'exists',
                 'download_url': download_url
             })
         else:
@@ -864,6 +864,7 @@ def round_mp3(round_id):
                 return jsonify({
                     'success': True,
                     'message': 'MP3 file successfully regenerated' if force_regenerate else 'MP3 file successfully generated',
+                    'mp3_status': 'regenerated' if force_regenerate else 'generated',
                     'download_url': download_url
                 })
             else:

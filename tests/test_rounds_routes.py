@@ -527,6 +527,20 @@ class TestRoundDetailRoute:
         assert data['success'] is True
         assert data['report']['summary'] == 'Needs replacement'
 
+    def test_round_quality_endpoint_reports_numeric_parameter_errors(self, app, client):
+        """Quality endpoint should describe all numeric parameter parse failures."""
+        _login(app, client)
+        song_id = _create_song(app, title='Quality Parameter Song')
+        round_id = _create_round(app, [song_id], name='Quality Parameter Round')
+
+        response = client.get(f'/rounds/{round_id}/quality?duration_tolerance_seconds=wide')
+
+        assert response.status_code == 400
+        assert response.get_json() == {
+            'success': False,
+            'error': 'Quality parameter values must be numeric.',
+        }
+
     def test_replacement_endpoints_proxy_automation(self, app, client):
         """Replacement routes should make repair candidates actionable."""
         _login(app, client)
@@ -815,6 +829,7 @@ class TestLegacyEmptyRoundRoutes:
         assert response.status_code == 200
         assert response.get_json()['success'] is True
         assert response.get_json()['message'] == 'MP3 file already exists'
+        assert response.get_json()['mp3_status'] == 'exists'
         mock_from_mp3.assert_not_called()
 
     def test_round_mp3_force_regenerates_existing_file(self, app, client):
@@ -849,6 +864,7 @@ class TestLegacyEmptyRoundRoutes:
         assert response.status_code == 200
         assert response.get_json()['success'] is True
         assert response.get_json()['message'] == 'MP3 file successfully regenerated'
+        assert response.get_json()['mp3_status'] == 'regenerated'
         assert mock_from_mp3.called
         with open(mp3_path, 'rb') as handle:
             assert handle.read() == b'NEW'
