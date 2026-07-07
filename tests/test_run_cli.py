@@ -1,7 +1,10 @@
 """Tests for the management CLI."""
 
 import json
+import sqlite3
 import sys
+
+from sqlalchemy import create_engine
 
 
 def test_health_check_command_outputs_public_safe_json(app, monkeypatch, capsys):
@@ -160,3 +163,139 @@ def test_database_preflight_reports_missing_pg_keys_safely(monkeypatch, capsys):
     assert "PGUSER" in captured.err
     assert "postgres.example" not in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_database_migrate_sqlite_refuses_sqlite_target_by_default(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """The migration command should not copy into SQLite unless it is a local test."""
+    import run
+
+    source = tmp_path / "source.db"
+    target = tmp_path / "target.db"
+    _create_source_sqlite(source, songs=1)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run.py", "database", "migrate-sqlite", "--source", str(source)],
+    )
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 78
+    assert "Refusing to migrate into a SQLite target" in captured.err
+    assert str(source) not in captured.out
+    assert str(target) not in captured.out
+
+
+def test_database_migrate_sqlite_dry_run_reports_safe_counts(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """Dry-run migration output should be useful and credential-safe."""
+    import run
+
+    source = tmp_path / "source.db"
+    target = tmp_path / "target.db"
+    _create_source_sqlite(source, songs=1)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "database",
+            "migrate-sqlite",
+            "--source",
+            str(source),
+            "--allow-sqlite-target",
+        ],
+    )
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["mode"] == "dry-run"
+    assert payload["target"] == "sqlite:///[local-file]"
+    assert payload["source"] == "sqlite:///[source-file]"
+    assert payload["total_source_rows"] == 1
+    assert payload["total_target_rows_after"] is None
+    assert _table_payload(payload, "song")["source_rows"] == 1
+    assert str(source) not in output
+    assert str(target) not in output
+
+
+def test_database_migrate_sqlite_execute_copies_rows(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """Explicit execution should copy rows into an empty configured target."""
+    import run
+
+    source = tmp_path / "source.db"
+    target = tmp_path / "target.db"
+    _create_source_sqlite(source, songs=1)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "database",
+            "migrate-sqlite",
+            "--source",
+            str(source),
+            "--allow-sqlite-target",
+            "--execute",
+        ],
+    )
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["mode"] == "execute"
+    assert payload["total_target_rows_after"] == 1
+    assert _table_payload(payload, "song")["target_rows_after"] == 1
+    with sqlite3.connect(target) as connection:
+        assert connection.execute("SELECT title FROM song").fetchone()[0] == "Test Song"
+
+
+def _create_source_sqlite(path, *, songs: int) -> None:
+    from musicround import db
+    import musicround.models  # noqa: F401
+
+    engine = create_engine(f"sqlite:///{path}")
+    db.metadata.create_all(bind=engine)
+    if songs:
+        with engine.begin() as connection:
+            for index in range(songs):
+                connection.execute(
+                    db.metadata.tables["song"].insert().values(
+                        title=f"Test Song" if index == 0 else f"Test Song {index + 1}",
+                        artist="Test Artist",
+                    )
+                )
+    engine.dispose()
+
+
+def _table_payload(payload, table_name):
+    return next(table for table in payload["tables"] if table["table"] == table_name)
