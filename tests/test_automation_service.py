@@ -732,6 +732,79 @@ class TestAssetInspection:
             assert replace_actions[0]["position"] == 3
             assert result["report"]["failed_positions"][0]["position"] == 3
 
+    def test_round_repair_report_summarizes_multiple_failed_positions(self, app):
+        with app.app_context():
+            quality = {
+                "round_id": 23,
+                "round_name": "2026-07-23",
+                "status": "needs_substitution",
+                "ok": False,
+                "expected_song_count": 8,
+                "resolved_song_count": 8,
+                "song_count": 8,
+                "issues": [
+                    {
+                        "code": "missing_preview_url",
+                        "message": "Position 4 has no preview.",
+                        "song": {
+                            "artist": "Kate Bush",
+                            "title": "Running Up That Hill",
+                        },
+                    },
+                    {
+                        "code": "preview_too_short",
+                        "message": "Position 7 preview is 10.0s.",
+                        "song": {
+                            "artist": "Example Artist",
+                            "title": "Short Clip",
+                        },
+                    },
+                ],
+                "preview_checks": [
+                    {
+                        "ok": False,
+                        "position": 4,
+                        "song_id": 104,
+                        "artist": "Kate Bush",
+                        "title": "Running Up That Hill",
+                        "issue_code": "missing_preview_url",
+                    },
+                    {
+                        "ok": False,
+                        "position": 7,
+                        "song_id": 107,
+                        "artist": "Example Artist",
+                        "title": "Short Clip",
+                        "issue_code": "preview_too_short",
+                    },
+                ],
+                "remediation": [
+                    {
+                        "action": "replace_position",
+                        "position": 4,
+                        "artist": "Kate Bush",
+                        "title": "Running Up That Hill",
+                    },
+                    {
+                        "action": "replace_position",
+                        "position": 7,
+                        "artist": "Example Artist",
+                        "title": "Short Clip",
+                    },
+                ],
+            }
+
+            report = automation._round_repair_report(quality)
+
+            assert report["headline"].startswith("2026-07-23 is blocked:")
+            assert report["status"] == "needs_substitution"
+            assert sorted(item["position"] for item in report["failed_positions"]) == [4, 7]
+            assert "Kate Bush - Running Up That Hill" in report["markdown"]
+            assert "Example Artist - Short Clip" in report["markdown"]
+            assert "Replace position 4" in report["markdown"]
+            assert "Replace position 7" in report["markdown"]
+            assert "suggest_replacement_songs" in report["next_step"]
+
     def test_inspect_round_package_warns_for_missing_preview(self, app):
         with app.app_context():
             user = _create_user()
