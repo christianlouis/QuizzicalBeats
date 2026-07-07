@@ -20,6 +20,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.email_helper import send_email as send_quiz_email
+from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
     round_mp3_dir,
@@ -331,7 +332,7 @@ def _selected_track_hint_audio(round_id):
     for script in scripts:
         if not script.cue_position:
             continue
-        path = os.path.join('/data', script.generated_mp3_path)
+        path = app_data_path(script.generated_mp3_path)
         try:
             hints[script.cue_position] = AudioSegment.from_mp3(path)
         except Exception as exc:

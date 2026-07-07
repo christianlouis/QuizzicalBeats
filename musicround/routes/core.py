@@ -11,6 +11,7 @@ from musicround.config import Config
 import requests
 import traceback
 from musicround.helpers.auth_helpers import oauth, update_oauth_tokens
+from musicround.helpers.paths import app_data_dir, app_data_path
 from musicround.helpers.spotify_helper import get_spotify_token, get_spotify_user_info
 from datetime import datetime
 from authlib.integrations.base_client.errors import OAuthError
@@ -486,8 +487,8 @@ def serve_user_audio(filepath):
     Serve user custom audio files from the data directory
     """
     # Resolve the real path to prevent path traversal attacks
-    base_dir = os.path.realpath('/data')
-    requested_path = os.path.realpath(os.path.join('/data', filepath))
+    base_dir = os.path.realpath(app_data_dir())
+    requested_path = os.path.realpath(app_data_path(filepath))
     if not requested_path.startswith(base_dir + os.sep) and requested_path != base_dir:
         abort(404)
         
@@ -498,4 +499,4 @@ def serve_user_audio(filepath):
             if username != current_user.username and not current_user.is_admin:
                 abort(403)
     
-    return send_from_directory('/data', filepath)
+    return send_from_directory(app_data_dir(), filepath)

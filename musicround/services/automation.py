@@ -19,6 +19,7 @@ from sqlalchemy import or_
 from musicround import db
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
     require_round_artifact_storage,
@@ -1556,7 +1557,7 @@ def _round_audio_components(
         for script in _selected_track_hint_scripts(round_id):
             if not script.cue_position:
                 continue
-            path = os.path.join("/data", script.generated_mp3_path)
+            path = app_data_path(script.generated_mp3_path)
             try:
                 components["hint_audio_ms"][script.cue_position] = len(AudioSegment.from_mp3(path))
             except Exception as exc:

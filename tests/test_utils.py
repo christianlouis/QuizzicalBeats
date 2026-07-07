@@ -119,6 +119,57 @@ class TestAllowedFile:
         assert allowed_file('My Great Song.mp3') is True
 
 
+class TestConfiguredDataPaths:
+    """Tests for configured data-directory helpers."""
+
+    def test_app_data_path_uses_configured_data_dir(self, app, tmp_path):
+        from musicround.helpers.paths import app_data_path, backup_dir, custom_mp3_dir
+
+        app.config["DATA_DIR"] = str(tmp_path)
+
+        assert app_data_path("custommp3", "user", "intro.mp3") == os.path.join(
+            str(tmp_path),
+            "custommp3",
+            "user",
+            "intro.mp3",
+        )
+        assert backup_dir() == os.path.join(str(tmp_path), "backups")
+        assert custom_mp3_dir() == os.path.join(str(tmp_path), "custommp3")
+
+    def test_user_mp3_directory_uses_configured_data_dir(self, app, tmp_path):
+        from musicround.helpers.utils import get_user_mp3_directory
+
+        app.config["DATA_DIR"] = str(tmp_path)
+
+        path = get_user_mp3_directory("User Name")
+
+        assert path == os.path.join(str(tmp_path), "custommp3", "User_Name")
+        assert os.path.isdir(path)
+
+    def test_get_mp3_path_uses_configured_data_dir(self, app, tmp_path):
+        from musicround.helpers.utils import get_mp3_path
+
+        app.config["DATA_DIR"] = str(tmp_path)
+        custom_path = tmp_path / "custommp3" / "user" / "intro.mp3"
+        custom_path.parent.mkdir(parents=True)
+        custom_path.write_bytes(b"mp3")
+
+        user = type("User", (), {"intro_mp3": "custommp3/user/intro.mp3"})()
+
+        assert get_mp3_path(user, "intro") == str(custom_path)
+
+    def test_spotify_direct_cache_uses_configured_data_dir(self, app, tmp_path):
+        from musicround.helpers.spotify_direct import SpotifyDirectClient
+
+        app.config["DATA_DIR"] = str(tmp_path)
+        app.config["SPOTIFY_CLIENT_ID"] = "client-id"
+        app.config["SPOTIFY_CLIENT_SECRET"] = "client-secret"
+
+        client = SpotifyDirectClient(bearer_token="token")
+
+        assert client.cache_path == os.path.join(str(tmp_path), ".spotifycache")
+
+
 class TestGetAvailableVoices:
     """Tests for the get_available_voices function."""
 

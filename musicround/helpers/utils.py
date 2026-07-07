@@ -10,6 +10,8 @@ from werkzeug.utils import secure_filename
 import requests
 import json
 
+from musicround.helpers.paths import app_data_path, custom_mp3_dir
+
 
 def is_safe_url(target):
     """Return whether a redirect target is an app-local absolute path."""
@@ -57,7 +59,7 @@ def get_user_mp3_directory(username):
     Returns:
         str: Path to the user's MP3 directory
     """
-    base_dir = os.path.join('/data', 'custommp3')
+    base_dir = custom_mp3_dir()
     user_dir = os.path.join(base_dir, secure_filename(username))
     
     # Create directories if they don't exist
@@ -127,8 +129,8 @@ def get_mp3_path(user, mp3_type):
     user_setting_attr = f"{mp3_type}_mp3"
     user_mp3_path = getattr(user, user_setting_attr)
     
-    if user_mp3_path and os.path.exists(os.path.join('/data', user_mp3_path)):
-        return os.path.join('/data', user_mp3_path)
+    if user_mp3_path and os.path.exists(app_data_path(user_mp3_path)):
+        return app_data_path(user_mp3_path)
     
     # Fall back to the default MP3
     return os.path.join(current_app.root_path, 'static', 'audio', f'{mp3_type}.mp3')
