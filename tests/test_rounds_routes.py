@@ -844,6 +844,35 @@ class TestLegacyEmptyRoundRoutes:
         assert response.get_json()['mp3_status'] == 'exists'
         mock_from_mp3.assert_not_called()
 
+    def test_round_mp3_first_generation_reports_generated_status(self, app, client):
+        """First-time MP3 generation should report the generated machine status."""
+        _login(app, client)
+        song_id = _create_song(app, title='Generated MP3 Song')
+        round_id = _create_round(app, [song_id], name='Generated MP3 Round')
+        mp3_path = os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3')
+
+        def fake_export(segment, path, format='mp3'):
+            with open(path, 'wb') as handle:
+                handle.write(b'NEW')
+            return None
+
+        with patch(
+            'musicround.routes.rounds.AudioSegment.from_mp3',
+            return_value=AudioSegment.silent(duration=100),
+        ) as mock_from_mp3, patch('pydub.audio_segment.AudioSegment.export', fake_export):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['success'] is True
+        assert response.get_json()['message'] == 'MP3 file successfully generated'
+        assert response.get_json()['mp3_status'] == 'generated'
+        assert mock_from_mp3.called
+        with open(mp3_path, 'rb') as handle:
+            assert handle.read() == b'NEW'
+
     def test_round_mp3_force_regenerates_existing_file(self, app, client):
         """force=true should bypass the existing-file shortcut and render again."""
         _login(app, client)
