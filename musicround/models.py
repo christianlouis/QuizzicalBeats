@@ -360,6 +360,34 @@ class RoundShare(db.Model):
         return f"RoundShare(round_id={self.round_id}, user_id={self.user_id}, role='{self.role}')"
 
 
+class RoundAccessEvent(db.Model):
+    """Audit events for round ownership and sharing changes."""
+    __tablename__ = 'round_access_event'
+
+    id = db.Column(db.Integer, primary_key=True)
+    round_id = db.Column(db.Integer, db.ForeignKey('round.id', ondelete='CASCADE'), nullable=False)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    target_user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    action = db.Column(db.String(40), nullable=False)
+    role = db.Column(db.String(20), nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.Index('idx_round_access_event_round_created', 'round_id', 'created_at'),
+        db.Index('idx_round_access_event_actor', 'actor_user_id', 'created_at'),
+        db.Index('idx_round_access_event_target', 'target_user_id', 'created_at'),
+    )
+
+    round = db.relationship('Round', backref=db.backref('access_events', lazy='dynamic'))
+    actor = db.relationship('User', foreign_keys=[actor_user_id])
+    target_user = db.relationship('User', foreign_keys=[target_user_id])
+
+    def __repr__(self) -> str:
+        """Return a compact debug representation."""
+        return f"RoundAccessEvent(round_id={self.round_id}, action='{self.action}')"
+
+
 class RoundAudioScript(db.Model):
     """
     Reviewable intro/replay/outro script drafts for a round before TTS generation.

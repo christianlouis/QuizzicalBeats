@@ -51,9 +51,10 @@ The MCP server exposes these tools:
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
 | `set_round_owner` | Assign or clear the quizmaster owner for a round. |
-| `share_round` | Share a round with another quizmaster as viewer or editor. |
+| `share_round` | Share a round with another quizmaster as viewer or editor via system automation. |
 | `list_round_shares` | List explicit share grants for a round. |
-| `revoke_round_share` | Remove a user's share grant from a round. |
+| `revoke_round_share` | Remove a user's share grant from a round via system automation. |
+| `list_round_access_events` | List recent ownership and sharing audit events for a round; requires an owner/admin requester. |
 | `register_seed_source` | Create or update a chart, festival, editorial, curated, or playlist seed source. |
 | `list_seed_sources` | List configured catalog seed sources for agent planning. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
@@ -95,8 +96,8 @@ songs have already appeared in rounds and avoid tracks without playable
 previews.
 
 The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
-`song`, `round`, `round_share`, `round_audio_script`, `tag`, `song_tag`, `user`,
-`role`, `user_preferences`, `planned_quiz_round`, `round_export`,
+`song`, `round`, `round_share`, `round_access_event`, `round_audio_script`,
+`tag`, `song_tag`, `user`, `role`, `user_preferences`, `planned_quiz_round`, `round_export`,
 `system_setting`, and `import_job_record`. Read results redact fields whose
 names contain `password`, `token`, or `secret` unless `include_sensitive` is
 explicitly set.

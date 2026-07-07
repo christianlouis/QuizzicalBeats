@@ -3,7 +3,7 @@ import pytest
 from datetime import datetime, timedelta
 from musicround.models import (
     db, User, Role, UserPreferences, Tag, SongTag, Song,
-    PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, SystemSetting,
+    PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, SystemSetting,
     ImportJobRecord,
 )
 
@@ -251,6 +251,38 @@ class TestRoundCollaborationModels:
 
         assert round_.shares.count() == 1
         assert viewer.shared_rounds.first().round_id == round_.id
+
+    def test_round_access_event_tracks_actor_and_target(self, app):
+        """Round sharing changes keep a persistent audit event."""
+        owner = User(username='auditowner', email='auditowner@example.com')
+        viewer = User(username='auditviewer', email='auditviewer@example.com')
+        db.session.add_all([owner, viewer])
+        db.session.commit()
+        round_ = Round(
+            name='Audited Round',
+            round_type='manual',
+            round_criteria_used='test',
+            songs='1',
+            owner=owner,
+            visibility='shared',
+        )
+        db.session.add(round_)
+        db.session.commit()
+
+        event = RoundAccessEvent(
+            round=round_,
+            actor=owner,
+            target_user=viewer,
+            action='share_created',
+            role='viewer',
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        assert round_.access_events.count() == 1
+        assert round_.access_events.first().actor.id == owner.id
+        assert round_.access_events.first().target_user.id == viewer.id
+        assert repr(event) == f"RoundAccessEvent(round_id={round_.id}, action='share_created')"
 
     def test_round_audio_script_creation(self, app):
         """Intro/replay/outro text can be stored before TTS generation."""

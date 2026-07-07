@@ -295,8 +295,12 @@ def set_round_owner(
 
 
 @mcp.tool()
-def share_round(round_id: int, user_id: int, role: str = "viewer") -> dict[str, Any]:
-    """Share a round with another quizmaster as viewer or editor."""
+def share_round(
+    round_id: int,
+    user_id: int,
+    role: str = "viewer",
+) -> dict[str, Any]:
+    """Share a round with another quizmaster as viewer or editor via system automation."""
     return _with_app_context(
         automation.share_round,
         round_id=round_id,
@@ -312,12 +316,30 @@ def list_round_shares(round_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
-def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
-    """Remove a user's share grant from a round."""
+def revoke_round_share(
+    round_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    """Remove a user's share grant from a round via system automation."""
     return _with_app_context(
         automation.revoke_round_share,
         round_id=round_id,
         user_id=user_id,
+    )
+
+
+@mcp.tool()
+def list_round_access_events(
+    round_id: int,
+    requester_user_id: int,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List recent ownership and sharing audit events for a round."""
+    return _with_app_context(
+        automation.list_round_access_events,
+        round_id=round_id,
+        limit=limit,
+        requester_user_id=requester_user_id,
     )
 
 

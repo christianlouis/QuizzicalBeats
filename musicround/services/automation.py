@@ -39,6 +39,7 @@ from musicround.models import (
     ImportJobRecord,
     PlannedQuizRound,
     Round,
+    RoundAccessEvent,
     RoundAudioScript,
     RoundExport,
     RoundShare,
@@ -191,6 +192,57 @@ def _round_share_summary(share: RoundShare) -> dict[str, Any]:
         "created_at": _datetime_payload(share.created_at),
         "user": _user_summary(share.user),
     }
+
+
+def _round_access_event_summary(event: RoundAccessEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "round_id": event.round_id,
+        "action": event.action,
+        "role": event.role,
+        "details": event.details,
+        "created_at": _datetime_payload(event.created_at),
+        "actor_user_id": event.actor_user_id,
+        "actor": _user_summary(event.actor),
+        "target_user_id": event.target_user_id,
+        "target_user": _user_summary(event.target_user),
+    }
+
+
+def _record_round_access_event(
+    round_obj: Round,
+    action: str,
+    *,
+    actor_user_id: int | None = None,
+    target_user_id: int | None = None,
+    role: str | None = None,
+    details: str | None = None,
+) -> RoundAccessEvent:
+    event = RoundAccessEvent(
+        round_id=round_obj.id,
+        actor_user_id=actor_user_id,
+        target_user_id=target_user_id,
+        action=action,
+        role=role,
+        details=details,
+    )
+    db.session.add(event)
+    return event
+
+
+def _validate_round_access_actor(actor_user_id: int | None) -> int | None:
+    if actor_user_id is None:
+        return None
+    return _find_user(actor_user_id).id
+
+
+def _validate_round_access_requester(round_obj: Round, requester_user_id: int | None) -> None:
+    if requester_user_id is None:
+        return
+    requester = _find_user(requester_user_id)
+    if requester.is_admin or round_obj.user_id == requester.id:
+        return
+    raise AutomationError("Only the round owner or an admin can view round access events.")
 
 
 def _round_summary(round_obj: Round) -> dict[str, Any]:
@@ -935,6 +987,7 @@ def share_round(
     round_id: int,
     user_id: int,
     role: str = "viewer",
+    actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Grant a user access to a round for future collaboration workflows."""
     if role not in {"viewer", "editor"}:
@@ -944,6 +997,7 @@ def share_round(
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
     user = _find_user(user_id)
+    actor_user_id = _validate_round_access_actor(actor_user_id)
     if round_obj.user_id == user.id:
         raise AutomationError("The owner already has access to this round.")
 
@@ -955,10 +1009,18 @@ def share_round(
     share.role = role
     round_obj.visibility = "shared"
     round_obj.updated_at = datetime.utcnow()
+    event = _record_round_access_event(
+        round_obj,
+        "share_created" if created else "share_updated",
+        actor_user_id=actor_user_id,
+        target_user_id=user.id,
+        role=role,
+    )
     db.session.commit()
     return {
         "created": created,
         "share": _round_share_summary(share),
+        "access_event": _round_access_event_summary(event),
         "round": _round_summary(round_obj),
     }
 
@@ -978,8 +1040,13 @@ def list_round_shares(round_id: int) -> dict[str, Any]:
     }
 
 
-def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
+def revoke_round_share(
+    round_id: int,
+    user_id: int,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
     """Remove a user's explicit share grant from a round."""
+    actor_user_id = _validate_round_access_actor(actor_user_id)
     share = RoundShare.query.filter_by(round_id=round_id, user_id=user_id).first()
     if not share:
         raise AutomationError(f"Round {round_id} is not shared with user {user_id}.")
@@ -987,6 +1054,15 @@ def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
     round_obj = db.session.get(Round, round_id)
     db.session.delete(share)
     db.session.flush()
+    event = None
+    if round_obj:
+        event = _record_round_access_event(
+            round_obj,
+            "share_revoked",
+            actor_user_id=actor_user_id,
+            target_user_id=user_id,
+            role=removed.get("role"),
+        )
     if round_obj and round_obj.visibility == "shared" and round_obj.shares.count() == 0:
         round_obj.visibility = "private"
         round_obj.updated_at = datetime.utcnow()
@@ -994,7 +1070,36 @@ def revoke_round_share(round_id: int, user_id: int) -> dict[str, Any]:
     return {
         "revoked": True,
         "share": removed,
+        "access_event": _round_access_event_summary(event) if event else None,
         "round": _round_summary(round_obj) if round_obj else None,
+    }
+
+
+def list_round_access_events(
+    round_id: int,
+    limit: int = 50,
+    requester_user_id: int | None = None,
+) -> dict[str, Any]:
+    """List recent ownership and sharing audit events for a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    _validate_round_access_requester(round_obj, requester_user_id)
+    try:
+        requested_limit = int(limit or 50)
+    except (TypeError, ValueError) as exc:
+        raise AutomationError("limit must be an integer.") from exc
+    normalized_limit = max(1, min(requested_limit, 200))
+    events = (
+        RoundAccessEvent.query.filter_by(round_id=round_id)
+        .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
+        .limit(normalized_limit)
+        .all()
+    )
+    return {
+        "round_id": round_id,
+        "count": len(events),
+        "events": [_round_access_event_summary(event) for event in events],
     }
 
 

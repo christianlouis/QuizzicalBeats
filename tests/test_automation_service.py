@@ -17,6 +17,7 @@ from musicround.models import (
     ImportJobRecord,
     PlannedQuizRound,
     Round,
+    RoundAccessEvent,
     RoundAudioScript,
     RoundExport,
     RoundShare,
@@ -486,17 +487,74 @@ class TestRoundAutomation:
                 user_id=owner.id,
             )["round"]["id"]
 
-            shared = automation.share_round(round_id, viewer.id, role="editor")
+            shared = automation.share_round(round_id, viewer.id, role="editor", actor_user_id=owner.id)
             listed = automation.list_round_shares(round_id)
-            revoked = automation.revoke_round_share(round_id, viewer.id)
+            events_after_share = automation.list_round_access_events(round_id)
+            revoked = automation.revoke_round_share(round_id, viewer.id, actor_user_id=owner.id)
+            events_after_revoke = automation.list_round_access_events(round_id)
 
             assert shared["created"] is True
             assert shared["share"]["role"] == "editor"
+            assert shared["access_event"]["action"] == "share_created"
+            assert shared["access_event"]["actor_user_id"] == owner.id
+            assert shared["access_event"]["target_user_id"] == viewer.id
             assert listed["count"] == 1
             assert listed["owner"]["id"] == owner.id
+            assert events_after_share["count"] == 1
+            assert events_after_share["events"][0]["action"] == "share_created"
             assert revoked["revoked"] is True
+            assert revoked["access_event"]["action"] == "share_revoked"
+            assert events_after_revoke["count"] == 2
+            assert events_after_revoke["events"][0]["action"] == "share_revoked"
             assert RoundShare.query.count() == 0
+            assert RoundAccessEvent.query.count() == 2
             assert db.session.get(Round, round_id).visibility == "private"
+
+    def test_share_round_rejects_invalid_actor_user_id(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="User 9999"):
+                automation.share_round(round_id, viewer.id, actor_user_id=9999)
+
+            automation.share_round(round_id, viewer.id, actor_user_id=owner.id)
+            with pytest.raises(automation.AutomationError, match="User 9999"):
+                automation.revoke_round_share(round_id, viewer.id, actor_user_id=9999)
+
+            assert RoundAccessEvent.query.count() == 1
+
+    def test_list_round_access_events_requires_owner_or_admin_requester(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            admin = _create_user(username="admin", email="admin@example.test")
+            admin.is_admin = True
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            automation.share_round(round_id, viewer.id, actor_user_id=owner.id)
+
+            owner_events = automation.list_round_access_events(round_id, requester_user_id=owner.id)
+            admin_events = automation.list_round_access_events(round_id, requester_user_id=admin.id)
+            with pytest.raises(automation.AutomationError, match="owner or an admin"):
+                automation.list_round_access_events(round_id, requester_user_id=viewer.id)
+            with pytest.raises(automation.AutomationError, match="limit must be an integer"):
+                automation.list_round_access_events(round_id, limit="many", requester_user_id=owner.id)
+
+            assert owner_events["count"] == 1
+            assert admin_events["count"] == 1
 
 
 class TestAssetInspection:
@@ -1613,6 +1671,7 @@ class TestDatastoreCrudAutomation:
 
             assert "song" in schema["object_types"]
             assert "round" in schema["object_types"]
+            assert "round_access_event" in schema["object_types"]
             assert "user" in schema["object_types"]
             song_schema = next(
                 item for item in schema["objects"] if item["object_type"] == "song"
