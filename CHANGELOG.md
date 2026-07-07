@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added row-level accept, edit, skip, and replace decisions for low-confidence
   text-playlist imports, including skipped-row summaries and source-position
   mappings for repair workflows.
+- Added TXT/CSV upload support and reusable browser templates for text-playlist
+  imports.
 - Added browser round sharing controls for owners/admins to grant and revoke
   viewer/editor/producer access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration

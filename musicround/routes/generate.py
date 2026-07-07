@@ -697,6 +697,19 @@ def _text_import_review_decisions():
     return decisions
 
 
+def _text_import_uploaded_playlist():
+    upload = request.files.get('playlist_file')
+    if not upload or not upload.filename:
+        return None
+    raw_content = upload.read(256 * 1024 + 1)
+    if len(raw_content) > 256 * 1024:
+        raise AutomationError('Uploaded playlist files must be 256 KB or smaller.')
+    try:
+        return raw_content.decode('utf-8-sig')
+    except UnicodeDecodeError as exc:
+        raise AutomationError('Uploaded playlist files must be UTF-8 text or CSV.') from exc
+
+
 @generate_bp.route('/import-text-playlist', methods=['GET', 'POST'])
 @login_required
 def import_text_playlist():
@@ -708,8 +721,16 @@ def import_text_playlist():
     resolution = None
 
     if request.method == 'POST':
+        try:
+            uploaded_text = _text_import_uploaded_playlist()
+        except AutomationError as exc:
+            flash(str(exc), 'error')
+            uploaded_text = None
+        if uploaded_text and not playlist_text.strip():
+            playlist_text = uploaded_text
+
         if not playlist_text.strip():
-            flash('Paste at least one song row before reviewing the text playlist.', 'error')
+            flash('Paste or upload at least one song row before reviewing the text playlist.', 'error')
             return render_template(
                 'import_text_playlist.html',
                 expected_song_count=expected_song_count,

@@ -1,5 +1,7 @@
 """Tests for browser text playlist review and round creation."""
 
+from io import BytesIO
+
 from musicround.models import Round, Song, User, db
 
 
@@ -66,6 +68,74 @@ def test_text_playlist_review_blocks_wrong_song_count(app, client):
 
     assert response.status_code == 200
     assert b'Text playlist resolved 2 songs; expected exactly 8.' in response.data
+    with app.app_context():
+        assert Round.query.count() == 0
+
+
+def test_text_playlist_review_accepts_uploaded_csv(app, client):
+    _login(app, client)
+    with app.app_context():
+        _create_song('Known Song', 'Known Artist')
+
+    response = client.post(
+        '/import-text-playlist',
+        data={
+            'action': 'review',
+            'round_name': 'Uploaded CSV',
+            'playlist_file': (
+                BytesIO(b'artist,title\nKnown Artist,Known Song\n'),
+                'songs.csv',
+            ),
+        },
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    assert b'1 resolved' in response.data
+    assert b'Known Artist,Known Song' in response.data
+
+
+def test_text_playlist_pasted_text_wins_over_upload(app, client):
+    _login(app, client)
+    with app.app_context():
+        _create_song('Pasted Song', 'Pasted Artist')
+        _create_song('Uploaded Song', 'Uploaded Artist')
+
+    response = client.post(
+        '/import-text-playlist',
+        data={
+            'action': 'review',
+            'round_name': 'Paste Wins',
+            'playlist_text': 'Pasted Artist - Pasted Song',
+            'playlist_file': (
+                BytesIO(b'Uploaded Artist - Uploaded Song\n'),
+                'songs.txt',
+            ),
+        },
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    assert b'Pasted Artist - Pasted Song' in response.data
+    assert b'Uploaded Artist - Uploaded Song' not in response.data
+
+
+def test_text_playlist_upload_rejects_non_utf8_file(app, client):
+    _login(app, client)
+
+    response = client.post(
+        '/import-text-playlist',
+        data={
+            'action': 'review',
+            'round_name': 'Bad Upload',
+            'playlist_file': (BytesIO(b'\xff\xfe\x00\x81'), 'songs.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    assert b'Uploaded playlist files must be UTF-8 text or CSV.' in response.data
+    assert b'Paste or upload at least one song row before reviewing the text playlist.' in response.data
     with app.app_context():
         assert Round.query.count() == 0
 

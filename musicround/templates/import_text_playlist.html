@@ -11,7 +11,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section class="lg:col-span-1 bg-white shadow-md rounded-lg p-6">
-            <form method="POST" action="{{ url_for('generate.import_text_playlist') }}">
+            <form method="POST" action="{{ url_for('generate.import_text_playlist') }}" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
                 <div class="mb-4">
@@ -37,10 +37,29 @@
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="playlist_text">
                         Songs
                     </label>
+                    <div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <button type="button" data-template="artist-title"
+                                class="text-left rounded border border-gray-300 bg-gray-50 px-3 py-2 font-semibold text-gray-700 hover:bg-gray-100">
+                            Artist - Title template
+                        </button>
+                        <button type="button" data-template="csv"
+                                class="text-left rounded border border-gray-300 bg-gray-50 px-3 py-2 font-semibold text-gray-700 hover:bg-gray-100">
+                            CSV header template
+                        </button>
+                    </div>
                     <textarea id="playlist_text" name="playlist_text" rows="14"
                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                               placeholder="Artist - Title&#10;Shania Twain - Man! I Feel Like a Woman!">{{ playlist_text }}</textarea>
                     <p class="text-gray-600 text-xs italic mt-1">Preferred format: Artist - Title. CSV with artist/title headers also works.</p>
+                </div>
+
+                <div class="mb-5">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="playlist_file">
+                        Upload TXT or CSV
+                    </label>
+                    <input id="playlist_file" name="playlist_file" type="file" accept=".txt,.csv,text/plain,text/csv"
+                           class="block w-full text-sm text-gray-700 file:mr-4 file:rounded file:border-0 file:bg-teal-50 file:px-3 file:py-2 file:font-semibold file:text-teal-700 hover:file:bg-teal-100">
+                    <p class="text-gray-600 text-xs italic mt-1">Uploads are read as UTF-8 text and are not stored. Paste text takes precedence when both are supplied.</p>
                 </div>
 
                 <div class="flex flex-col sm:flex-row gap-3">
@@ -210,4 +229,22 @@
         </a>
     </div>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const textarea = document.getElementById('playlist_text');
+        const templates = {
+            'artist-title': 'Artist - Title\nHarry Styles - As It Was\nShania Twain - Man! I Feel Like a Woman!',
+            csv: 'artist,title\nHarry Styles,As It Was\nShania Twain,Man! I Feel Like a Woman!'
+        };
+        document.querySelectorAll('[data-template]').forEach((button) => {
+            button.addEventListener('click', () => {
+                if (!textarea) {
+                    return;
+                }
+                textarea.value = templates[button.dataset.template] || '';
+                textarea.focus();
+            });
+        });
+    });
+</script>
 {% endblock %}
