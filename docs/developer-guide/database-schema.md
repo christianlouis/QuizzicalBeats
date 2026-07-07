@@ -202,6 +202,8 @@ The `Round` table stores music quiz rounds.
 | tag                   | String(50)   | Tag of the round (if applicable)                 |
 | user_id               | Integer      | Owning quizmaster, if assigned                   |
 | visibility            | String(20)   | Round visibility (private, shared, public)       |
+| public_token          | String(64)   | Token for read-only public link, when enabled    |
+| public_token_created_at | DateTime   | When the public token was created                |
 | created_at            | DateTime     | Creation timestamp                               |
 | updated_at            | DateTime     | Last update timestamp                            |
 | mp3_generated         | Boolean      | Flag indicating if MP3 has been generated        |
@@ -212,6 +214,7 @@ The `Round` table stores music quiz rounds.
 - `idx_round_created_at` supports recent-round lists.
 - `idx_round_generation_status` supports readiness and repair views.
 - `idx_round_owner_created` supports per-quizmaster round history.
+- `idx_round_public_token` supports token-based public round lookup.
 
 ### RoundShare
 
@@ -222,7 +225,7 @@ The `RoundShare` table stores explicit round access grants.
 | id         | Integer     | Primary key                          |
 | round_id   | Integer     | Foreign key to Round                 |
 | user_id    | Integer     | Foreign key to shared user           |
-| role       | String(20)  | Share role (viewer, editor)          |
+| role       | String(20)  | Share role (viewer, editor, producer) |
 | created_at | DateTime    | When the share was created           |
 
 ### RoundAccessEvent

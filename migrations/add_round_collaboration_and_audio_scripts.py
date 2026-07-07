@@ -23,14 +23,15 @@ def _index_exists(inspector, table_name, index_name):
     return any(index.get("name") == index_name for index in inspector.get_indexes(table_name))
 
 
-def _create_index(conn, inspector, table_name, index_name, columns):
+def _create_index(conn, inspector, table_name, index_name, columns, *, unique=False):
     if _index_exists(inspector, table_name, index_name):
         return False
     preparer = conn.dialect.identifier_preparer
     quoted_table = _quote(table_name, preparer)
     quoted_index = _quote(index_name, preparer)
     quoted_columns = ", ".join(_quote(column, preparer) for column in columns)
-    conn.execute(text(f"CREATE INDEX {quoted_index} ON {quoted_table} ({quoted_columns})"))
+    unique_sql = "UNIQUE " if unique else ""
+    conn.execute(text(f"CREATE {unique_sql}INDEX {quoted_index} ON {quoted_table} ({quoted_columns})"))
     return True
 
 
@@ -60,6 +61,12 @@ def run_migration():
                         "ADD COLUMN visibility VARCHAR(20) DEFAULT 'private' NOT NULL"
                     )
                 )
+                changes_made = True
+            if "public_token" not in round_columns:
+                conn.execute(text(f"ALTER TABLE {round_table} ADD COLUMN public_token VARCHAR(64)"))
+                changes_made = True
+            if "public_token_created_at" not in round_columns:
+                conn.execute(text(f"ALTER TABLE {round_table} ADD COLUMN public_token_created_at DATETIME"))
                 changes_made = True
 
             if not _table_exists(inspector, "round_share"):
@@ -166,6 +173,17 @@ def run_migration():
                 existing_columns = _columns(inspector, table_name)
                 if all(column in existing_columns for column in columns):
                     changes_made = _create_index(conn, inspector, table_name, index_name, columns) or changes_made
+
+            inspector = inspect(db.engine)
+            if _table_exists(inspector, "round") and "public_token" in _columns(inspector, "round"):
+                changes_made = _create_index(
+                    conn,
+                    inspector,
+                    "round",
+                    "idx_round_public_token",
+                    ["public_token"],
+                    unique=True,
+                ) or changes_made
 
             if changes_made:
                 conn.commit()

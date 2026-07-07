@@ -51,10 +51,13 @@ The MCP server exposes these tools:
 | `compile_round` | Create a named round from explicit song IDs or selection criteria. |
 | `rename_round` | Set or clear a round name. |
 | `set_round_owner` | Assign or clear the quizmaster owner for a round. |
-| `share_round` | Share a round with another quizmaster as viewer or editor via system automation. |
+| `share_round` | Share a round with another quizmaster as viewer, editor, or producer via system automation. |
 | `list_round_shares` | List explicit share grants for a round. |
 | `revoke_round_share` | Remove a user's share grant from a round via system automation. |
 | `list_round_access_events` | List recent ownership and sharing audit events for a round; requires an owner/admin requester. |
+| `enable_round_public_link` | Enable a token-based read-only public link for a round. |
+| `disable_round_public_link` | Disable a token-based read-only public link for a round. |
+| `get_public_round` | Fetch read-only round data for an active public round token. |
 | `register_seed_source` | Create or update a chart, festival, editorial, curated, or playlist seed source. |
 | `list_seed_sources` | List configured catalog seed sources for agent planning. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |

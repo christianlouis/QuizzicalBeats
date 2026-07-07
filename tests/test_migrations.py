@@ -253,8 +253,9 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
         assert add_round_collaboration_and_audio_scripts.run_migration() is None
 
     round_columns = set(_column_names(database_path, "round"))
-    assert {"user_id", "visibility"}.issubset(round_columns)
+    assert {"user_id", "visibility", "public_token", "public_token_created_at"}.issubset(round_columns)
     assert "idx_round_owner_created" in _index_names(database_path, "round")
+    assert "idx_round_public_token" in _index_names(database_path, "round")
     assert "round_share" in _table_names(database_path)
     assert "round_access_event" in _table_names(database_path)
     assert "round_audio_script" in _table_names(database_path)
@@ -294,6 +295,7 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
         (row[2], row[3], row[4], row[6]) for row in access_event_foreign_keys
     }
     assert "user_id" in Round.__table__.columns.keys()
+    assert "public_token" in Round.__table__.columns.keys()
     assert RoundShare.__tablename__ == "round_share"
     assert RoundAccessEvent.__tablename__ == "round_access_event"
     assert RoundAudioScript.__tablename__ == "round_audio_script"
