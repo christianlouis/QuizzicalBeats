@@ -1,7 +1,6 @@
 """Additional tests for setup, system health, and API branches."""
 import json
 import pytest
-from werkzeug.exceptions import BadRequest
 from musicround.helpers.import_queue import ImportQueue
 from musicround.models import db, ImportJobRecord, User, Role, Song, Tag
 
@@ -270,39 +269,49 @@ class TestBackupDownloadRoutes:
     def test_download_backup_rejects_path_traversal_filename(
         self,
         app,
+        client,
         monkeypatch,
         tmp_path,
     ):
         """Backup downloads should reject non-basename filenames."""
         from musicround.routes import users
 
+        _create_user(app, 'backup_admin_reject', 'backup_admin_reject@example.com', is_admin=True)
+        _login(app, client, 'backup_admin_reject')
+
         backups_path = tmp_path / "backups"
         backups_path.mkdir()
         (tmp_path / "other.zip").write_bytes(b"outside")
         monkeypatch.setattr(users, "backup_dir", lambda: str(backups_path))
 
-        with app.test_request_context("/users/download-backup/ignored"):
-            with pytest.raises(BadRequest):
-                users.download_backup.__wrapped__.__wrapped__("../other.zip")
+        response = client.get("/users/download-backup/..%5Cother.zip")
+
+        assert response.status_code == 400
 
     def test_download_backup_serves_basename_zip(
         self,
         app,
+        client,
         monkeypatch,
         tmp_path,
     ):
         """Valid backup basenames still download from the configured backup dir."""
         from musicround.routes import users
 
+        _create_user(app, 'backup_admin_valid', 'backup_admin_valid@example.com', is_admin=True)
+        _login(app, client, 'backup_admin_valid')
+
         backups_path = tmp_path / "backups"
         backups_path.mkdir()
         (backups_path / "safe.zip").write_bytes(b"backup")
         monkeypatch.setattr(users, "backup_dir", lambda: str(backups_path))
 
-        with app.test_request_context("/users/download-backup/safe.zip"):
-            response = users.download_backup.__wrapped__.__wrapped__("safe.zip")
+        response = client.get("/users/download-backup/safe.zip")
 
         assert response.status_code == 200
+        assert response.mimetype == "application/zip"
+        assert response.data == b"backup"
+        assert "safe.zip" in response.headers["Content-Disposition"]
 
 
 class TestSongApiExtendedBranches:

@@ -1584,7 +1584,7 @@ def download_backup(filename):
     # Only allow downloading from the backup directory
     backups_path = os.path.realpath(backup_dir())
     backup_path = os.path.realpath(os.path.join(backups_path, filename))
-    if not backup_path.startswith(backups_path + os.sep) and backup_path != backups_path:
+    if not backup_path.startswith(backups_path + os.sep):
         abort(400, "Invalid backup path")
     
     # Check if the file exists
