@@ -59,7 +59,7 @@ AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
 AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
-DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 45.0
+DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
