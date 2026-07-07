@@ -510,6 +510,27 @@ class TestRoundAutomation:
             assert RoundAccessEvent.query.count() == 2
             assert db.session.get(Round, round_id).visibility == "private"
 
+    def test_share_round_rejects_invalid_actor_user_id(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="User 9999"):
+                automation.share_round(round_id, viewer.id, actor_user_id=9999)
+
+            automation.share_round(round_id, viewer.id, actor_user_id=owner.id)
+            with pytest.raises(automation.AutomationError, match="User 9999"):
+                automation.revoke_round_share(round_id, viewer.id, actor_user_id=9999)
+
+            assert RoundAccessEvent.query.count() == 1
+
 
 class TestAssetInspection:
     """Tests for generated asset quality checks."""

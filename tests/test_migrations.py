@@ -272,6 +272,14 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
         database_path, "round_audio_script"
     )
     assert "cue_position" in _column_names(database_path, "round_audio_script")
+    with sqlite3.connect(database_path) as conn:
+        access_event_columns = {
+            column[1]: column
+            for column in conn.execute("PRAGMA table_info(round_access_event)")
+        }
+    created_at_column = access_event_columns["created_at"]
+    assert created_at_column[3] == 1
+    assert created_at_column[4] == "CURRENT_TIMESTAMP"
     assert "user_id" in Round.__table__.columns.keys()
     assert RoundShare.__tablename__ == "round_share"
     assert RoundAccessEvent.__tablename__ == "round_access_event"

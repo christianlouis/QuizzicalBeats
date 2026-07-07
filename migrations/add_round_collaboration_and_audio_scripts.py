@@ -116,7 +116,7 @@ def run_migration():
                             action VARCHAR(40) NOT NULL,
                             role VARCHAR(20),
                             details TEXT,
-                            created_at DATETIME
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )
                         """
                     )

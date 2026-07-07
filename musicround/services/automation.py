@@ -230,6 +230,12 @@ def _record_round_access_event(
     return event
 
 
+def _validate_round_access_actor(actor_user_id: int | None) -> int | None:
+    if actor_user_id is None:
+        return None
+    return _find_user(actor_user_id).id
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
@@ -982,6 +988,7 @@ def share_round(
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
     user = _find_user(user_id)
+    actor_user_id = _validate_round_access_actor(actor_user_id)
     if round_obj.user_id == user.id:
         raise AutomationError("The owner already has access to this round.")
 
@@ -1030,6 +1037,7 @@ def revoke_round_share(
     actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Remove a user's explicit share grant from a round."""
+    actor_user_id = _validate_round_access_actor(actor_user_id)
     share = RoundShare.query.filter_by(round_id=round_id, user_id=user_id).first()
     if not share:
         raise AutomationError(f"Round {round_id} is not shared with user {user_id}.")
