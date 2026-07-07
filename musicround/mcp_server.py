@@ -762,7 +762,7 @@ def inspect_round_package(
     expected_song_count: int = 8,
     min_preview_seconds: float = 20.0,
     max_preview_seconds: float = 35.0,
-    duration_tolerance_seconds: float = 6.0,
+    duration_tolerance_seconds: float = automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
 ) -> dict[str, Any]:
     """Check previews, generated MP3 length, MP3 quality, and PDF integrity before sending."""
     return _with_app_context(
@@ -783,7 +783,7 @@ def round_repair_report(
     expected_song_count: int = 8,
     min_preview_seconds: float = 20.0,
     max_preview_seconds: float = 35.0,
-    duration_tolerance_seconds: float = 6.0,
+    duration_tolerance_seconds: float = automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
 ) -> dict[str, Any]:
     """Return package quality plus a human-readable repair report."""
     return _with_app_context(

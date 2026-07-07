@@ -868,7 +868,49 @@ class TestAssetInspection:
             assert result["status"] == "needs_substitution"
             assert any(issue["code"] == "preview_too_short" for issue in result["issues"])
 
-    def test_inspect_round_package_warns_for_mp3_duration_mismatch(self, app):
+    def test_inspect_round_package_tolerates_minor_mp3_duration_variance(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Long Enough", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Minor Variance",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=("https://example.test/preview.mp3", AudioSegment.silent(duration=30000), None),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 50},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id, user_id=user.id, expected_song_count=1
+                )
+
+            assert result["expected_duration_seconds"] == 65
+            assert result["status"] == "ok"
+            assert not any(
+                issue["code"] == "round_mp3_duration_mismatch"
+                for issue in result["issues"]
+            )
+
+    def test_inspect_round_package_warns_for_large_mp3_duration_mismatch(self, app):
         with app.app_context():
             user = _create_user()
             song = _create_song(title="Long Enough", artist="Artist", deezer_id="123")
@@ -896,7 +938,7 @@ class TestAssetInspection:
                 ),
                 patch(
                     "musicround.services.automation.inspect_mp3_quality",
-                    return_value={"warnings": [], "ok": True, "duration_seconds": 40},
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 5},
                 ),
             ):
                 result = automation.inspect_round_package(

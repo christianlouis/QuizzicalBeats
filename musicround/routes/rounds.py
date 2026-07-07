@@ -573,6 +573,12 @@ def round_quality(round_id):
             expected_song_count=_int_arg('expected_song_count', default=8, minimum=1, maximum=25),
             min_preview_seconds=float(request.args.get('min_preview_seconds', 20.0)),
             max_preview_seconds=float(request.args.get('max_preview_seconds', 35.0)),
+            duration_tolerance_seconds=float(
+                request.args.get(
+                    'duration_tolerance_seconds',
+                    automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+                )
+            ),
         )
     except ValueError:
         return _automation_error_response(AutomationError('Preview duration values must be numeric.'), 400)
@@ -724,10 +730,11 @@ def round_mp3(round_id):
     # Define the path for the MP3 file
     mp3_file_path = os.path.join(rounds_dir, f'round_{round_id}.mp3')
     current_app.logger.info(f"Checking MP3 generation status for round {round_id}")
+    force_regenerate = _bool_form_value('force', False)
 
     # Check if the MP3 has already been generated and if the file exists
     # We'll generate a new file if either the flag is False or the file doesn't exist
-    if round.mp3_generated and os.path.exists(mp3_file_path):
+    if not force_regenerate and round.mp3_generated and os.path.exists(mp3_file_path):
         current_app.logger.info(f"MP3 file already exists and is up to date at: {mp3_file_path}")
         download_url = url_for('rounds.download_mp3', round_id=round_id)
         
@@ -856,12 +863,12 @@ def round_mp3(round_id):
                 download_url = url_for('rounds.download_mp3', round_id=round_id)
                 return jsonify({
                     'success': True,
-                    'message': 'MP3 file successfully generated',
+                    'message': 'MP3 file successfully regenerated' if force_regenerate else 'MP3 file successfully generated',
                     'download_url': download_url
                 })
             else:
                 # Traditional form submission, send file
-                flash('MP3 generated successfully', 'success')
+                flash('MP3 regenerated successfully' if force_regenerate else 'MP3 generated successfully', 'success')
                 return send_file(mp3_file_path, as_attachment=True)
             
         except Exception as e:

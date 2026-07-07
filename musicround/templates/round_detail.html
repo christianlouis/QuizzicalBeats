@@ -218,8 +218,8 @@
                 <i class="fas fa-file-audio fa-3x"></i>
             </div>
             <h3 class="text-xl font-semibold mb-4 text-navy-800 text-center font-montserrat">Generate MP3</h3>
-            <p class="text-gray-600 mb-4 text-center text-sm">Create an audio file with all songs to play during your quiz.</p>
-            <button id="generate-mp3-btn" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
+            <p class="text-gray-600 mb-4 text-center text-sm">Create or refresh the audio file with all songs to play during your quiz.</p>
+            <button id="generate-mp3-btn" title="Shift-click to regenerate the MP3" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors w-full font-semibold">
                 <i class="fas fa-music mr-2"></i> Generate MP3
             </button>
         </div>
@@ -440,6 +440,9 @@
                     <i class="fas fa-download mr-2"></i> Download MP3
                 </a>
             </div>
+            <button id="regenerate-mp3-btn" class="hidden mt-4 bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                <i class="fas fa-sync-alt mr-2"></i> Regenerate MP3
+            </button>
             <button id="close-mp3-modal" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-4 rounded transition-colors">Close</button>
         </div>
     </div>
@@ -578,6 +581,7 @@
         const mp3Loading = document.getElementById('mp3-loading');
         const mp3DownloadBtn = document.getElementById('mp3-download-btn');
         const mp3DownloadBtnContainer = document.getElementById('mp3-download-btn-container');
+        const regenerateMp3Btn = document.getElementById('regenerate-mp3-btn');
         const closeMP3Modal = document.getElementById('close-mp3-modal');
         
         // PDF modal elements
@@ -1019,14 +1023,19 @@
             loadReplacementsBtn.addEventListener('click', loadReplacements);
         }
 
-        // MP3 generation with AJAX
-        generateMp3Btn.addEventListener('click', function() {
+        function generateMp3(forceRegenerate = false) {
             // Show the mp3 status modal
             mp3StatusModal.classList.remove('hidden');
             mp3Loading.classList.remove('hidden');
             mp3DownloadBtnContainer.classList.add('hidden');
-            mp3StatusTitle.textContent = 'Generating MP3...';
+            regenerateMp3Btn.classList.add('hidden');
+            mp3StatusTitle.textContent = forceRegenerate ? 'Regenerating MP3...' : 'Generating MP3...';
             mp3StatusMessage.textContent = 'Please wait, this may take a few minutes.';
+
+            const body = new URLSearchParams({ csrf_token: '{{ csrf_token() }}' });
+            if (forceRegenerate) {
+                body.set('force', 'true');
+            }
             
             // Send the AJAX request
             fetch('{{ url_for("rounds.round_mp3", round_id=round.id) }}', {
@@ -1035,18 +1044,24 @@
                     'X-Requested-With': 'XMLHttpRequest',
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
-                body: 'csrf_token={{ csrf_token() }}'
+                body: body.toString()
             })
             .then(response => response.json())
             .then(data => {
                 mp3Loading.classList.add('hidden');
                 
                 if (data.success) {
-                    mp3StatusTitle.textContent = 'MP3 Generated Successfully';
-                    mp3StatusMessage.textContent = 'Your MP3 file is ready for download.';
+                    if (data.message === 'MP3 file already exists') {
+                        mp3StatusTitle.textContent = 'MP3 Already Exists';
+                        mp3StatusMessage.textContent = 'An MP3 is already available. Download it or regenerate it.';
+                        regenerateMp3Btn.classList.remove('hidden');
+                    } else {
+                        mp3StatusTitle.textContent = forceRegenerate ? 'MP3 Regenerated Successfully' : 'MP3 Generated Successfully';
+                        mp3StatusMessage.textContent = 'Your MP3 file is ready for download.';
+                    }
                     mp3DownloadBtn.href = data.download_url;
                     mp3DownloadBtnContainer.classList.remove('hidden');
-                    showToast('MP3 generated successfully', 'success');
+                    showToast(data.message || 'MP3 generated successfully', 'success');
                 } else {
                     mp3StatusTitle.textContent = 'Error Generating MP3';
                     mp3StatusMessage.textContent = data.error || 'An unknown error occurred.';
@@ -1060,6 +1075,15 @@
                 showToast('Error generating MP3', 'error');
                 console.error('Error:', error);
             });
+        }
+
+        // MP3 generation with AJAX
+        generateMp3Btn.addEventListener('click', function(event) {
+            generateMp3(event.shiftKey);
+        });
+
+        regenerateMp3Btn.addEventListener('click', function() {
+            generateMp3(true);
         });
         
         // Close MP3 modal
