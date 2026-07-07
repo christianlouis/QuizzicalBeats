@@ -19,6 +19,13 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
 
 from musicround import db
+from musicround.helpers.database_config import (
+    bool_from_config,
+    database_summary,
+    is_legacy_data_sqlite_uri,
+    managed_database_requirement_error,
+    postgres_env_readiness,
+)
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.paths import app_data_path
@@ -209,6 +216,52 @@ def _round_access_event_summary(event: RoundAccessEvent) -> dict[str, Any]:
         "actor": _user_summary(event.actor),
         "target_user_id": event.target_user_id,
         "target_user": _user_summary(event.target_user),
+    }
+
+
+def database_configuration_summary() -> dict[str, Any]:
+    """Return credential-safe database readiness details for agent workflows."""
+    db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI")
+    summary = database_summary(db_uri)
+    managed_required = bool_from_config(current_app.config.get("DATABASE_REQUIRE_MANAGED"))
+    postgres_readiness = postgres_env_readiness(os.environ)
+    managed_error = managed_database_requirement_error(db_uri, managed_required)
+    issues: list[dict[str, Any]] = []
+
+    if managed_error:
+        issues.append(
+            {
+                "code": "managed_database_requirement_failed",
+                "message": managed_error,
+                "severity": "error",
+            }
+        )
+    elif is_legacy_data_sqlite_uri(db_uri):
+        issues.append(
+            {
+                "code": "legacy_sqlite_data_store",
+                "message": "Database is still configured to use the legacy /data SQLite file.",
+                "severity": "warning",
+                "hint": (
+                    "Configure a managed SQL URI or complete PG* credentials via "
+                    "secrets, then enable DATABASE_REQUIRE_MANAGED=true."
+                ),
+            }
+        )
+
+    status = "ok"
+    if any(issue["severity"] == "error" for issue in issues):
+        status = "error"
+    elif issues:
+        status = "warning"
+
+    return {
+        "ok": status != "error",
+        "status": status,
+        "managed_required": managed_required,
+        "database": summary,
+        "postgres_env": postgres_readiness,
+        "issues": issues,
     }
 
 

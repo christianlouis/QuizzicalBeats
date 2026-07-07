@@ -27,6 +27,14 @@ database to a managed SQL database without exposing credentials in logs or Git.
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status
    ```
 
+   For MCP agents, smoke scripts, or automation, use the equivalent JSON form.
+   It reports only redacted targets and PG* key names, never database passwords
+   or SQLite file paths:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status --json
+   ```
+
    Before the managed database cutover, run the stricter preflight. It fails
    with exit code `78` while legacy SQLite is still active or the PG*
    configuration is incomplete:
@@ -34,6 +42,9 @@ database to a managed SQL database without exposing credentials in logs or Git.
    ```bash
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
    ```
+
+   The preflight command also supports `--json` for automation while preserving
+   the same exit-code semantics.
 
    During early migration work, use `--allow-sqlite` only to collect the same
    diagnostics without blocking on the current SQLite state:

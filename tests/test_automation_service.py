@@ -539,6 +539,53 @@ class TestRoundAutomation:
 
             assert RoundAccessEvent.query.count() == 1
 
+    def test_database_configuration_summary_warns_for_legacy_sqlite(self, app):
+        """MCP database diagnostics should flag legacy SQLite without leaking paths."""
+        with app.app_context():
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:////data/song_data.db"
+            app.config["DATABASE_BACKEND"] = "sqlite"
+            app.config["DATABASE_REQUIRE_MANAGED"] = False
+
+            result = automation.database_configuration_summary()
+
+        assert result["ok"] is True
+        assert result["status"] == "warning"
+        assert result["database"]["backend"] == "sqlite"
+        assert result["database"]["redacted_uri"] == "sqlite:///[local-file]"
+        assert result["issues"][0]["code"] == "legacy_sqlite_data_store"
+        assert "/data/song_data.db" not in repr(result)
+
+    def test_database_configuration_summary_is_credential_safe_for_pg_env(self, app, monkeypatch):
+        """MCP database diagnostics should expose key names but not secret values."""
+        monkeypatch.setenv("PGHOST", "postgres.internal")
+        monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
+        monkeypatch.setenv("PGUSER", "qb_user")
+        monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+        monkeypatch.setenv("PGSSLMODE", "require")
+        with app.app_context():
+            app.config["SQLALCHEMY_DATABASE_URI"] = (
+                "postgresql://qb_user:super-secret-password@postgres.internal/quizzicalbeats"
+            )
+            app.config["DATABASE_BACKEND"] = "postgresql"
+            app.config["DATABASE_REQUIRE_MANAGED"] = True
+
+            result = automation.database_configuration_summary()
+
+        assert result["ok"] is True
+        assert result["status"] == "ok"
+        assert result["managed_required"] is True
+        assert result["database"]["backend"] == "postgresql"
+        assert result["postgres_env"]["complete"] is True
+        assert result["postgres_env"]["present_required"] == [
+            "PGHOST",
+            "PGDATABASE",
+            "PGUSER",
+            "PGPASSWORD",
+        ]
+        serialized = repr(result)
+        assert "super-secret-password" not in serialized
+        assert "postgresql://qb_user:***@postgres.internal/quizzicalbeats" in serialized
+
     def test_list_round_access_events_requires_owner_or_admin_requester(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")

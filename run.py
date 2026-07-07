@@ -40,7 +40,16 @@ def main():
 
     database_parser = subparsers.add_parser('database', help='Database diagnostics')
     database_subparsers = database_parser.add_subparsers(dest='database_action', help='Database action to perform')
-    database_subparsers.add_parser('status', help='Print the configured database backend without credentials')
+    status_parser = database_subparsers.add_parser(
+        'status',
+        help='Print the configured database backend without credentials',
+    )
+    status_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable credential-safe diagnostics',
+    )
     preflight_parser = database_subparsers.add_parser(
         'preflight',
         help='Validate managed database readiness without printing credentials',
@@ -49,6 +58,12 @@ def main():
         '--allow-sqlite',
         action='store_true',
         help='Report diagnostics without failing on SQLite; useful before cutover work starts',
+    )
+    preflight_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable credential-safe diagnostics',
     )
     migrate_parser = database_subparsers.add_parser(
         'migrate-sqlite',
@@ -144,8 +159,10 @@ def main():
         app.config.from_object(Config)
         if "SQLALCHEMY_DATABASE_URI" not in os.environ:
             app.config["SQLALCHEMY_DATABASE_URI"] = None
+        json_output = bool(getattr(args, "json_output", False))
+        preflight_requires_managed = args.database_action == 'preflight' and not args.allow_sqlite
         if args.database_action == 'preflight':
-            app.config['DATABASE_REQUIRE_MANAGED'] = not args.allow_sqlite
+            app.config['DATABASE_REQUIRE_MANAGED'] = preflight_requires_managed and not json_output
         try:
             _configure_database_uri(app)
         except RuntimeError as exc:
@@ -153,10 +170,36 @@ def main():
             return 78
         db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
         summary = database_summary(db_uri)
+        readiness = postgres_env_readiness(os.environ)
+        issues = []
+        if is_legacy_data_sqlite_uri(db_uri):
+            issues.append(
+                {
+                    "code": "legacy_sqlite_data_store",
+                    "severity": "warning",
+                    "message": "legacy /data SQLite database is configured",
+                    "hint": (
+                        "configure a managed SQL URI or complete PG* credentials "
+                        "via secrets for production"
+                    ),
+                }
+            )
+        diagnostics = {
+            "ok": True,
+            "status": "warning" if issues else "ok",
+            "managed_required": preflight_requires_managed or bool(app.config.get('DATABASE_REQUIRE_MANAGED')),
+            "database": summary,
+            "postgres_env": readiness,
+            "issues": issues,
+        }
+        if json_output:
+            print(json.dumps(diagnostics, indent=2, sort_keys=True))
+            if args.database_action == 'preflight' and issues and not args.allow_sqlite:
+                return 78
+            return 0
         print(f"Database backend: {summary['backend']}")
         print(f"Database target: {summary['redacted_uri']}")
         print(f"Managed database required: {bool(app.config.get('DATABASE_REQUIRE_MANAGED'))}")
-        readiness = postgres_env_readiness(os.environ)
         if readiness["configured"]:
             print(
                 "PostgreSQL env present: "

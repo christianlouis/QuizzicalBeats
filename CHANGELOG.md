@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP helpers, and access-event audit entries.
 - Added producer sharing roles that can generate/export/send round assets
   without granting owner-level sharing or delete rights.
+- Added credential-safe MCP database configuration diagnostics for managed-DB
+  cutover planning.
+- Added JSON output for database status/preflight CLI diagnostics so automation
+  can gate managed-DB cutovers without scraping logs.
 - Added a chart/festival seed-source registry with run history, Flask-Admin
   views, migrations, and MCP automation helpers.
 - Added a browser round-ops workflow with round calendar, catalog/fatigue analytics, quizmaster planning briefs, round review/approval state, package quality inspection, actionable replacement suggestions, and browser review of announcement and per-track hint script drafts.
