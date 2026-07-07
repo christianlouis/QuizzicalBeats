@@ -1837,7 +1837,10 @@ def generate_round_assets(
             AUTOMATION_STORAGE_ERROR,
             details=check_round_artifact_storage(include_mp3=include_mp3, include_pdf=include_pdf),
         ) from exc
-    assets: dict[str, Any] = {"round_id": round_id}
+    assets: dict[str, Any] = {
+        "round_id": round_id,
+        "review_url_path": f"/rounds/{round_id}",
+    }
     if include_pdf:
         assets["pdf"] = generate_round_pdf(round_id)
     if include_mp3:

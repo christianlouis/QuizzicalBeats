@@ -1239,6 +1239,68 @@ class TestAssetInspection:
             assert "Warnings" in result["report"]["markdown"]
             assert result["report"]["blockers"] == []
 
+    def test_inspect_round_package_allows_realistic_full_round_render_variance(self, app):
+        """A sub-30s render drift should not block an eight-song package."""
+        with app.app_context():
+            user = _create_user()
+            songs = [
+                _create_song(title=f"Song {index}", artist="Artist", deezer_id=str(index))
+                for index in range(1, 9)
+            ]
+            round_id = automation.create_round(
+                name="Realistic Render Drift",
+                round_type="manual",
+                song_ids=[song.id for song in songs],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=(
+                        "https://example.test/preview.mp3",
+                        AudioSegment.silent(duration=30000),
+                        None,
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {
+                            "custom_audio_ms": {
+                                "intro": 11000,
+                                "replay": 11000,
+                                "outro": 9800,
+                            },
+                            "number_audio_ms": [500] * 8,
+                            "hint_audio_ms": {},
+                        },
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={
+                        "warnings": [],
+                        "ok": True,
+                        "duration_seconds": 504.8,
+                    },
+                ),
+            ):
+                result = automation.inspect_round_package(round_id, user_id=user.id)
+
+            assert result["expected_duration_seconds"] == 519.8
+            assert result["status"] == "ok"
+            assert result["ok"] is True
+            assert result["blocking_issue_count"] == 0
+            assert not any(
+                issue["code"] == "round_mp3_duration_mismatch"
+                for issue in result["issues"]
+            )
+
     def test_inspect_round_package_blocks_material_mp3_duration_shortfall(self, app):
         with app.app_context():
             user = _create_user()
@@ -1569,6 +1631,33 @@ class TestAssetInspection:
             assert exc_info.value.details
             assert "storage-secret" not in message
             assert "traceback" not in message
+
+    def test_generate_assets_returns_round_review_url_path(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Review Link", artist="Artist")
+            round_id = automation.create_round(
+                name="Review Link Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_pdf",
+                    return_value={"round_id": round_id, "path": "/tmp/round.pdf", "bytes": 12},
+                ),
+                patch(
+                    "musicround.services.automation.generate_round_mp3",
+                    return_value={"round_id": round_id, "path": "/tmp/round.mp3", "bytes": 34},
+                ),
+            ):
+                result = automation.generate_round_assets(round_id, user_id=user.id)
+
+            assert result["round_id"] == round_id
+            assert result["review_url_path"] == f"/rounds/{round_id}"
+            assert result["pdf"]["path"] == "/tmp/round.pdf"
+            assert result["mp3"]["path"] == "/tmp/round.mp3"
 
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():

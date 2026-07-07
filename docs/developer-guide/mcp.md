@@ -81,7 +81,7 @@ The MCP server exposes these tools:
 | `create_round_from_playlist` | Import a playlist and turn the imported songs into a round. |
 | `create_round_from_text_playlist` | Create a complete round from text rows after every row resolves. |
 | `round_analytics_summary` | Summarize catalog health, usage frequency, and unused candidates. |
-| `generate_round_assets` | Generate the round PDF and/or MP3. |
+| `generate_round_assets` | Generate the round PDF and/or MP3 and return the round review URL path. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
 | `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
@@ -126,7 +126,8 @@ explicitly set.
    ID, artist, title, QB song ID, status, and failure reason so agents can
    repair specific positions.
 6. Link the plan to the generated round with `link_planned_quiz_round`.
-7. Generate PDF and MP3 files with `generate_round_assets`.
+7. Generate PDF and MP3 files with `generate_round_assets`; send the returned
+   `review_url_path` to the quizmaster when a human should inspect the bundle.
 8. Inspect the generated files and previews with `inspect_round_package`.
 9. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
