@@ -70,7 +70,7 @@ services:
     environment:
       - POSTGRES_DB=${PGDATABASE:-quizzicalbeats}
       - POSTGRES_USER=${PGUSER:-quizzicalbeats}
-      - POSTGRES_PASSWORD=${PGPASSWORD:-quizzicalbeats-dev-password-change-me}
+      - POSTGRES_PASSWORD=${PGPASSWORD:-}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
