@@ -1,5 +1,7 @@
 from dotenv import load_dotenv
-from musicround import create_app
+from flask import Flask
+from musicround import _configure_database_uri, create_app, db
+from musicround.config import Config
 from musicround.version import get_version_str, VERSION_INFO
 import contextlib
 import json
@@ -9,6 +11,15 @@ import argparse
 
 # Load environment variables
 load_dotenv()
+
+
+def _create_database_cli_app():
+    """Create the minimum app context needed for database CLI commands."""
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    _configure_database_uri(app)
+    db.init_app(app)
+    return app
 
 def main():
     # Create argument parser
@@ -102,9 +113,8 @@ def main():
                 )
                 return 78
             with contextlib.redirect_stdout(sys.stderr):
-                app = create_app()
+                app = _create_database_cli_app()
             with app.app_context():
-                from musicround import db
                 from musicround.helpers.database_migration import (
                     DatabaseMigrationError,
                     migrate_sqlite_to_configured_database,
@@ -124,9 +134,6 @@ def main():
                 print(json.dumps(result, indent=2, sort_keys=True))
                 return 0
 
-        from flask import Flask
-        from musicround import _configure_database_uri
-        from musicround.config import Config
         from musicround.helpers.database_config import (
             database_summary,
             is_legacy_data_sqlite_uri,
