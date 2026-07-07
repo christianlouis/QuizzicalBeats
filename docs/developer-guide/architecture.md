@@ -88,8 +88,10 @@ Configuration is handled in `config.py` using environment variables loaded from 
 ```python
 class Config:
     # Core configuration
-    DEBUG = os.getenv("DEBUG", "True") == "True"
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-please-change')
+    DEBUG = os.getenv("DEBUG", "False") == "True"
+    SECRET_KEY = os.getenv("SECRET_KEY")
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY environment variable must be set.")
     
     # API keys for various services
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -98,7 +100,8 @@ class Config:
     LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
     
     # Database configuration
-    SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///data/song_data.db')
+    SQLALCHEMY_DATABASE_URI = os.environ.get("SQLALCHEMY_DATABASE_URI")
+    DATABASE_REQUIRE_MANAGED = bool_from_config(os.getenv("DATABASE_REQUIRE_MANAGED", "False"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # OAuth provider configurations

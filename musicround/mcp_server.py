@@ -110,6 +110,12 @@ def datastore_schema() -> dict[str, Any]:
 
 
 @mcp.tool()
+def database_configuration_summary() -> dict[str, Any]:
+    """Return credential-safe database readiness details for cutover planning."""
+    return _with_app_context(automation.database_configuration_summary)
+
+
+@mcp.tool()
 def list_datastore_objects(
     object_type: str,
     filters: dict[str, Any] | None = None,
