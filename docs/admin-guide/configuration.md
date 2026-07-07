@@ -91,7 +91,7 @@ For optimal metadata quality, we recommend configuring at least Spotify and Last
 
 ```bash
 # SQLite (default)
-SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+SQLALCHEMY_DATABASE_URI=sqlite:////data/song_data.db
 SQLALCHEMY_TRACK_MODIFICATIONS=False
 
 # Application file storage
@@ -105,6 +105,10 @@ ROUND_PDF_DIR=/data/pdfs
 # For PostgreSQL:
 # SQLALCHEMY_DATABASE_URI=postgresql://username:password@localhost/musicround
 ```
+
+When `SQLALCHEMY_DATABASE_URI` is omitted, the local SQLite fallback is created
+as `song_data.db` inside `DATA_DIR`. Production deployments should configure
+PostgreSQL instead and enable `DATABASE_REQUIRE_MANAGED=true`.
 
 ### OAuth Provider Configuration
 
@@ -173,7 +177,7 @@ Then edit the `.env` file with your actual configuration values:
 # Example .env file (simplified)
 SECRET_KEY=your-secure-secret-key
 DEBUG=True
-SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+SQLALCHEMY_DATABASE_URI=sqlite:////data/song_data.db
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
 # Add other variables as needed

@@ -31,7 +31,14 @@ csrf = CSRFProtect()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE_DIR = '/data'
-DEFAULT_DATABASE_PATH = os.path.join(DEFAULT_DATABASE_DIR, 'song_data.db')
+
+
+def _default_database_dir(app):
+    return os.environ.get('DATA_DIR') or app.config.get('DATA_DIR') or DEFAULT_DATABASE_DIR
+
+
+def _default_database_path(app):
+    return os.path.join(_default_database_dir(app), 'song_data.db')
 
 
 def _configure_database_uri(app):
@@ -59,14 +66,16 @@ def _configure_database_uri(app):
     if managed_error:
         raise RuntimeError(managed_error)
 
-    if not os.path.exists(DEFAULT_DATABASE_DIR):
-        os.makedirs(DEFAULT_DATABASE_DIR, exist_ok=True)
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DEFAULT_DATABASE_PATH}'
+    fallback_database_dir = _default_database_dir(app)
+    fallback_database_path = _default_database_path(app)
+    if not os.path.exists(fallback_database_dir):
+        os.makedirs(fallback_database_dir, exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{fallback_database_path}'
     app.config['DATABASE_BACKEND'] = 'sqlite'
     app.config['DATABASE_URI_REDACTED'] = 'sqlite:///[local-file]'
     app.logger.warning(
         "SQLALCHEMY_DATABASE_URI is not configured; using local SQLite fallback at %s",
-        DEFAULT_DATABASE_PATH,
+        fallback_database_path,
     )
 
 
