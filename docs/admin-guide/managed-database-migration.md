@@ -27,6 +27,21 @@ database to a managed SQL database without exposing credentials in logs or Git.
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status
    ```
 
+   Before the managed database cutover, run the stricter preflight. It fails
+   with exit code `78` while legacy SQLite is still active or the PG*
+   configuration is incomplete:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
+   ```
+
+   During early migration work, use `--allow-sqlite` only to collect the same
+   diagnostics without blocking on the current SQLite state:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight --allow-sqlite
+   ```
+
 2. Create a final SQLite backup before migration:
 
    ```bash
@@ -52,7 +67,7 @@ database to a managed SQL database without exposing credentials in logs or Git.
 3. Start the app against the disposable managed URI and run:
 
    ```bash
-   python /app/run.py database status
+   python /app/run.py database preflight
    python -m pytest tests/test_app_factory.py tests/test_automation_service.py
    ```
 
@@ -96,7 +111,7 @@ database to a managed SQL database without exposing credentials in logs or Git.
 4. Verify without printing credentials:
 
    ```bash
-   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python - <<'PY'
    from musicround import create_app, db
    from musicround.models import Song, Round, User
@@ -109,8 +124,8 @@ database to a managed SQL database without exposing credentials in logs or Git.
 5. Verify web, MCP, and scheduled-email execution share the same config:
 
    ```bash
-   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status
-   kubectl -n quizzicalbeats exec deploy/quizzicalbeats-mcp -c mcp -- python /app/run.py database status
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats-mcp -c mcp -- python /app/run.py database preflight
    kubectl -n quizzicalbeats create job --from=cronjob/quizzicalbeats-scheduled-email qb-db-cutover-smoke
    ```
 

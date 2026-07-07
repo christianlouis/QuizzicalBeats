@@ -30,6 +30,15 @@ def main():
     database_parser = subparsers.add_parser('database', help='Database diagnostics')
     database_subparsers = database_parser.add_subparsers(dest='database_action', help='Database action to perform')
     database_subparsers.add_parser('status', help='Print the configured database backend without credentials')
+    preflight_parser = database_subparsers.add_parser(
+        'preflight',
+        help='Validate managed database readiness without printing credentials',
+    )
+    preflight_parser.add_argument(
+        '--allow-sqlite',
+        action='store_true',
+        help='Report diagnostics without failing on SQLite; useful before cutover work starts',
+    )
 
     health_parser = subparsers.add_parser('health', help='Health diagnostics')
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
@@ -64,26 +73,59 @@ def main():
         from flask import Flask
         from musicround import _configure_database_uri
         from musicround.config import Config
-        from musicround.helpers.database_config import database_summary, is_legacy_data_sqlite_uri
+        from musicround.helpers.database_config import (
+            database_summary,
+            is_legacy_data_sqlite_uri,
+            postgres_env_readiness,
+        )
 
         app = Flask(__name__)
         app.config.from_object(Config)
+        if args.database_action == 'preflight' and not args.allow_sqlite:
+            app.config['DATABASE_REQUIRE_MANAGED'] = True
         try:
             _configure_database_uri(app)
         except RuntimeError as exc:
             print(f"Database configuration error: {exc}", file=sys.stderr)
+            readiness = postgres_env_readiness(os.environ)
+            if readiness["configured"] and not readiness["complete"]:
+                print(
+                    "PostgreSQL environment is incomplete; missing keys: "
+                    + ", ".join(readiness["missing_required"]),
+                    file=sys.stderr,
+                )
             return 78
         db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
         summary = database_summary(db_uri)
         print(f"Database backend: {summary['backend']}")
         print(f"Database target: {summary['redacted_uri']}")
         print(f"Managed database required: {bool(app.config.get('DATABASE_REQUIRE_MANAGED'))}")
+        readiness = postgres_env_readiness(os.environ)
+        if readiness["configured"]:
+            print(
+                "PostgreSQL env present: "
+                + ", ".join(readiness["present_required"] + readiness["present_optional"])
+            )
+            if readiness["missing_required"]:
+                print(
+                    "PostgreSQL env missing: "
+                    + ", ".join(readiness["missing_required"])
+                )
         if is_legacy_data_sqlite_uri(db_uri):
             print(
                 "Warning: legacy /data SQLite database is configured; "
                 "configure a managed SQL URI or complete PG* credentials via "
                 "secrets for production."
             )
+            if args.database_action == 'preflight' and not args.allow_sqlite:
+                print(
+                    "Preflight failed: managed database cutover is not ready "
+                    "while legacy SQLite is configured.",
+                    file=sys.stderr,
+                )
+                return 78
+        if args.database_action == 'preflight':
+            print("Database preflight passed.")
         return 0
     elif args.command == 'health':
         with contextlib.redirect_stdout(sys.stderr):
