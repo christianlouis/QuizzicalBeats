@@ -90,6 +90,14 @@
 
 4. Access the application at `http://localhost:5000`.
 
+   By default, Docker Compose uses the app's local SQLite fallback under
+   `/data`. To test the managed PostgreSQL path locally, set
+   `DATABASE_REQUIRE_MANAGED=true` plus `PGHOST=postgres`, `PGDATABASE`,
+   `PGUSER`, and `PGPASSWORD` in `.env`, then run:
+   ```bash
+   docker compose --profile managed-db up -d
+   ```
+
 #### Manual Installation
 
 1. Clone the repository:

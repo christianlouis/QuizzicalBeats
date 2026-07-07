@@ -25,7 +25,9 @@ services:
       - FLASK_APP=run.py
       - FLASK_ENV=development  # Using the older style for compatibility
       - FLASK_DEBUG=1
-      - SQLALCHEMY_DATABASE_URI=sqlite:///data/song_data.db
+      - DATA_DIR=/data
+      - ROUND_MP3_DIR=/data/rounds
+      - ROUND_PDF_DIR=/data/pdfs
       - PYTHONUNBUFFERED=1
       # Hot reloading specific settings
       - FLASK_RUN_EXTRA_FILES=./templates:/app/templates,./static:/app/static
@@ -61,6 +63,25 @@ services:
       ofelia.job-local.my-test-job.schedule: "@hourly"
       ofelia.job-local.my-test-job.command: "date"
 
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - managed-db
+    environment:
+      - POSTGRES_DB=${PGDATABASE:-quizzicalbeats}
+      - POSTGRES_USER=${PGUSER:-quizzicalbeats}
+      - POSTGRES_PASSWORD=${PGPASSWORD:-quizzicalbeats-dev-password-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   musicround_data:
+    driver: local
+  postgres_data:
     driver: local

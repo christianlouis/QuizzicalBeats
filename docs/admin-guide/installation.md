@@ -43,6 +43,30 @@ The easiest way to deploy Quizzical Beats is using Docker:
 
 4. Access the application at `http://localhost:5000`
 
+### Local PostgreSQL Compose Profile
+
+The default Compose setup is for development and leaves the database URI unset,
+so the app creates a SQLite fallback at `/data/song_data.db`. To exercise the
+managed-database path locally, configure split PostgreSQL variables in `.env`:
+
+```bash
+DATABASE_REQUIRE_MANAGED=true
+PGHOST=postgres
+PGPORT=5432
+PGDATABASE=quizzicalbeats
+PGUSER=quizzicalbeats
+PGPASSWORD=change-this-local-password
+```
+
+Then start the app with the managed database profile:
+
+```bash
+docker compose --profile managed-db up -d
+```
+
+Do not set `SQLALCHEMY_DATABASE_URI` at the same time unless you intentionally
+want the full URI to take precedence over the `PG*` variables.
+
 ### Docker Volume Configuration
 
 The Docker setup creates several persistent volumes:
