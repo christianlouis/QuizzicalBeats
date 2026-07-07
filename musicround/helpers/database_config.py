@@ -34,6 +34,26 @@ def is_legacy_data_sqlite_uri(uri: str | None) -> bool:
     return normalized_path == "/data/song_data.db"
 
 
+def managed_database_requirement_error(
+    uri: str | None,
+    require_managed,
+) -> str | None:
+    """Return a safe error message when managed DB mode is misconfigured."""
+    if not bool_from_config(require_managed):
+        return None
+    if not uri:
+        return (
+            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
+            "is not configured."
+        )
+    if is_sqlite_database_uri(uri):
+        return (
+            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
+            "points at SQLite. Configure a managed SQL URI via secrets."
+        )
+    return None
+
+
 def redact_database_uri(uri: str | None) -> str:
     """Redact credentials from a database URI without hiding the backend."""
     if not uri:

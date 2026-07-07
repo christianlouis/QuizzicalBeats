@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import csv
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -34,6 +35,7 @@ from musicround.helpers.utils import generate_tts_mp3, get_mp3_path
 from musicround import models as datastore_models
 from musicround.models import (
     ImportJobRecord,
+    PlannedQuizRound,
     Round,
     RoundAudioScript,
     RoundExport,
@@ -70,23 +72,69 @@ def _ordered_round_songs(round_obj: Round) -> list[Song]:
     return [songs_by_id[song_id] for song_id in ids if song_id in songs_by_id]
 
 
-def _playlist_position_map(song_ids: list[int], expected_count: int | None = None) -> list[dict[str, Any]]:
+def _playlist_position_map(
+    song_ids: list[int],
+    expected_count: int | None = None,
+    source_positions: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     limit = expected_count if expected_count is not None else len(song_ids)
-    return [
-        {
+    if source_positions:
+        positions = []
+        selected = source_positions[:limit]
+        for index, source in enumerate(selected):
+            song_id = source.get("song_id")
+            try:
+                song_id = int(song_id) if song_id is not None else None
+            except (TypeError, ValueError):
+                song_id = None
+            status = source.get("status") or ("resolved" if song_id else "failed")
+            positions.append({
+                "position": source.get("position") or index + 1,
+                "song_id": song_id,
+                "resolved": bool(song_id) and status == "resolved",
+                "status": status,
+                "spotify_track_id": source.get("spotify_track_id"),
+                "artist": source.get("artist"),
+                "title": source.get("title"),
+                "reason": source.get("reason"),
+            })
+        for index in range(len(selected), limit):
+            positions.append({
+                "position": index + 1,
+                "song_id": None,
+                "resolved": False,
+                "status": "missing",
+                "spotify_track_id": None,
+                "artist": None,
+                "title": None,
+                "reason": "no_playlist_position",
+            })
+        return positions
+
+    positions = []
+    for index, song_id in enumerate(song_ids[:limit]):
+        positions.append({
             "position": index + 1,
-            "song_id": song_id if index < len(song_ids) else None,
-            "resolved": index < len(song_ids),
-        }
-        for index, song_id in enumerate(song_ids[:limit])
-    ] + [
-        {
+            "song_id": song_id,
+            "resolved": True,
+            "status": "resolved",
+            "spotify_track_id": None,
+            "artist": None,
+            "title": None,
+            "reason": None,
+        })
+    for index in range(len(song_ids), limit):
+        positions.append({
             "position": index + 1,
             "song_id": None,
             "resolved": False,
-        }
-        for index in range(len(song_ids), limit)
-    ]
+            "status": "missing",
+            "spotify_track_id": None,
+            "artist": None,
+            "title": None,
+            "reason": "not_resolved",
+        })
+    return positions
 
 
 def _song_summary(song: Song) -> dict[str, Any]:
@@ -157,6 +205,26 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "last_generated_at": (
             round_obj.last_generated_at.isoformat() if round_obj.last_generated_at else None
         ),
+    }
+
+
+def _planned_quiz_round_summary(plan: PlannedQuizRound) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "quiz_date": _datetime_payload(plan.quiz_date),
+        "quizmaster_id": plan.quizmaster_id,
+        "quizmaster": _user_summary(plan.quizmaster),
+        "theme": plan.theme,
+        "brief": plan.brief,
+        "source_playlist_url": plan.source_playlist_url,
+        "due_at": _datetime_payload(plan.due_at),
+        "status": plan.status,
+        "round_id": plan.round_id,
+        "round": _round_summary(plan.round) if plan.round else None,
+        "export_id": plan.export_id,
+        "export": _round_export_summary(plan.export) if plan.export else None,
+        "created_at": _datetime_payload(plan.created_at),
+        "updated_at": _datetime_payload(plan.updated_at),
     }
 
 
@@ -1191,15 +1259,24 @@ def create_round_from_playlist(
     """Import a playlist and create a manual round from the imported songs."""
     imported = import_catalog_item(service_name, "playlist", playlist_id_or_url, user_id=user_id)
     playlist_id = imported["item_id"]
-    if service_name.lower() == "spotify":
+    source_positions = imported.get("result", {}).get("playlist_positions") or []
+    if source_positions:
+        position_map = _playlist_position_map([], count, source_positions=source_positions)
+        song_ids = [
+            item["song_id"]
+            for item in position_map
+            if item["resolved"] and item.get("song_id") is not None
+        ]
+    elif service_name.lower() == "spotify":
         song_ids = _spotify_playlist_song_ids(playlist_id, count, user_id)
+        position_map = _playlist_position_map(song_ids, count)
     else:
         song_ids = imported.get("result", {}).get(
             "imported_song_ids"
         ) or _deezer_playlist_song_ids(playlist_id, count)
-    if not song_ids:
+        position_map = _playlist_position_map(song_ids, count)
+    if not song_ids and not position_map:
         raise AutomationError("Playlist import did not return song IDs to build a round.")
-    position_map = _playlist_position_map(song_ids, count)
     if len(song_ids) < count:
         message = (
             f"Playlist import resolved {len(song_ids)} songs; "
@@ -2089,6 +2166,74 @@ def _split_playlist_line(line: str) -> tuple[str | None, str | None, float, list
     return text, None, 0.35, issues
 
 
+def _playlist_candidate(
+    line_number: int,
+    raw_line: str,
+    title: str | None,
+    artist: str | None,
+    confidence: float = 0.95,
+    issues: list[str] | None = None,
+) -> dict[str, Any] | None:
+    title = (title or "").strip()
+    artist = (artist or "").strip()
+    issues = list(issues or [])
+    if not title and not artist:
+        return None
+    if not title:
+        if "missing_title" not in issues:
+            issues.append("missing_title")
+        confidence = min(confidence, 0.35)
+    if not artist:
+        if "missing_artist" not in issues:
+            issues.append("missing_artist")
+        confidence = min(confidence, 0.35)
+    return {
+        "line": line_number,
+        "raw": raw_line.strip(),
+        "title": title or None,
+        "artist": artist or None,
+        "confidence": confidence,
+        "needs_review": confidence < 0.8 or bool(issues),
+        "issues": issues,
+    }
+
+
+def _parse_headered_csv_playlist(text: str, limit: int) -> list[dict[str, Any]] | None:
+    """Parse CSV-like rows only when explicit artist/title headers are present."""
+    non_empty_lines = [line for line in text.splitlines() if line.strip()]
+    if not non_empty_lines:
+        return None
+
+    delimiter = ";" if non_empty_lines[0].count(";") > non_empty_lines[0].count(",") else ","
+    header = next(csv.reader([non_empty_lines[0]], delimiter=delimiter), [])
+    normalized_header = [column.strip().casefold() for column in header]
+    title_headers = {"title", "song", "song title", "track", "track title"}
+    artist_headers = {"artist", "artists", "artist name", "performer"}
+    if not title_headers.intersection(normalized_header):
+        return None
+    if not artist_headers.intersection(normalized_header):
+        return None
+
+    reader = csv.DictReader(text.splitlines(), delimiter=delimiter)
+    fieldnames = reader.fieldnames or []
+    title_field = next(field for field in fieldnames if field.strip().casefold() in title_headers)
+    artist_field = next(field for field in fieldnames if field.strip().casefold() in artist_headers)
+    candidates: list[dict[str, Any]] = []
+    for line_number, row in enumerate(reader, start=2):
+        if len(candidates) >= limit:
+            break
+        raw_line = non_empty_lines[line_number - 1] if line_number - 1 < len(non_empty_lines) else ""
+        candidate = _playlist_candidate(
+            line_number,
+            raw_line,
+            row.get(title_field),
+            row.get(artist_field),
+        )
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
 def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     """Parse pasted text or CSV-like playlist rows into reviewable candidates."""
     if not text or not text.strip():
@@ -2096,26 +2241,18 @@ def parse_text_playlist(text: str, limit: int = 100) -> dict[str, Any]:
     if limit < 1 or limit > 500:
         raise AutomationError("limit must be between 1 and 500.")
 
-    candidates = []
-    low_confidence = []
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        if len(candidates) >= limit:
-            break
-        title, artist, confidence, issues = _split_playlist_line(raw_line)
-        if title is None:
-            continue
-        candidate = {
-            "line": line_number,
-            "raw": raw_line.strip(),
-            "title": title,
-            "artist": artist,
-            "confidence": confidence,
-            "needs_review": confidence < 0.8 or bool(issues),
-            "issues": issues,
-        }
-        candidates.append(candidate)
-        if candidate["needs_review"]:
-            low_confidence.append(candidate)
+    candidates = _parse_headered_csv_playlist(text, limit)
+    if candidates is None:
+        candidates = []
+        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            if len(candidates) >= limit:
+                break
+            title, artist, confidence, issues = _split_playlist_line(raw_line)
+            candidate = _playlist_candidate(line_number, raw_line, title, artist, confidence, issues)
+            if candidate:
+                candidates.append(candidate)
+
+    low_confidence = [candidate for candidate in candidates if candidate["needs_review"]]
 
     return {
         "count": len(candidates),
@@ -2356,6 +2493,131 @@ def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
         },
         "recent_usage": recent_usage_summary(user_id=user.id, months=months, limit=25),
     }
+
+
+def create_planned_quiz_round(
+    quiz_date: str | datetime,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | datetime | None = None,
+    source_playlist_url: str | None = None,
+    status: str = "planned",
+) -> dict[str, Any]:
+    """Create a planned quiz entry before a concrete round exists."""
+    quizmaster = _find_user(quizmaster_id) if quizmaster_id is not None else None
+    plan = PlannedQuizRound(
+        quiz_date=_parse_datetime_utc(quiz_date),
+        quizmaster_id=quizmaster.id if quizmaster else None,
+        theme=(theme or "").strip() or None,
+        brief=(brief or "").strip() or None,
+        source_playlist_url=(source_playlist_url or "").strip() or None,
+        due_at=_parse_datetime_utc(due_at) if due_at else None,
+        status=status,
+    )
+    db.session.add(plan)
+    db.session.commit()
+    return {"created": True, "plan": _planned_quiz_round_summary(plan)}
+
+
+def list_planned_quiz_rounds(
+    quizmaster_id: int | None = None,
+    status: str | None = None,
+    include_past: bool = True,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List planned quiz entries for production-board and MCP callers."""
+    if limit < 1 or limit > 200:
+        raise AutomationError("limit must be between 1 and 200.")
+
+    query = PlannedQuizRound.query
+    if quizmaster_id is not None:
+        _find_user(quizmaster_id)
+        query = query.filter_by(quizmaster_id=quizmaster_id)
+    if status:
+        status = status.strip().lower()
+        if status not in {'planned', 'drafted', 'blocked', 'approved', 'scheduled', 'sent'}:
+            raise AutomationError(f"Invalid planned quiz status: {status!r}.")
+        query = query.filter_by(status=status)
+    if not include_past:
+        query = query.filter(PlannedQuizRound.quiz_date >= datetime.utcnow())
+
+    plans = (
+        query.order_by(PlannedQuizRound.quiz_date.asc(), PlannedQuizRound.id.asc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(plans),
+        "plans": [_planned_quiz_round_summary(plan) for plan in plans],
+        "filters": {
+            "quizmaster_id": quizmaster_id,
+            "status": status,
+            "include_past": include_past,
+            "limit": limit,
+        },
+    }
+
+
+def update_planned_quiz_round(
+    plan_id: int,
+    quiz_date: str | datetime | None = None,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | datetime | None = None,
+    source_playlist_url: str | None = None,
+    status: str | None = None,
+    round_id: int | None = None,
+    export_id: int | None = None,
+) -> dict[str, Any]:
+    """Update a planned quiz entry and optionally link generated artifacts."""
+    plan = db.session.get(PlannedQuizRound, plan_id)
+    if not plan:
+        raise AutomationError(f"Planned quiz round {plan_id} was not found.")
+
+    if quiz_date is not None:
+        plan.quiz_date = _parse_datetime_utc(quiz_date)
+    if quizmaster_id is not None:
+        plan.quizmaster_id = _find_user(quizmaster_id).id
+    if theme is not None:
+        plan.theme = theme.strip() or None
+    if brief is not None:
+        plan.brief = brief.strip() or None
+    if due_at is not None:
+        plan.due_at = _parse_datetime_utc(due_at) if due_at else None
+    if source_playlist_url is not None:
+        plan.source_playlist_url = source_playlist_url.strip() or None
+    if status is not None:
+        plan.status = status.strip().lower()
+    if round_id is not None:
+        if not db.session.get(Round, round_id):
+            raise AutomationError(f"Round {round_id} was not found.")
+        plan.round_id = round_id
+    if export_id is not None:
+        if not db.session.get(RoundExport, export_id):
+            raise AutomationError(f"RoundExport {export_id} was not found.")
+        plan.export_id = export_id
+    plan.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"updated": True, "plan": _planned_quiz_round_summary(plan)}
+
+
+def link_planned_quiz_round(
+    plan_id: int,
+    round_id: int | None = None,
+    export_id: int | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Link a planned quiz entry to a generated round and/or scheduled export."""
+    if round_id is None and export_id is None and status is None:
+        raise AutomationError("Provide round_id, export_id, or status to update the plan.")
+    return update_planned_quiz_round(
+        plan_id,
+        round_id=round_id,
+        export_id=export_id,
+        status=status,
+    )
 
 
 def round_planning_brief(

@@ -61,6 +61,10 @@ The MCP server exposes these tools:
 | `recent_usage_summary` | Summarize recent rounds, frequently used songs, and selected-song warnings. |
 | `quizmaster_context` | Return quizmaster preferences and recent usage for personalized planning. |
 | `round_planning_brief` | Build an agent-readable brief for a robust themed round. |
+| `create_planned_quiz_round` | Create a planned quiz date before a concrete round exists. |
+| `list_planned_quiz_rounds` | List planned quiz dates for agents and production-board views. |
+| `update_planned_quiz_round` | Update a planned quiz date and optional linked deliverables. |
+| `link_planned_quiz_round` | Link a planned quiz date to a generated round or scheduled export. |
 | `draft_round_audio_scripts` | Draft intro, replay, and outro text before TTS generation. |
 | `save_round_audio_scripts` | Persist reviewable intro, replay, and outro script drafts. |
 | `list_round_audio_scripts` | List stored script drafts by round, user, or review status. |
@@ -89,27 +93,34 @@ previews.
 
 The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
 `song`, `round`, `round_share`, `round_audio_script`, `tag`, `song_tag`, `user`,
-`role`, `user_preferences`, `round_export`, `system_setting`, and
-`import_job_record`. Read results redact fields whose names contain `password`,
-`token`, or `secret` unless `include_sensitive` is explicitly set.
+`role`, `user_preferences`, `planned_quiz_round`, `round_export`,
+`system_setting`, and `import_job_record`. Read results redact fields whose
+names contain `password`, `token`, or `secret` unless `include_sensitive` is
+explicitly set.
 
 ## Intended Workflow
 
-1. Start with `quizmaster_context`, `recent_usage_summary`, or
+1. Create or load upcoming quiz work with `create_planned_quiz_round` and
+   `list_planned_quiz_rounds` when the date is known before the round exists.
+2. Start with `quizmaster_context`, `recent_usage_summary`, or
    `round_planning_brief` so repeated songs and personalization constraints are
    visible before selecting tracks.
-2. Search with `find_songs` to avoid duplicates.
-3. Add missing tracks with `add_song` or import platform content with
+3. Search with `find_songs` to avoid duplicates.
+4. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
    For pasted lists, run `parse_text_playlist` first, then
    `resolve_text_playlist`; use `create_round_from_text_playlist` only after
    every row resolves.
-4. Create the round with `compile_round` or `create_round_from_playlist`.
+5. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
-   round when fewer than the requested eight tracks resolve.
-5. Generate PDF and MP3 files with `generate_round_assets`.
-6. Inspect the generated files and previews with `inspect_round_package`.
-7. Send the completed bundle with `send_round_email`; it reruns the package
+   round when fewer than the requested eight tracks resolve. Spotify playlist
+   imports include `resolved_positions` with playlist position, Spotify track
+   ID, artist, title, QB song ID, status, and failure reason so agents can
+   repair specific positions.
+6. Link the plan to the generated round with `link_planned_quiz_round`.
+7. Generate PDF and MP3 files with `generate_round_assets`.
+8. Inspect the generated files and previews with `inspect_round_package`.
+9. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
    `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package

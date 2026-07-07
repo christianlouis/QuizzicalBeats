@@ -1,8 +1,9 @@
 import os
 import openai
 from dotenv import load_dotenv
-import tempfile
 from datetime import timedelta
+
+from musicround.helpers.database_config import bool_from_config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -42,7 +43,7 @@ class Config:
     
     SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    DATABASE_REQUIRE_MANAGED = os.getenv("DATABASE_REQUIRE_MANAGED", "False") == "True"
+    DATABASE_REQUIRE_MANAGED = bool_from_config(os.getenv("DATABASE_REQUIRE_MANAGED", "False"))
 
     
     # Spotify API credentials    

@@ -28,8 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added round owner/share models and MCP helpers for quizmaster collaboration handoff.
 - Added persisted round-audio script drafts, review status, and MCP helpers to approve script text before TTS audio generation.
 - Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
+- Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
+- Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
+- Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
 
 ### Fixed
+- Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.
+- Stopped headered CSV playlist imports from treating the header row as a song and now flags missing artist/title cells for review.
 - Removed dead duplicate import and export helpers, and made the legacy Spotify diagnostics route use the configured Authlib client instead of a missing app-level Spotify client.
 - Normalized Spotify profile display names on the connection-management page and removed the obsolete admin token-wizard template.
 - Required login for Spotify playlist import, direct-token, and diagnostic routes before resolving user, manual, or system fallback tokens.
@@ -74,7 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserved Spotify playlist import order when the importer returns database song IDs directly.
 - Kept round package preview failures aligned to stored round positions even when unresolved song IDs create gaps.
 - Added playlist import position maps to MCP round-creation success and repair payloads.
+- Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
+- Hardened the managed-database guard so common truthy `DATABASE_REQUIRE_MANAGED` values fail fast before container startup can fall back to SQLite.
+- Hardened login and OAuth redirect targets against open redirects.
+- Escaped browser error metadata instead of injecting raw JSON into the error template.
+- Normalized Dropbox API paths for folder browsing, folder creation, upload, and shared-link creation.
+- Optimized genre picker and least-used genre helpers to avoid loading full song and round tables.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

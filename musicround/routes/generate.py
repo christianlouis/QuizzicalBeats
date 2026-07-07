@@ -1,4 +1,5 @@
 import random
+import re
 from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import current_user, login_required
@@ -11,6 +12,42 @@ generate_bp = Blueprint('generate', __name__)
 
 # Constants
 songs_per_round = 8
+_TAG_ALIAS_MAP = {
+    'hip-hop': 'Hip-Hop',
+    'hip hop': 'Hip-Hop',
+    'hiphop': 'Hip-Hop',
+    'r&b': 'R&B',
+    'rnb': 'R&B',
+    'rhythm and blues': 'R&B',
+    'rock': 'Rock',
+    'metal': 'Metal',
+    'country': 'Country',
+    'pop': 'Pop',
+    'punk': 'Punk',
+    'indie': 'Indie',
+    'electronic': 'Electronic',
+    'edm': 'Electronic',
+    'dance': 'Dance',
+    'soul': 'Soul',
+    'funk': 'Funk',
+    'jazz': 'Jazz',
+    'blues': 'Blues',
+    'folk': 'Folk',
+    'disco': 'Disco',
+    'new wave': 'New Wave',
+    'alternative': 'Alternative',
+    'classic rock': 'Classic Rock',
+    'hard rock': 'Hard Rock',
+}
+_INTERNAL_TAG_PREFIXES = (
+    'seed:',
+    'source:',
+    'import:',
+    'spotify:',
+    'deezer:',
+    'lastfm:',
+    'chart-source:',
+)
 
 # Helper functions
 def get_all_decades():
@@ -35,11 +72,13 @@ def get_all_genres():
     """
     Return a list of all genres in the Song table.
     """
-    all_genres = []
-    for song in Song.query.all():
-        if song.genre and song.genre not in all_genres:
-            all_genres.append(song.genre)
-    return all_genres
+    rows = (
+        Song.query.with_entities(Song.genre)
+        .filter(Song.genre.isnot(None), Song.genre != '')
+        .distinct()
+        .all()
+    )
+    return [genre for (genre,) in rows]
 
 def get_all_tags():
     """
@@ -56,8 +95,39 @@ def get_all_tags():
 
 
 def _normalize_tag_name(tag_name):
-    """Trim tag names before matching or showing them in builder controls."""
-    return (tag_name or '').strip()
+    """Return a quizmaster-facing tag label, or None for internal/noisy tags."""
+    normalized = re.sub(r'\s+', ' ', (tag_name or '').strip())
+    if not normalized:
+        return None
+
+    lowered = normalized.casefold()
+    if lowered.startswith(_INTERNAL_TAG_PREFIXES):
+        return None
+    if '://' in lowered or lowered.startswith(('www.', '#')):
+        return None
+    if '@' in normalized:
+        return None
+    if len(normalized) > 40:
+        return None
+    if len(normalized.split()) > 4:
+        return None
+
+    return _TAG_ALIAS_MAP.get(lowered, normalized)
+
+
+def _tag_lookup_variants(tag_name):
+    """Return normalized DB comparison values for a public tag label."""
+    normalized_tag_name = _normalize_tag_name(tag_name)
+    if not normalized_tag_name:
+        return []
+
+    variants = {normalized_tag_name.casefold()}
+    variants.update(
+        alias.casefold()
+        for alias, canonical in _TAG_ALIAS_MAP.items()
+        if canonical.casefold() == normalized_tag_name.casefold()
+    )
+    return sorted(variants)
 
 
 def get_songs_by_tag(tag_name, limit=8):
@@ -68,10 +138,11 @@ def get_songs_by_tag(tag_name, limit=8):
     if not normalized_tag_name:
         return []
 
+    lookup_variants = _tag_lookup_variants(normalized_tag_name)
     normalized_sql = db.func.lower(db.func.trim(Tag.name))
     return (
         Song.query.join(Song.tags)
-        .filter(normalized_sql == normalized_tag_name.lower())
+        .filter(normalized_sql.in_(lookup_variants))
         .order_by(Song.id.asc())
         .distinct()
         .limit(limit)
@@ -88,11 +159,16 @@ def get_least_used_genres():
     genre_usage = {g: 0 for g in all_genres_list}
 
     # Count how many times each genre appears in Rounds of type 'genre'
-    used_genre_rounds = Round.query.filter_by(round_type='genre').all()
-    for rnd in used_genre_rounds:
+    used_genre_counts = (
+        db.session.query(Round.round_criteria_used, db.func.count(Round.id))
+        .filter_by(round_type='genre')
+        .group_by(Round.round_criteria_used)
+        .all()
+    )
+    for genre, count in used_genre_counts:
         # Ensure we only increment if it exists in genre_usage
-        if rnd.round_criteria_used in genre_usage:
-            genre_usage[rnd.round_criteria_used] += 1
+        if genre in genre_usage:
+            genre_usage[genre] += count
 
     # If we have no genres at all, return an empty list
     if not genre_usage:

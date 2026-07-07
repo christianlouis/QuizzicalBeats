@@ -7,14 +7,60 @@
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
         <div>
             <h1 class="text-3xl font-bold text-navy-800 font-montserrat">Round Calendar</h1>
-            <p class="text-gray-600 mt-1">Scheduled and processed email deliveries for visible rounds.</p>
+            <p class="text-gray-600 mt-1">Planned quiz dates and scheduled email deliveries for visible rounds.</p>
         </div>
         <a href="{{ url_for('rounds.rounds_list') }}" class="bg-navy-700 hover:bg-navy-800 text-white py-2 px-4 rounded-md transition-colors text-sm font-semibold">
             <i class="fas fa-list mr-1"></i> Rounds
         </a>
     </div>
 
+    <div class="bg-white shadow-md rounded-lg overflow-hidden mb-8">
+        <div class="px-4 py-3 bg-navy-700 text-white font-semibold">Planned Quiz Dates</div>
+        <table class="w-full table-auto">
+            <thead class="bg-navy-50 text-navy-800">
+                <tr>
+                    <th class="px-4 py-3 text-left font-semibold">Quiz Date</th>
+                    <th class="px-4 py-3 text-left font-semibold">Theme</th>
+                    <th class="px-4 py-3 text-left font-semibold">Quizmaster</th>
+                    <th class="px-4 py-3 text-left font-semibold">Status</th>
+                    <th class="px-4 py-3 text-left font-semibold">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for plan in planned_rounds %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">{{ plan.quiz_date.strftime('%Y-%m-%d %H:%M') if plan.quiz_date else '-' }}</td>
+                    <td class="px-4 py-3 font-medium">{{ plan.theme or 'Unthemed quiz round' }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ plan.quizmaster.username if plan.quizmaster else 'Unassigned' }}</td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs font-semibold rounded-full
+                            {% if plan.status == 'scheduled' %}bg-blue-100 text-blue-800
+                            {% elif plan.status == 'approved' %}bg-green-100 text-green-800
+                            {% elif plan.status == 'blocked' %}bg-red-100 text-red-800
+                            {% elif plan.status == 'sent' %}bg-gray-100 text-gray-800
+                            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                            {{ plan.status|capitalize }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if plan.round_id %}
+                        <a href="{{ url_for('rounds.round_detail', round_id=plan.round_id) }}" class="bg-teal-500 hover:bg-teal-600 text-white py-1.5 px-3 rounded text-sm transition-colors">Open Round</a>
+                        {% else %}
+                        <span class="text-sm text-gray-500">No round yet</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">No planned quiz dates yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="px-4 py-3 bg-navy-700 text-white font-semibold">Scheduled Email Deliveries</div>
         <table class="w-full table-auto">
             <thead class="bg-navy-50 text-navy-800">
                 <tr>

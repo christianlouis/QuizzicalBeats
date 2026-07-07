@@ -31,6 +31,21 @@ def _make_dropbox_user():
     return user
 
 
+@pytest.mark.parametrize(
+    ('raw_path', 'expected'),
+    [
+        ('', ''),
+        ('/', ''),
+        ('folder/file.pdf', '/folder/file.pdf'),
+        ('/folder/file.pdf', '/folder/file.pdf'),
+        ('//folder///nested/', '/folder/nested'),
+        (' /folder/ ', '/folder'),
+    ],
+)
+def test_format_dropbox_path_normalizes_api_paths(raw_path, expected):
+    assert dropbox_helper.format_dropbox_path(raw_path) == expected
+
+
 def test_refresh_dropbox_token_raises_on_invalid_grant(app):
     with app.app_context():
         with patch('musicround.helpers.dropbox_helper.requests.post') as mock_post:

@@ -15,6 +15,7 @@ os.environ.setdefault("AUTOMATION_TOKEN", "test-automation-token-for-testing")
 from musicround.helpers.import_queue import ImportQueue
 from musicround.models import (
     ImportJobRecord,
+    PlannedQuizRound,
     Round,
     RoundAudioScript,
     RoundExport,
@@ -208,11 +209,10 @@ class TestRoundAutomation:
             assert exc_info.value.details["status"] == "needs_more_songs"
             assert exc_info.value.details["expected_song_count"] == 8
             assert exc_info.value.details["resolved_song_count"] == 1
-            assert exc_info.value.details["resolved_positions"][0] == {
-                "position": 1,
-                "song_id": song.id,
-                "resolved": True,
-            }
+            assert exc_info.value.details["resolved_positions"][0]["position"] == 1
+            assert exc_info.value.details["resolved_positions"][0]["song_id"] == song.id
+            assert exc_info.value.details["resolved_positions"][0]["resolved"] is True
+            assert exc_info.value.details["resolved_positions"][1]["reason"] == "not_resolved"
             assert exc_info.value.details["missing_positions"] == [2, 3, 4, 5, 6, 7, 8]
 
     def test_create_round_from_playlist_returns_resolved_position_map(self, app):
@@ -223,7 +223,31 @@ class TestRoundAutomation:
             with (
                 patch(
                     "musicround.services.automation.import_catalog_item",
-                    return_value={"item_id": "playlist123", "result": {}},
+                    return_value={
+                        "item_id": "playlist123",
+                        "result": {
+                            "playlist_positions": [
+                                {
+                                    "position": 1,
+                                    "spotify_track_id": "spotify-first",
+                                    "artist": "A",
+                                    "title": "First",
+                                    "song_id": first_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                                {
+                                    "position": 2,
+                                    "spotify_track_id": "spotify-second",
+                                    "artist": "B",
+                                    "title": "Second",
+                                    "song_id": second_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                            ],
+                        },
+                    },
                 ),
                 patch(
                     "musicround.services.automation._spotify_playlist_song_ids",
@@ -237,10 +261,84 @@ class TestRoundAutomation:
                 )
 
             assert result["round"]["song_ids"] == [first_song.id, second_song.id]
-            assert result["resolved_positions"] == [
-                {"position": 1, "song_id": first_song.id, "resolved": True},
-                {"position": 2, "song_id": second_song.id, "resolved": True},
-            ]
+            assert result["resolved_positions"][0] == {
+                "position": 1,
+                "song_id": first_song.id,
+                "resolved": True,
+                "status": "resolved",
+                "spotify_track_id": "spotify-first",
+                "artist": "A",
+                "title": "First",
+                "reason": None,
+            }
+            assert result["resolved_positions"][1]["spotify_track_id"] == "spotify-second"
+
+    def test_create_round_from_playlist_preserves_failed_source_positions(self, app):
+        with app.app_context():
+            first_song = _create_song(title="First", artist="A")
+            third_song = _create_song(title="Third", artist="C")
+
+            with (
+                patch(
+                    "musicround.services.automation.import_catalog_item",
+                    return_value={
+                        "item_id": "playlist123",
+                        "result": {
+                            "playlist_positions": [
+                                {
+                                    "position": 1,
+                                    "spotify_track_id": "spotify-first",
+                                    "artist": "A",
+                                    "title": "First",
+                                    "song_id": first_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                                {
+                                    "position": 2,
+                                    "spotify_track_id": None,
+                                    "artist": "B",
+                                    "title": "Broken",
+                                    "song_id": None,
+                                    "status": "failed",
+                                    "reason": "missing_spotify_track_id",
+                                },
+                                {
+                                    "position": 3,
+                                    "spotify_track_id": "spotify-third",
+                                    "artist": "C",
+                                    "title": "Third",
+                                    "song_id": third_song.id,
+                                    "status": "resolved",
+                                    "reason": None,
+                                },
+                            ],
+                        },
+                    },
+                ),
+                patch("musicround.services.automation._spotify_playlist_song_ids") as mock_song_ids,
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.create_round_from_playlist(
+                        "spotify",
+                        "playlist123",
+                        count=3,
+                    )
+
+            mock_song_ids.assert_not_called()
+            assert exc_info.value.details["resolved_song_count"] == 2
+            assert exc_info.value.details["missing_positions"] == [2]
+            assert exc_info.value.details["resolved_positions"][1] == {
+                "position": 2,
+                "song_id": None,
+                "resolved": False,
+                "status": "failed",
+                "spotify_track_id": None,
+                "artist": "B",
+                "title": "Broken",
+                "reason": "missing_spotify_track_id",
+            }
+            assert Round.query.count() == 0
 
     def test_replace_round_song_updates_position_and_invalidates_assets(self, app):
         with app.app_context():
@@ -1292,6 +1390,45 @@ class TestAgentPlanningAutomation:
             assert result["low_confidence"][0]["issues"] == ["missing_artist"]
             assert result["ready_for_import"] is False
 
+    def test_parse_text_playlist_reads_headered_csv_columns(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "artist,title\n"
+                "Harry Styles,As It Was\n"
+                "Shania Twain,Man! I Feel Like A Woman!\n"
+            )
+
+            assert result["count"] == 2
+            assert result["candidates"][0]["line"] == 2
+            assert result["candidates"][0]["artist"] == "Harry Styles"
+            assert result["candidates"][0]["title"] == "As It Was"
+            assert result["candidates"][1]["artist"] == "Shania Twain"
+            assert result["low_confidence_count"] == 0
+            assert result["ready_for_import"] is True
+
+    def test_parse_text_playlist_reads_semicolon_csv_title_artist(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "title;artist\n"
+                "As It Was;Harry Styles\n"
+            )
+
+            assert result["candidates"][0]["title"] == "As It Was"
+            assert result["candidates"][0]["artist"] == "Harry Styles"
+
+    def test_parse_text_playlist_marks_csv_rows_with_missing_values(self, app):
+        with app.app_context():
+            result = automation.parse_text_playlist(
+                "artist,title\n"
+                "Harry Styles,\n"
+                ",Man! I Feel Like A Woman!\n"
+            )
+
+            assert result["count"] == 2
+            assert result["low_confidence_count"] == 2
+            assert result["low_confidence"][0]["issues"] == ["missing_title"]
+            assert result["low_confidence"][1]["issues"] == ["missing_artist"]
+
     def test_retry_import_job_requeues_dead_letter_job(self, app):
         with app.app_context():
             user = _create_user()
@@ -1435,6 +1572,80 @@ class TestAgentPlanningAutomation:
             assert any("exactly 8 songs" in item for item in result["constraints"])
             assert any("summer" in item for item in result["date_notes"])
             assert "agent_prompt" in result
+
+    def test_planned_quiz_round_lifecycle(self, app):
+        with app.app_context():
+            user = _create_user(username="planner", email="planner@example.test")
+            song = _create_song(title="As It Was", artist="Harry Styles")
+            round_id = automation.create_round(
+                name="Planned Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            export = RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination="planner@example.test",
+                status="scheduled",
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                quizmaster_id=user.id,
+                theme="festival headliners",
+                brief="Build eight robust songs.",
+                due_at="2026-07-09T17:00:00+02:00",
+                source_playlist_url="https://open.spotify.com/playlist/example",
+            )
+            plan_id = created["plan"]["id"]
+            listed = automation.list_planned_quiz_rounds(quizmaster_id=user.id)
+            linked = automation.link_planned_quiz_round(
+                plan_id,
+                round_id=round_id,
+                export_id=export.id,
+                status="scheduled",
+            )
+
+            assert created["created"] is True
+            assert created["plan"]["quiz_date"] == "2026-07-09T17:00:00Z"
+            assert created["plan"]["due_at"] == "2026-07-09T15:00:00Z"
+            assert listed["count"] == 1
+            assert linked["plan"]["round_id"] == round_id
+            assert linked["plan"]["export_id"] == export.id
+            assert linked["plan"]["status"] == "scheduled"
+            assert PlannedQuizRound.query.get(plan_id).round_id == round_id
+
+    def test_planned_quiz_round_rejects_invalid_links(self, app):
+        with app.app_context():
+            user = _create_user()
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                quizmaster_id=user.id,
+            )
+
+            with pytest.raises(automation.AutomationError) as exc_info:
+                automation.link_planned_quiz_round(created["plan"]["id"], round_id=9999)
+
+            assert "Round 9999 was not found" in str(exc_info.value)
+
+    def test_planned_quiz_round_can_be_unassigned(self, app):
+        with app.app_context():
+            _create_user(username="planner-a", email="planner-a@example.test")
+            _create_user(username="planner-b", email="planner-b@example.test")
+
+            created = automation.create_planned_quiz_round(
+                quiz_date="2026-07-09T19:00:00+02:00",
+                theme="unassigned production slot",
+            )
+
+            assert created["created"] is True
+            assert created["plan"]["quizmaster_id"] is None
+            assert created["plan"]["quizmaster"] is None
 
     def test_draft_round_audio_scripts_uses_round_context(self, app):
         with app.app_context():

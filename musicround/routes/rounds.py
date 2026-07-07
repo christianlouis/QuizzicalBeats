@@ -14,7 +14,7 @@ import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
 from sqlalchemy import or_
-from musicround.models import Round, RoundAudioScript, RoundExport, RoundShare, Song, db
+from musicround.models import PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, Song, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -316,8 +316,23 @@ def rounds_list():
 @rounds_bp.route('/calendar')
 @login_required
 def rounds_calendar():
-    """Show scheduled round email exports as a lightweight quiz calendar."""
+    """Show planned quiz dates and scheduled email exports as a lightweight calendar."""
     visible_round_ids = _visible_rounds_query().with_entities(Round.id)
+    planned_query = PlannedQuizRound.query
+    if not current_user.is_admin:
+        planned_query = planned_query.filter(
+            or_(
+                PlannedQuizRound.quizmaster_id == current_user.id,
+                PlannedQuizRound.quizmaster_id.is_(None),
+                PlannedQuizRound.round_id.in_(visible_round_ids),
+            )
+        )
+    planned_rounds = (
+        planned_query
+        .order_by(PlannedQuizRound.quiz_date.asc(), PlannedQuizRound.id.asc())
+        .limit(100)
+        .all()
+    )
     exports = (
         RoundExport.query.filter(
             RoundExport.round_id.in_(visible_round_ids),
@@ -328,7 +343,7 @@ def rounds_calendar():
         .limit(100)
         .all()
     )
-    return render_template('round_calendar.html', exports=exports)
+    return render_template('round_calendar.html', exports=exports, planned_rounds=planned_rounds)
 
 
 @rounds_bp.route('/analytics')

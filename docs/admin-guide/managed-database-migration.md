@@ -8,7 +8,8 @@ database to a managed SQL database without exposing credentials in logs or Git.
 - Secret owner: `quizzicalbeats/quizzicalbeats-secrets` in the existing
   1Password-backed ExternalSecret flow.
 - Required secret key: `SQLALCHEMY_DATABASE_URI`.
-- Production guard: set `DATABASE_REQUIRE_MANAGED=True` in Kubernetes config.
+- Production guard: set `DATABASE_REQUIRE_MANAGED=true` in Kubernetes config.
+  The app accepts common truthy values such as `true`, `1`, `yes`, and `on`.
 - The URI value must stay in 1Password or the generated Kubernetes Secret. Do
   not commit it to Git and do not print it in logs.
 
@@ -58,7 +59,7 @@ database to a managed SQL database without exposing credentials in logs or Git.
      -o jsonpath='{.data.SQLALCHEMY_DATABASE_URI}' >/dev/null
    ```
 
-2. Deploy the app with `DATABASE_REQUIRE_MANAGED=True` and without a ConfigMap
+2. Deploy the app with `DATABASE_REQUIRE_MANAGED=true` and without a ConfigMap
    `SQLALCHEMY_DATABASE_URI` fallback.
 3. Restart the web deployment after the secret has synced:
 

@@ -112,7 +112,7 @@
 ### 🎯 Milestone 12: **"Search Supercharge" Release** – Enhanced Search
 
 * [ ] Improve search algorithm and relevance scoring
-* [x] Normalize and de-duplicate tag choices in the round builder
+* [x] Normalize, de-duplicate, and curate tag choices in the round builder
 * [x] Add advanced song catalog filtering options (year, genre, preview, usage)
 * [ ] Implement caching for frequent searches
 * [x] Add server-side song catalog pagination for API and agent workflows
@@ -125,7 +125,7 @@
 * [x] Confidence scoring for matches
 * [x] MCP review payload for low-confidence matches
 * [ ] Manual review interface for low-confidence matches
-* [x] Support for various text formats (CSV, plain text, etc.)
+* [x] Support for various text formats, including headered CSV and plain text
 * [x] Create complete rounds from fully resolved text playlists
 
 ### 🎯 Milestone 14: **"Curated Collector" Release** – Playlist Scraper
@@ -137,9 +137,9 @@
 
 ### 🎯 Milestone 15: **"Server Stability" Release** – Production Web Server
 
-* [ ] Replace Flask development server with Gunicorn/uWSGI
-* [ ] Configure proper worker processes and threads
-* [ ] Implement graceful shutdown and restart capabilities
+* [x] Replace Flask development server with Gunicorn/uWSGI
+* [x] Configure proper worker processes and threads
+* [x] Implement graceful shutdown and restart capabilities through Gunicorn
 * [ ] Add Nginx as reverse proxy with proper caching
 * [ ] Set up proper SSL termination and security headers
 * [ ] Optimize static file serving
@@ -180,6 +180,8 @@
   * [x] Create quiz rounds from fully resolved text playlists
   * [x] Let users prompt AI with a theme or vibe (e.g., "Chill 80s", "Dancefloor Divas")
   * [x] Provide recent usage/fatigue context for agentic song selection
+  * [x] Store planned quiz dates and link them to generated rounds/scheduled exports
+  * [x] Show planned quiz dates in the browser round calendar
   * [x] Draft intro/replay/outro scripts for later TTS generation
   * [x] Store and review generated intro/replay/outro scripts before assigning TTS audio
   * [ ] Include fallback logic when metadata is sparse
@@ -236,7 +238,7 @@
 
 ### 🎯 Milestone 24: **"Deployment Dynamo" Release** – CI/CD and Maintenance
 
-* [ ] GitHub Actions or GitLab CI/CD pipeline for builds and tests
+* [x] GitHub Actions CI/CD pipeline for builds and tests
 * [ ] Nightly backup job with status alert
 * [ ] Add Sentry or similar for exception tracking
 * [ ] Updater script for pulling latest Git commits safely
@@ -258,4 +260,4 @@
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: July 5, 2026*
+*Last updated: July 6, 2026*

@@ -5,7 +5,15 @@ import sqlite3
 from flask import Flask
 
 from musicround import db
-from musicround.models import ImportJobRecord, Round, RoundAudioScript, RoundExport, RoundShare, Song
+from musicround.models import (
+    ImportJobRecord,
+    PlannedQuizRound,
+    Round,
+    RoundAudioScript,
+    RoundExport,
+    RoundShare,
+    Song,
+)
 
 
 def _legacy_app(database_path):
@@ -287,6 +295,41 @@ def test_add_round_review_workflow_to_legacy_database(tmp_path):
     }.issubset(round_columns)
     assert "idx_round_review_status" in _index_names(database_path, "round")
     assert "review_status" in Round.__table__.columns.keys()
+
+
+def test_add_planned_quiz_rounds_to_legacy_database(tmp_path):
+    """Existing databases get planned quiz production-board schema."""
+    database_path = tmp_path / "legacy-planned-quiz.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        db.create_all()
+        db.session.remove()
+        db.drop_all()
+
+        from migrations import add_planned_quiz_rounds
+
+        assert add_planned_quiz_rounds.run_migration() is True
+        assert add_planned_quiz_rounds.run_migration() is None
+
+    assert "planned_quiz_round" in _table_names(database_path)
+    columns = set(_column_names(database_path, "planned_quiz_round"))
+    assert {
+        "quiz_date",
+        "quizmaster_id",
+        "theme",
+        "brief",
+        "source_playlist_url",
+        "due_at",
+        "status",
+        "round_id",
+        "export_id",
+    }.issubset(columns)
+    assert "idx_planned_quiz_round_status_due" in _index_names(database_path, "planned_quiz_round")
+    assert "idx_planned_quiz_round_quizmaster_date" in _index_names(
+        database_path,
+        "planned_quiz_round",
+    )
+    assert PlannedQuizRound.__tablename__ == "planned_quiz_round"
 
 
 def test_round_songs_comment_matches_storage_behavior():

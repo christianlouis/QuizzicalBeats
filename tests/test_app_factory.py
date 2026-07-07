@@ -1,6 +1,7 @@
 """Tests for Flask app factory configuration helpers."""
 import os
 import json
+import importlib
 from datetime import datetime, timedelta
 
 from flask import Flask
@@ -17,6 +18,7 @@ from musicround import (
 from musicround.helpers.database_config import (
     database_summary,
     is_legacy_data_sqlite_uri,
+    managed_database_requirement_error,
     redact_database_uri,
 )
 from musicround.models import User, db
@@ -83,6 +85,42 @@ def test_configure_database_uri_rejects_sqlite_when_managed_required(monkeypatch
     import pytest
     with pytest.raises(RuntimeError, match='points at SQLite'):
         _configure_database_uri(app)
+
+
+def test_configure_database_uri_accepts_lowercase_managed_flag(monkeypatch):
+    """Managed DB guard should accept env-style lowercase booleans."""
+    monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', 'sqlite:////data/song_data.db')
+    app = Flask(__name__)
+    app.config['DATABASE_REQUIRE_MANAGED'] = 'true'
+
+    import pytest
+    with pytest.raises(RuntimeError, match='points at SQLite'):
+        _configure_database_uri(app)
+
+
+def test_config_bool_parses_common_managed_database_values(monkeypatch):
+    """Config should parse the same DATABASE_REQUIRE_MANAGED values as runtime."""
+    monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-testing-only')
+    monkeypatch.setenv('DATABASE_REQUIRE_MANAGED', 'yes')
+
+    import musicround.config as config_module
+
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.DATABASE_REQUIRE_MANAGED is True
+    monkeypatch.setenv('DATABASE_REQUIRE_MANAGED', 'False')
+    importlib.reload(config_module)
+
+
+def test_managed_database_requirement_error_is_credential_safe():
+    """Managed DB guard errors must not include raw database credentials."""
+    uri = 'postgresql://qb_user:super-secret@postgres.example/qb'
+
+    assert managed_database_requirement_error(uri, True) is None
+    assert 'super-secret' not in managed_database_requirement_error(None, True)
+    sqlite_error = managed_database_requirement_error('sqlite:////data/song_data.db', 'on')
+    assert 'points at SQLite' in sqlite_error
+    assert '/data/song_data.db' not in sqlite_error
 
 
 def test_database_uri_redaction_hides_credentials():

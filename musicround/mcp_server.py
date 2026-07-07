@@ -450,6 +450,92 @@ def round_planning_brief(
 
 
 @mcp.tool()
+def create_planned_quiz_round(
+    quiz_date: str,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | None = None,
+    source_playlist_url: str | None = None,
+    status: str = "planned",
+) -> dict[str, Any]:
+    """Create a planned quiz date before a concrete round exists."""
+    return _with_app_context(
+        automation.create_planned_quiz_round,
+        quiz_date=quiz_date,
+        quizmaster_id=quizmaster_id,
+        theme=theme,
+        brief=brief,
+        due_at=due_at,
+        source_playlist_url=source_playlist_url,
+        status=status,
+    )
+
+
+@mcp.tool()
+def list_planned_quiz_rounds(
+    quizmaster_id: int | None = None,
+    status: str | None = None,
+    include_past: bool = True,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List planned quiz dates for agents and production-board views."""
+    return _with_app_context(
+        automation.list_planned_quiz_rounds,
+        quizmaster_id=quizmaster_id,
+        status=status,
+        include_past=include_past,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def update_planned_quiz_round(
+    plan_id: int,
+    quiz_date: str | None = None,
+    quizmaster_id: int | None = None,
+    theme: str | None = None,
+    brief: str | None = None,
+    due_at: str | None = None,
+    source_playlist_url: str | None = None,
+    status: str | None = None,
+    round_id: int | None = None,
+    export_id: int | None = None,
+) -> dict[str, Any]:
+    """Update a planned quiz date and optional linked deliverables."""
+    return _with_app_context(
+        automation.update_planned_quiz_round,
+        plan_id=plan_id,
+        quiz_date=quiz_date,
+        quizmaster_id=quizmaster_id,
+        theme=theme,
+        brief=brief,
+        due_at=due_at,
+        source_playlist_url=source_playlist_url,
+        status=status,
+        round_id=round_id,
+        export_id=export_id,
+    )
+
+
+@mcp.tool()
+def link_planned_quiz_round(
+    plan_id: int,
+    round_id: int | None = None,
+    export_id: int | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Link a planned quiz date to a generated round or scheduled export."""
+    return _with_app_context(
+        automation.link_planned_quiz_round,
+        plan_id=plan_id,
+        round_id=round_id,
+        export_id=export_id,
+        status=status,
+    )
+
+
+@mcp.tool()
 def draft_round_audio_scripts(
     round_id: int | None = None,
     user_id: int | None = None,

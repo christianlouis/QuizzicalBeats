@@ -119,7 +119,7 @@ TRACEBACK:
     </div>
 
     <!-- Store error info for JS -->
-    <div id="error-info-data" class="hidden" data-error-info='{{ error_info_for_js|safe }}'></div>
+    <div id="error-info-data" class="hidden" data-error-info="{{ error_info_for_js }}"></div>
 {% endblock %}
 
 {% block scripts %}

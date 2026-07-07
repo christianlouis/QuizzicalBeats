@@ -4,10 +4,29 @@ General utility functions used throughout the application.
 import secrets
 import string
 import os
+from urllib.parse import urlparse
 from flask import current_app
 from werkzeug.utils import secure_filename
 import requests
 import json
+
+
+def is_safe_url(target):
+    """Return whether a redirect target is an app-local absolute path."""
+    if not target or not isinstance(target, str):
+        return False
+    if not target.startswith('/'):
+        return False
+    if target.startswith(('//', r'\\', r'/\\', r'\\/')):
+        return False
+    if '\\' in target:
+        return False
+    try:
+        parsed = urlparse(target)
+    except ValueError:
+        return False
+    return not parsed.scheme and not parsed.netloc
+
 
 def generate_token(length=32):
     """
