@@ -531,6 +531,31 @@ class TestRoundAutomation:
 
             assert RoundAccessEvent.query.count() == 1
 
+    def test_list_round_access_events_requires_owner_or_admin_requester(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            admin = _create_user(username="admin", email="admin@example.test")
+            admin.is_admin = True
+            song = _create_song(title="Shared", artist="A")
+            round_id = automation.create_round(
+                name="Share Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            automation.share_round(round_id, viewer.id, actor_user_id=owner.id)
+
+            owner_events = automation.list_round_access_events(round_id, requester_user_id=owner.id)
+            admin_events = automation.list_round_access_events(round_id, requester_user_id=admin.id)
+            with pytest.raises(automation.AutomationError, match="owner or an admin"):
+                automation.list_round_access_events(round_id, requester_user_id=viewer.id)
+            with pytest.raises(automation.AutomationError, match="limit must be an integer"):
+                automation.list_round_access_events(round_id, limit="many", requester_user_id=owner.id)
+
+            assert owner_events["count"] == 1
+            assert admin_events["count"] == 1
+
 
 class TestAssetInspection:
     """Tests for generated asset quality checks."""

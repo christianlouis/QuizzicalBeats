@@ -282,6 +282,7 @@ class TestRoundCollaborationModels:
         assert round_.access_events.count() == 1
         assert round_.access_events.first().actor.id == owner.id
         assert round_.access_events.first().target_user.id == viewer.id
+        assert repr(event) == f"RoundAccessEvent(round_id={round_.id}, action='share_created')"
 
     def test_round_audio_script_creation(self, app):
         """Intro/replay/outro text can be stored before TTS generation."""

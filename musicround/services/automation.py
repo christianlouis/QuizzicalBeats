@@ -236,6 +236,15 @@ def _validate_round_access_actor(actor_user_id: int | None) -> int | None:
     return _find_user(actor_user_id).id
 
 
+def _validate_round_access_requester(round_obj: Round, requester_user_id: int | None) -> None:
+    if requester_user_id is None:
+        return
+    requester = _find_user(requester_user_id)
+    if requester.is_admin or round_obj.user_id == requester.id:
+        return
+    raise AutomationError("Only the round owner or an admin can view round access events.")
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
@@ -1066,12 +1075,21 @@ def revoke_round_share(
     }
 
 
-def list_round_access_events(round_id: int, limit: int = 50) -> dict[str, Any]:
+def list_round_access_events(
+    round_id: int,
+    limit: int = 50,
+    requester_user_id: int | None = None,
+) -> dict[str, Any]:
     """List recent ownership and sharing audit events for a round."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
-    normalized_limit = max(1, min(int(limit or 50), 200))
+    _validate_round_access_requester(round_obj, requester_user_id)
+    try:
+        requested_limit = int(limit or 50)
+    except (TypeError, ValueError) as exc:
+        raise AutomationError("limit must be an integer.") from exc
+    normalized_limit = max(1, min(requested_limit, 200))
     events = (
         RoundAccessEvent.query.filter_by(round_id=round_id)
         .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())

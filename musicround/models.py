@@ -361,9 +361,7 @@ class RoundShare(db.Model):
 
 
 class RoundAccessEvent(db.Model):
-    """
-    Audit events for round ownership and sharing changes.
-    """
+    """Audit events for round ownership and sharing changes."""
     __tablename__ = 'round_access_event'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -385,7 +383,8 @@ class RoundAccessEvent(db.Model):
     actor = db.relationship('User', foreign_keys=[actor_user_id])
     target_user = db.relationship('User', foreign_keys=[target_user_id])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Return a compact debug representation."""
         return f"RoundAccessEvent(round_id={self.round_id}, action='{self.action}')"
 
 

@@ -265,6 +265,9 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     assert "idx_round_access_event_actor" in _index_names(
         database_path, "round_access_event"
     )
+    assert "idx_round_access_event_target" in _index_names(
+        database_path, "round_access_event"
+    )
     assert "idx_round_audio_script_round_status" in _index_names(
         database_path, "round_audio_script"
     )
@@ -280,6 +283,16 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     created_at_column = access_event_columns["created_at"]
     assert created_at_column[3] == 1
     assert created_at_column[4] == "CURRENT_TIMESTAMP"
+    access_event_foreign_keys = _foreign_keys(database_path, "round_access_event")
+    assert ("round", "round_id", "id", "CASCADE") in {
+        (row[2], row[3], row[4], row[6]) for row in access_event_foreign_keys
+    }
+    assert ("user", "actor_user_id", "id", "SET NULL") in {
+        (row[2], row[3], row[4], row[6]) for row in access_event_foreign_keys
+    }
+    assert ("user", "target_user_id", "id", "SET NULL") in {
+        (row[2], row[3], row[4], row[6]) for row in access_event_foreign_keys
+    }
     assert "user_id" in Round.__table__.columns.keys()
     assert RoundShare.__tablename__ == "round_share"
     assert RoundAccessEvent.__tablename__ == "round_access_event"

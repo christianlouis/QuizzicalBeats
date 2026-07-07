@@ -110,9 +110,9 @@ def run_migration():
                         """
                         CREATE TABLE round_access_event (
                             id INTEGER PRIMARY KEY,
-                            round_id INTEGER NOT NULL,
-                            actor_user_id INTEGER,
-                            target_user_id INTEGER,
+                            round_id INTEGER NOT NULL REFERENCES round(id) ON DELETE CASCADE,
+                            actor_user_id INTEGER REFERENCES user(id) ON DELETE SET NULL,
+                            target_user_id INTEGER REFERENCES user(id) ON DELETE SET NULL,
                             action VARCHAR(40) NOT NULL,
                             role VARCHAR(20),
                             details TEXT,
