@@ -542,9 +542,29 @@ class TestRoundDetailRoute:
 
         assert update.status_code == 302
         assert mp3.status_code == 403
+        assert mp3.is_json
+        assert mp3.get_json() == {
+            'success': False,
+            'error': 'You do not have permission to produce assets for this round.',
+        }
         assert pdf.status_code == 403
+        assert pdf.is_json
+        assert pdf.get_json() == {
+            'success': False,
+            'error': 'You do not have permission to produce assets for this round.',
+        }
         assert mail.status_code == 403
+        assert mail.is_json
+        assert mail.get_json() == {
+            'success': False,
+            'error': 'You do not have permission to produce assets for this round.',
+        }
         assert dropbox.status_code == 403
+        assert dropbox.is_json
+        assert dropbox.get_json() == {
+            'success': False,
+            'error': 'You do not have permission to produce assets for this round.',
+        }
         assert delete.status_code == 403
         with app.app_context():
             assert db.session.get(Round, round_id).name == 'Editor Still Can Edit'

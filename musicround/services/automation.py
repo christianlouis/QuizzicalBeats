@@ -193,6 +193,16 @@ def _user_summary(user: User | None) -> dict[str, Any] | None:
     }
 
 
+def _public_user_summary(user: User | None) -> dict[str, Any] | None:
+    if not user:
+        return None
+    return {
+        "id": user.id,
+        "username": user.username,
+        "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
+    }
+
+
 def _round_share_summary(share: RoundShare) -> dict[str, Any]:
     return {
         "id": share.id,
@@ -355,7 +365,7 @@ def _public_round_summary(round_obj: Round) -> dict[str, Any]:
         "created_at": _datetime_payload(round_obj.created_at),
         "song_count": len(_round_song_ids(round_obj)),
         "songs": [_song_summary(song) for song in _ordered_round_songs(round_obj)],
-        "owner": _user_summary(round_obj.owner),
+        "owner": _public_user_summary(round_obj.owner),
     }
 
 

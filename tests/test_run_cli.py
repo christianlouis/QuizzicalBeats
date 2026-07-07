@@ -81,9 +81,35 @@ def test_database_preflight_json_blocks_legacy_sqlite(monkeypatch, capsys):
     payload = json.loads(captured.out)
 
     assert exit_code == 78
-    assert payload["ok"] is True
-    assert payload["status"] == "warning"
-    assert payload["issues"][0]["code"] == "legacy_sqlite_data_store"
+    assert payload["ok"] is False
+    assert payload["status"] == "error"
+    assert payload["managed_required"] is True
+    assert payload["issues"][0]["code"] == "managed_database_requirement_failed"
+    assert "/data/song_data.db" not in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_database_status_json_reports_managed_guard_error(monkeypatch, capsys):
+    """JSON status should expose managed-DB violations without a traceback."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.setenv("DATABASE_REQUIRE_MANAGED", "true")
+    from musicround.config import Config
+    monkeypatch.setattr(Config, "DATABASE_REQUIRE_MANAGED", True)
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "status", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 78
+    assert payload["ok"] is False
+    assert payload["status"] == "error"
+    assert payload["managed_required"] is True
+    assert payload["issues"][0]["code"] == "managed_database_requirement_failed"
     assert "/data/song_data.db" not in captured.out
     assert "Traceback" not in captured.err
 

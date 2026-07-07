@@ -265,7 +265,7 @@ class Round(db.Model):
     tag = db.Column(db.String(50))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     visibility = db.Column(db.String(20), default='private', nullable=False)
-    public_token = db.Column(db.String(64), unique=True, nullable=True)
+    public_token = db.Column(db.String(64), nullable=True)
     public_token_created_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
@@ -281,7 +281,7 @@ class Round(db.Model):
         db.Index('idx_round_created_at', 'created_at'),
         db.Index('idx_round_generation_status', 'mp3_generated', 'pdf_generated'),
         db.Index('idx_round_owner_created', 'user_id', 'created_at'),
-        db.Index('idx_round_public_token', 'public_token'),
+        db.Index('idx_round_public_token', 'public_token', unique=True),
         db.Index('idx_round_review_status', 'review_status', 'approved_at'),
     )
 
