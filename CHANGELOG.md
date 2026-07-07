@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
 - Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
+- Added PostgreSQL component-variable database configuration so Kubernetes/CNPG deployments can use `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` without storing one full database URI secret.
 
 ### Fixed
 - Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.
@@ -82,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
 - Hardened the managed-database guard so common truthy `DATABASE_REQUIRE_MANAGED` values fail fast before container startup can fall back to SQLite.
+- Added a PostgreSQL driver dependency required for managed PostgreSQL deployments.
 - Hardened login and OAuth redirect targets against open redirects.
 - Escaped browser error metadata instead of injecting raw JSON into the error template.
 - Normalized Dropbox API paths for folder browsing, folder creation, upload, and shared-link creation.

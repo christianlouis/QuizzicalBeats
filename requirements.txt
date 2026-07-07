@@ -2,6 +2,7 @@ Flask
 Flask-WTF
 Flask-SQLAlchemy
 flask_migrate
+psycopg2-binary>=2.9.9
 requests
 pydub
 reportlab

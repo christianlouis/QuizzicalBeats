@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 
 def bool_from_config(value) -> bool:
@@ -43,15 +43,53 @@ def managed_database_requirement_error(
         return None
     if not uri:
         return (
-            "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
-            "is not configured."
+            "DATABASE_REQUIRE_MANAGED is enabled, but neither "
+            "SQLALCHEMY_DATABASE_URI nor a complete PGHOST/PGDATABASE/PGUSER/"
+            "PGPASSWORD configuration is available."
         )
     if is_sqlite_database_uri(uri):
         return (
             "DATABASE_REQUIRE_MANAGED is enabled, but SQLALCHEMY_DATABASE_URI "
-            "points at SQLite. Configure a managed SQL URI via secrets."
+            "points at SQLite. Configure a managed SQL URI or complete PG* "
+            "database credentials via secrets."
         )
     return None
+
+
+def database_uri_from_postgres_env(environ) -> str | None:
+    """Build a SQLAlchemy PostgreSQL URI from standard PG* environment variables."""
+    values = {
+        "PGHOST": environ.get("PGHOST"),
+        "PGDATABASE": environ.get("PGDATABASE"),
+        "PGUSER": environ.get("PGUSER"),
+        "PGPASSWORD": environ.get("PGPASSWORD"),
+    }
+    if not any(values.values()):
+        return None
+
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        raise ValueError(
+            "PostgreSQL environment is incomplete; missing "
+            + ", ".join(sorted(missing))
+            + "."
+        )
+
+    scheme = environ.get("SQLALCHEMY_POSTGRES_SCHEME", "postgresql+psycopg2")
+    host = str(values["PGHOST"]).strip()
+    port = str(environ.get("PGPORT") or "5432").strip()
+    database = quote(str(values["PGDATABASE"]).strip(), safe="")
+    username = quote(str(values["PGUSER"]).strip(), safe="")
+    password = quote(str(values["PGPASSWORD"]), safe="")
+    netloc = f"{username}:{password}@{host}:{port}"
+
+    query_params = {}
+    sslmode = environ.get("PGSSLMODE")
+    if sslmode:
+        query_params["sslmode"] = sslmode
+    query = urlencode(query_params)
+
+    return urlunsplit((scheme, netloc, f"/{database}", query, ""))
 
 
 def redact_database_uri(uri: str | None) -> str:

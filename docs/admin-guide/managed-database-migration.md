@@ -7,11 +7,14 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
 - Secret owner: `quizzicalbeats/quizzicalbeats-secrets` in the existing
   1Password-backed ExternalSecret flow.
-- Required secret key: `SQLALCHEMY_DATABASE_URI`.
+- Required database config: either `SQLALCHEMY_DATABASE_URI` or the standard
+  PostgreSQL component variables `PGHOST`, `PGDATABASE`, `PGUSER`, and
+  `PGPASSWORD`. `PGPORT` defaults to `5432`.
 - Production guard: set `DATABASE_REQUIRE_MANAGED=true` in Kubernetes config.
   The app accepts common truthy values such as `true`, `1`, `yes`, and `on`.
-- The URI value must stay in 1Password or the generated Kubernetes Secret. Do
-  not commit it to Git and do not print it in logs.
+- Database credentials must stay in 1Password, CNPG-generated Kubernetes
+  Secrets, or equivalent secretKeyRef entries. Do not commit them to Git and
+  do not print them in logs.
 
 ## Preflight
 
@@ -30,9 +33,11 @@ database to a managed SQL database without exposing credentials in logs or Git.
 3. Copy `/data/song_data.db` out of the pod or snapshot the PVC before any
    import into the managed database.
 
-4. Add or update `SQLALCHEMY_DATABASE_URI` in the 1Password item
-   `quizzicalbeats/quizzicalbeats-secrets`. The target should be a managed SQL
-   database. PostgreSQL is preferred for production.
+4. Add the managed database configuration. For PostgreSQL/CNPG, prefer
+   `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` from Kubernetes
+   `secretKeyRef` entries so no full URI secret needs to be stored. A complete
+   `SQLALCHEMY_DATABASE_URI` in the 1Password item
+   `quizzicalbeats/quizzicalbeats-secrets` is still supported.
 
 ## Dry Run
 
@@ -59,8 +64,18 @@ database to a managed SQL database without exposing credentials in logs or Git.
      -o jsonpath='{.data.SQLALCHEMY_DATABASE_URI}' >/dev/null
    ```
 
+   If using CNPG component variables instead, verify the app deployment has
+   `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` configured without
+   printing their values:
+
+   ```bash
+   kubectl -n quizzicalbeats get deploy quizzicalbeats \
+     -o jsonpath='{range .spec.template.spec.containers[?(@.name=="web")].env[*]}{.name}{"\n"}{end}' \
+     | grep -E '^(PGHOST|PGDATABASE|PGUSER|PGPASSWORD)$'
+   ```
+
 2. Deploy the app with `DATABASE_REQUIRE_MANAGED=true` and without a ConfigMap
-   `SQLALCHEMY_DATABASE_URI` fallback.
+   `SQLALCHEMY_DATABASE_URI` SQLite fallback.
 3. Restart the web deployment after the secret has synced:
 
    ```bash

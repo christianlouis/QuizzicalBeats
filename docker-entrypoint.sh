@@ -12,11 +12,16 @@ import os
 import sys
 from musicround.helpers.database_config import (
     bool_from_config,
+    database_uri_from_postgres_env,
     database_summary,
     managed_database_requirement_error,
 )
 
-db_uri = os.environ.get("SQLALCHEMY_DATABASE_URI")
+try:
+    db_uri = os.environ.get("SQLALCHEMY_DATABASE_URI") or database_uri_from_postgres_env(os.environ)
+except ValueError as exc:
+    print(f"Database configuration error: {exc}", file=sys.stderr)
+    sys.exit(78)
 require_managed = bool_from_config(os.environ.get("DATABASE_REQUIRE_MANAGED"))
 summary = database_summary(db_uri)
 print(f"Database backend: {summary['backend']}")

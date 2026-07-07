@@ -16,6 +16,7 @@ from musicround import (
     _store_spotify_authlib_token,
 )
 from musicround.helpers.database_config import (
+    database_uri_from_postgres_env,
     database_summary,
     is_legacy_data_sqlite_uri,
     managed_database_requirement_error,
@@ -46,6 +47,56 @@ def test_configure_database_uri_preserves_explicit_config_uri(monkeypatch):
     assert app.config['DATABASE_BACKEND'] == 'postgresql'
 
 
+def test_configure_database_uri_builds_from_postgres_env(monkeypatch):
+    """Managed deployments can avoid storing one full URI secret."""
+    monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
+    monkeypatch.setenv('PGHOST', 'quizzicalbeats-db-rw.quizzicalbeats.svc.cluster.local')
+    monkeypatch.setenv('PGPORT', '5432')
+    monkeypatch.setenv('PGDATABASE', 'quizzicalbeats')
+    monkeypatch.setenv('PGUSER', 'qb_user')
+    monkeypatch.setenv('PGPASSWORD', 'super secret/pass')
+    app = Flask(__name__)
+    app.config['DATABASE_REQUIRE_MANAGED'] = True
+
+    _configure_database_uri(app)
+
+    assert app.config['DATABASE_BACKEND'] == 'postgresql'
+    assert app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgresql+psycopg2://qb_user:')
+    assert 'super secret/pass' not in app.config['SQLALCHEMY_DATABASE_URI']
+    assert app.config['DATABASE_URI_REDACTED'] == (
+        'postgresql+psycopg2://qb_user:***@'
+        'quizzicalbeats-db-rw.quizzicalbeats.svc.cluster.local:5432/quizzicalbeats'
+    )
+
+
+def test_configure_database_uri_explicit_uri_wins_over_postgres_env(monkeypatch):
+    """Existing SQLALCHEMY_DATABASE_URI deployments keep their current contract."""
+    monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', 'postgresql://explicit.example/qb')
+    monkeypatch.setenv('PGHOST', 'ignored.example')
+    monkeypatch.setenv('PGDATABASE', 'ignored')
+    monkeypatch.setenv('PGUSER', 'ignored')
+    monkeypatch.setenv('PGPASSWORD', 'ignored')
+    app = Flask(__name__)
+
+    _configure_database_uri(app)
+
+    assert app.config['SQLALCHEMY_DATABASE_URI'] == 'postgresql://explicit.example/qb'
+
+
+def test_configure_database_uri_rejects_partial_postgres_env(monkeypatch):
+    """Partial PG* configuration should fail before falling back to SQLite."""
+    monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
+    monkeypatch.setenv('PGHOST', 'postgres.example')
+    monkeypatch.setenv('PGDATABASE', 'quizzicalbeats')
+    monkeypatch.delenv('PGUSER', raising=False)
+    monkeypatch.delenv('PGPASSWORD', raising=False)
+    app = Flask(__name__)
+
+    import pytest
+    with pytest.raises(RuntimeError, match='PostgreSQL environment is incomplete'):
+        _configure_database_uri(app)
+
+
 def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
     """Test fallback SQLite path is only used when no URI is configured."""
     monkeypatch.delenv('SQLALCHEMY_DATABASE_URI', raising=False)
@@ -72,7 +123,7 @@ def test_configure_database_uri_requires_managed_database(monkeypatch):
     app.config['DATABASE_REQUIRE_MANAGED'] = True
 
     import pytest
-    with pytest.raises(RuntimeError, match='SQLALCHEMY_DATABASE_URI is not configured'):
+    with pytest.raises(RuntimeError, match='complete PGHOST/PGDATABASE/PGUSER'):
         _configure_database_uri(app)
 
 
@@ -120,6 +171,7 @@ def test_managed_database_requirement_error_is_credential_safe():
     assert 'super-secret' not in managed_database_requirement_error(None, True)
     sqlite_error = managed_database_requirement_error('sqlite:////data/song_data.db', 'on')
     assert 'points at SQLite' in sqlite_error
+    assert 'complete PG* database credentials' in sqlite_error
     assert '/data/song_data.db' not in sqlite_error
 
 
@@ -135,6 +187,26 @@ def test_database_uri_redaction_hides_credentials():
     assert summary['backend'] == 'postgresql'
     assert summary['host'] == 'postgres.example'
     assert summary['database'] == 'quizzicalbeats'
+
+
+def test_database_uri_from_postgres_env_quotes_secret_components():
+    """Generated URIs must be valid and never include raw secret text."""
+    environ = {
+        'PGHOST': 'postgres.example',
+        'PGPORT': '5432',
+        'PGDATABASE': 'quiz db',
+        'PGUSER': 'qb user',
+        'PGPASSWORD': 'pass/with spaces',
+        'PGSSLMODE': 'require',
+    }
+
+    uri = database_uri_from_postgres_env(environ)
+
+    assert uri == (
+        'postgresql+psycopg2://qb%20user:pass%2Fwith%20spaces@'
+        'postgres.example:5432/quiz%20db?sslmode=require'
+    )
+    assert 'pass/with spaces' not in uri
 
 
 def test_legacy_sqlite_uri_detection_is_specific_to_data_file():
