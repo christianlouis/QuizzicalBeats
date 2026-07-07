@@ -943,6 +943,30 @@ class TestAssetInspection:
             assert result["status"] == "needs_substitution"
             assert any(issue["code"] == "preview_too_short" for issue in result["issues"])
 
+    def test_inspect_round_package_rejects_invalid_duration_parameters(self, app):
+        with app.app_context():
+            song = _create_song(title="Parameter", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Bad Parameters",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="must not exceed"):
+                automation.inspect_round_package(
+                    round_id,
+                    expected_song_count=1,
+                    min_preview_seconds=35,
+                    max_preview_seconds=20,
+                )
+
+            with pytest.raises(automation.AutomationError, match="must not be negative"):
+                automation.inspect_round_package(
+                    round_id,
+                    expected_song_count=1,
+                    duration_tolerance_seconds=-1,
+                )
+
     def test_inspect_round_package_tolerates_minor_mp3_duration_variance(self, app):
         with app.app_context():
             user = _create_user()
@@ -984,6 +1008,57 @@ class TestAssetInspection:
                 issue["code"] == "round_mp3_duration_mismatch"
                 for issue in result["issues"]
             )
+
+    def test_inspect_round_package_warns_for_small_mp3_duration_shortfall(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Warn Only", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Small Shortfall",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with (
+                patch(
+                    "musicround.services.automation._download_preview_audio",
+                    return_value=("https://example.test/preview.mp3", AudioSegment.silent(duration=30000), None),
+                ),
+                patch(
+                    "musicround.services.automation._round_audio_components",
+                    return_value=(
+                        {"custom_audio_ms": {"intro": 1000, "replay": 1000, "outro": 1000}, "number_audio_ms": [1000]},
+                        [],
+                    ),
+                ),
+                patch(
+                    "musicround.services.automation.inspect_pdf_quality",
+                    return_value={"warnings": [], "ok": True},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_mp3_quality",
+                    return_value={"warnings": [], "ok": True, "duration_seconds": 50},
+                ),
+            ):
+                result = automation.inspect_round_package(
+                    round_id,
+                    user_id=user.id,
+                    expected_song_count=1,
+                    duration_tolerance_seconds=10,
+                )
+
+            warning = next(
+                issue for issue in result["issues"]
+                if issue["code"] == "round_mp3_duration_mismatch"
+            )
+            assert result["expected_duration_seconds"] == 65
+            assert result["status"] == "ok"
+            assert result["ok"] is True
+            assert warning["severity"] == "warning"
+            assert result["blocking_issue_count"] == 0
+            assert result["warnings"] == [warning]
+            assert "Warnings" in result["report"]["markdown"]
+            assert result["report"]["blockers"] == []
 
     def test_inspect_round_package_blocks_material_mp3_duration_shortfall(self, app):
         with app.app_context():
@@ -1038,10 +1113,11 @@ class TestAssetInspection:
 
             assert result["expected_duration_seconds"] == 339
             assert result["status"] == "render_failed"
-            assert any(
-                issue["code"] == "round_mp3_duration_mismatch"
-                for issue in result["issues"]
+            mismatch = next(
+                issue for issue in result["issues"]
+                if issue["code"] == "round_mp3_duration_mismatch"
             )
+            assert mismatch["severity"] == "error"
 
     def test_inspect_round_package_warns_for_large_mp3_duration_mismatch(self, app):
         with app.app_context():
@@ -1080,10 +1156,11 @@ class TestAssetInspection:
 
             assert result["expected_duration_seconds"] == 65
             assert result["status"] == "render_failed"
-            assert any(
-                issue["code"] == "round_mp3_duration_mismatch"
-                for issue in result["issues"]
+            mismatch = next(
+                issue for issue in result["issues"]
+                if issue["code"] == "round_mp3_duration_mismatch"
             )
+            assert mismatch["severity"] == "error"
 
     def test_round_audio_component_failures_hide_exception_details(self, app):
         with app.app_context():

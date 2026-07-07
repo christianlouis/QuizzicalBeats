@@ -635,6 +635,7 @@ class TestRoundDetailRoute:
             '?expected_song_count=many'
             '&min_preview_seconds=short'
             '&duration_tolerance_seconds=wide'
+            '&max_preview_seconds=-1'
         )
 
         assert response.status_code == 400
@@ -645,6 +646,7 @@ class TestRoundDetailRoute:
                 'invalid_parameters': [
                     {'name': 'expected_song_count', 'value': 'many'},
                     {'name': 'min_preview_seconds', 'value': 'short'},
+                    {'name': 'max_preview_seconds', 'value': '-1'},
                     {'name': 'duration_tolerance_seconds', 'value': 'wide'},
                 ],
             },

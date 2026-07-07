@@ -30,6 +30,11 @@ repair feedback, including missing or too-short previews and replacement actions
 Scheduled emails use the same gate and keep a failed export message on the round
 so the issue can be repaired before resending.
 
+Some checks are warnings rather than delivery blockers. For example, a small MP3
+duration difference is shown for review, while a mismatch large enough to suggest
+a missing song remains blocked until the MP3 is regenerated or the round is
+repaired.
+
 ## Dropbox Export
 
 Quizzical Beats integrates with Dropbox to easily store your rounds in the cloud:

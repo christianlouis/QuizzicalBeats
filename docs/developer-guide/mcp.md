@@ -136,6 +136,12 @@ report's `failed_positions`, call `suggest_replacement_songs`, then call
 `replace_round_song`. Regenerate assets after any replacement because the
 generated MP3/PDF flags are invalidated.
 
+`inspect_round_package` distinguishes hard blockers from review warnings. The
+`ok` field is false only when blocking issues exist, while `warnings` and
+`report.warnings` should be surfaced to the user or agent as repair hints. Small
+MP3 duration differences can be warnings; mismatches large enough to resemble a
+missing preview slot remain blocking render failures.
+
 When the status is `needs_more_songs`, call `suggest_additional_songs`, then
 `add_round_song` until the round has exactly eight playable songs. Regenerate
 assets and rerun `inspect_round_package` before sending.

@@ -656,15 +656,19 @@ def round_quality(round_id):
             value = min(maximum, value)
         return value
 
-    def parse_float_query_arg(name, default):
+    def parse_float_query_arg(name, default, minimum=None):
         raw_value = request.args.get(name)
         if raw_value in (None, ''):
             return default
         try:
-            return float(raw_value)
+            value = float(raw_value)
         except (TypeError, ValueError):
             invalid_parameters.append({'name': name, 'value': raw_value})
             return default
+        if minimum is not None and value < minimum:
+            invalid_parameters.append({'name': name, 'value': raw_value})
+            return default
+        return value
 
     expected_song_count = parse_int_query_arg(
         'expected_song_count',
@@ -672,11 +676,12 @@ def round_quality(round_id):
         minimum=1,
         maximum=25,
     )
-    min_preview_seconds = parse_float_query_arg('min_preview_seconds', 20.0)
-    max_preview_seconds = parse_float_query_arg('max_preview_seconds', 35.0)
+    min_preview_seconds = parse_float_query_arg('min_preview_seconds', 20.0, minimum=0.0)
+    max_preview_seconds = parse_float_query_arg('max_preview_seconds', 35.0, minimum=0.0)
     duration_tolerance_seconds = parse_float_query_arg(
         'duration_tolerance_seconds',
         automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+        minimum=0.0,
     )
     if invalid_parameters:
         return _automation_error_response(
