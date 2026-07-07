@@ -105,6 +105,22 @@ def database_uri_from_postgres_env(environ) -> str | None:
     return urlunsplit((scheme, netloc, f"/{database}", query, ""))
 
 
+def postgres_env_readiness(environ) -> dict[str, list[str] | bool]:
+    """Return credential-safe readiness details for PG* database variables."""
+    required_keys = ["PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD"]
+    optional_keys = ["PGPORT", "PGSSLMODE", "SQLALCHEMY_POSTGRES_SCHEME"]
+    present_required = [name for name in required_keys if environ.get(name)]
+    missing_required = [name for name in required_keys if not environ.get(name)]
+    present_optional = [name for name in optional_keys if environ.get(name)]
+    return {
+        "configured": bool(present_required),
+        "complete": not missing_required,
+        "present_required": present_required,
+        "missing_required": missing_required,
+        "present_optional": present_optional,
+    }
+
+
 def redact_database_uri(uri: str | None) -> str:
     """Redact credentials from a database URI without hiding the backend."""
     if not uri:

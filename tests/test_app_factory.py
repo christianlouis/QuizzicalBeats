@@ -20,6 +20,7 @@ from musicround.helpers.database_config import (
     database_summary,
     is_legacy_data_sqlite_uri,
     managed_database_requirement_error,
+    postgres_env_readiness,
     redact_database_uri,
 )
 from musicround.models import User, db
@@ -95,6 +96,22 @@ def test_configure_database_uri_rejects_partial_postgres_env(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match='PostgreSQL environment is incomplete'):
         _configure_database_uri(app)
+
+
+def test_postgres_env_readiness_reports_only_key_names():
+    """PG readiness diagnostics should not expose configured values."""
+    readiness = postgres_env_readiness({
+        'PGHOST': 'postgres.example',
+        'PGDATABASE': 'quizzicalbeats',
+        'PGSSLMODE': 'require',
+    })
+
+    assert readiness['configured'] is True
+    assert readiness['complete'] is False
+    assert readiness['present_required'] == ['PGHOST', 'PGDATABASE']
+    assert readiness['missing_required'] == ['PGUSER', 'PGPASSWORD']
+    assert readiness['present_optional'] == ['PGSSLMODE']
+    assert 'postgres.example' not in repr(readiness)
 
 
 def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):
