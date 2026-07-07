@@ -1605,12 +1605,15 @@ class TestAgentPlanningAutomation:
             _create_song(title="Used", artist="A", genre="Rock", used_count=4)
             _create_song(title="Unused", artist="B", genre="Pop", used_count=0)
             _create_song(title="No Preview", artist="C", genre="Rock")
+            _create_song(title="Unknown Genre", artist="D", genre="Unknown", preview_url="https://example.test/unknown.mp3")
 
             result = automation.round_analytics_summary(months=6, limit=5)
 
-            assert result["song_count"] == 3
+            assert result["song_count"] == 4
             assert result["missing_preview_count"] == 3
+            assert result["unknown_genre_count"] == 1
             assert result["genre_counts"]["Rock"] == 2
+            assert "Unknown" not in result["genre_counts"]
             assert result["most_used_songs"][0]["title"] == "Used"
             assert any(song["title"] == "Unused" for song in result["unused_candidates"])
 

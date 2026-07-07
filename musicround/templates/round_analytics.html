@@ -23,11 +23,20 @@
     </div>
 
     {% if summary %}
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Songs</div><div class="text-3xl font-bold text-navy-800">{{ summary.song_count }}</div></div>
         <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Rounds</div><div class="text-3xl font-bold text-navy-800">{{ summary.round_count }}</div></div>
         <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Recent Rounds</div><div class="text-3xl font-bold text-navy-800">{{ summary.recent_round_count }}</div></div>
-        <div class="bg-white shadow-md rounded-lg p-5"><div class="text-sm text-gray-500">Missing Previews</div><div class="text-3xl font-bold text-red-700">{{ summary.missing_preview_count }}</div></div>
+        <a href="{{ url_for('core.view_songs', has_preview='false') }}" class="block bg-white shadow-md rounded-lg p-5 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300" aria-label="Review {{ summary.missing_preview_count }} songs with missing previews">
+            <div class="text-sm text-gray-500">Missing Previews</div>
+            <div class="text-3xl font-bold text-red-700">{{ summary.missing_preview_count }}</div>
+            <div class="mt-2 text-xs font-semibold text-red-700">Review songs</div>
+        </a>
+        <a href="{{ url_for('core.view_songs', genre='__missing__') }}" class="block bg-white shadow-md rounded-lg p-5 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-300" aria-label="Review {{ summary.unknown_genre_count|default(0) }} songs with unknown genre metadata">
+            <div class="text-sm text-gray-500">Unknown Genres</div>
+            <div class="text-3xl font-bold text-orange-700">{{ summary.unknown_genre_count|default(0) }}</div>
+            <div class="mt-2 text-xs font-semibold text-orange-700">Clean metadata</div>
+        </a>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -35,32 +44,71 @@
             <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Most Used</h2>
             <div class="space-y-2">
                 {% for song in summary.most_used_songs %}
-                <div class="border-b border-gray-100 pb-2">
-                    <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
-                    <div class="text-xs text-gray-500">Used {{ song.used_count or 0 }}x{% if song.last_used %} · {{ song.last_used }}{% endif %}</div>
+                <div class="border-b border-gray-100 pb-2 flex items-start justify-between gap-3">
+                    <div>
+                        <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
+                        <div class="text-xs text-gray-500">Used {{ song.used_count or 0 }}x{% if song.last_used %} · {{ song.last_used }}{% endif %}</div>
+                    </div>
+                    <a href="{{ url_for('core.view_songs', q=song.artist ~ ' ' ~ song.title) }}" class="shrink-0 text-xs font-semibold text-teal-700 hover:text-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-2 py-1" aria-label="Inspect {{ song.title }} by {{ song.artist }} in the song library">Inspect</a>
                 </div>
+                {% else %}
+                <div class="text-sm text-gray-500">No usage data yet. Generate or approve rounds to build fatigue signals.</div>
                 {% endfor %}
+            </div>
+            <div class="mt-4">
+                <a href="{{ url_for('rounds.round_planning', theme='avoid overused songs') }}" class="inline-flex items-center text-sm font-semibold text-navy-800 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-2 py-1">
+                    Plan around fatigue <i class="fas fa-arrow-right ml-2"></i>
+                </a>
             </div>
         </div>
         <div class="bg-white shadow-md rounded-lg p-6">
-            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Unused Candidates</h2>
+            <div class="flex items-start justify-between gap-3 mb-3">
+                <h2 class="text-xl font-bold text-navy-800 font-montserrat">Unused Candidates</h2>
+                <a href="{{ url_for('core.view_songs', used_max=0) }}" class="text-xs font-semibold text-teal-700 hover:text-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-2 py-1">Open all</a>
+            </div>
             <div class="space-y-2">
                 {% for song in summary.unused_candidates %}
-                <div class="border-b border-gray-100 pb-2">
-                    <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
-                    <div class="text-xs text-gray-500">{{ song.year or 'Unknown year' }}{% if song.genre %} · {{ song.genre }}{% endif %}</div>
+                <div class="border-b border-gray-100 pb-2 flex items-start justify-between gap-3">
+                    <div>
+                        <div class="font-semibold">{{ song.artist }} - {{ song.title }}</div>
+                        <div class="text-xs text-gray-500">{{ song.year or 'Unknown year' }}{% if song.genre %} · {{ song.genre }}{% endif %}</div>
+                    </div>
+                    <a href="{{ url_for('core.view_songs', q=song.artist ~ ' ' ~ song.title, used_max=0) }}" class="shrink-0 text-xs font-semibold text-teal-700 hover:text-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-2 py-1" aria-label="Inspect unused candidate {{ song.title }} by {{ song.artist }}">Inspect</a>
                 </div>
+                {% else %}
+                <div class="text-sm text-gray-500">No unused candidates match this limit. Raise the limit or import more songs.</div>
                 {% endfor %}
+            </div>
+            <div class="mt-4">
+                <a href="{{ url_for('rounds.round_planning', theme='unused candidate discovery') }}" class="inline-flex items-center text-sm font-semibold text-navy-800 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-2 py-1">
+                    Create planning brief <i class="fas fa-arrow-right ml-2"></i>
+                </a>
             </div>
         </div>
         <div class="bg-white shadow-md rounded-lg p-6">
-            <h2 class="text-xl font-bold text-navy-800 font-montserrat mb-3">Genres</h2>
-            <div class="space-y-2">
+            <div class="flex items-start justify-between gap-3 mb-3">
+                <div>
+                    <h2 class="text-xl font-bold text-navy-800 font-montserrat">Genres</h2>
+                    {% if summary.unknown_genre_count|default(0) > 0 %}
+                    <p class="text-xs text-orange-700 mt-1">{{ summary.unknown_genre_count }} songs need metadata cleanup before genre balance is meaningful.</p>
+                    {% endif %}
+                </div>
+                {% if summary.unknown_genre_count|default(0) > 0 %}
+                <a href="{{ url_for('core.view_songs', genre='__missing__') }}" class="text-xs font-semibold text-orange-700 hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-300 rounded px-2 py-1">Clean up</a>
+                {% endif %}
+            </div>
+            <div class="space-y-3">
                 {% for genre, count in summary.genre_counts.items() %}
                 <div>
-                    <div class="flex justify-between text-sm"><span>{{ genre }}</span><span>{{ count }}</span></div>
+                    <div class="flex justify-between gap-3 text-sm">
+                        <a href="{{ url_for('core.view_songs', genre=genre) }}" class="font-semibold text-navy-800 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded" aria-label="Filter song library for {{ genre }} songs">{{ genre }}</a>
+                        <span>{{ count }}</span>
+                    </div>
                     <div class="h-2 bg-gray-100 rounded"><div class="h-2 bg-teal-500 rounded" style="width: {{ (count / summary.song_count * 100) if summary.song_count else 0 }}%"></div></div>
+                    <a href="{{ url_for('rounds.round_planning', theme='genre: ' ~ genre) }}" class="mt-1 inline-block text-xs font-semibold text-teal-700 hover:text-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-1" aria-label="Create planning brief for {{ genre }}">Plan this genre</a>
                 </div>
+                {% else %}
+                <div class="text-sm text-gray-500">No clean genre metadata yet. Start by cleaning unknown genres.</div>
                 {% endfor %}
             </div>
         </div>

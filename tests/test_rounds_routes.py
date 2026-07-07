@@ -252,6 +252,9 @@ class TestRoundsListRoute:
         assert response.status_code == 200
         assert b'Round Analytics' in response.data
         assert b'Missing Previews' in response.data
+        assert b'/view-songs?has_preview=false' in response.data
+        assert b'/view-songs?genre=__missing__' in response.data
+        assert b'Create planning brief' in response.data
 
     def test_round_planning_page_renders_brief(self, app, client):
         """Planning page should turn quizmaster context into a brief."""

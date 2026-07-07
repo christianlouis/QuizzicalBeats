@@ -175,6 +175,21 @@
                     </div>
 
                     <div class="w-full md:w-1/6">
+                        <label for="previewFilter" class="block text-sm font-medium text-gray-700 mb-1">Preview</label>
+                        <select id="previewFilter" name="has_preview" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                            <option value="" {% if not filters.has_preview %}selected{% endif %}>Any</option>
+                            <option value="true" {% if filters.has_preview in ['true', '1', 'yes'] %}selected{% endif %}>Has preview</option>
+                            <option value="false" {% if filters.has_preview in ['false', '0', 'no'] %}selected{% endif %}>Missing preview</option>
+                        </select>
+                    </div>
+
+                    <div class="w-full md:w-1/6">
+                        <label for="usedMaxFilter" class="block text-sm font-medium text-gray-700 mb-1">Used at most</label>
+                        <input type="number" id="usedMaxFilter" name="used_max" min="0" value="{{ filters.used_max if filters.used_max is not none else '' }}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+                    </div>
+
+                    <div class="w-full md:w-1/6">
                         <label for="pageSizeSelect" class="block text-sm font-medium text-gray-700 mb-1">Records per page</label>
                         <select id="pageSizeSelect" name="per_page" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
                             {% for size in [25, 50, 100, 200] %}
@@ -681,7 +696,7 @@
             }
             
             // Set up filter input handlers
-            $('#globalSearch, #genreFilter, #yearFilter').on('keydown', function(e) {
+            $('#globalSearch, #genreFilter, #yearFilter, #previewFilter, #usedMaxFilter').on('keydown', function(e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     $('#songLibraryFilters').trigger('submit');

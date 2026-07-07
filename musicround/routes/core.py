@@ -383,19 +383,42 @@ def view_songs():
     per_page = _int_arg('per_page', default=25, minimum=1, maximum=200)
     query_text = (request.args.get('q') or '').strip()
     genre = (request.args.get('genre') or '').strip()
+    has_preview = (request.args.get('has_preview') or '').strip().lower()
     year = _int_arg('year')
     used_min = _int_arg('used_min', minimum=0)
+    used_max = _int_arg('used_max', minimum=0)
 
     query = Song.query
     if query_text:
         pattern = f'%{query_text}%'
         query = query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
-    if genre:
+    if genre == '__missing__':
+        query = query.filter(or_(Song.genre.is_(None), Song.genre == '', Song.genre.ilike('unknown')))
+    elif genre:
         query = query.filter(Song.genre.ilike(genre))
+    preview_filters = [
+        Song.preview_url.isnot(None),
+        Song.spotify_preview_url.isnot(None),
+        Song.deezer_preview_url.isnot(None),
+        Song.apple_preview_url.isnot(None),
+        Song.youtube_preview_url.isnot(None),
+    ]
+    if has_preview in {'true', '1', 'yes'}:
+        query = query.filter(or_(*preview_filters))
+    elif has_preview in {'false', '0', 'no'}:
+        query = query.filter(
+            Song.preview_url.is_(None),
+            Song.spotify_preview_url.is_(None),
+            Song.deezer_preview_url.is_(None),
+            Song.apple_preview_url.is_(None),
+            Song.youtube_preview_url.is_(None),
+        )
     if year is not None:
         query = query.filter(Song.year == year)
     if used_min is not None:
         query = query.filter(Song.used_count >= used_min)
+    if used_max is not None:
+        query = query.filter(or_(Song.used_count <= used_max, Song.used_count.is_(None)))
 
     query = query.order_by(Song.artist.asc(), Song.title.asc(), Song.id.asc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -413,8 +436,10 @@ def view_songs():
     query_args = {
         'q': query_text or None,
         'genre': genre or None,
+        'has_preview': has_preview or None,
         'year': year,
         'used_min': used_min,
+        'used_max': used_max,
         'per_page': per_page,
     }
     query_args = {key: value for key, value in query_args.items() if value not in (None, '')}
@@ -428,8 +453,10 @@ def view_songs():
         filters={
             'q': query_text,
             'genre': genre,
+            'has_preview': has_preview,
             'year': year,
             'used_min': used_min,
+            'used_max': used_max,
             'per_page': per_page,
         },
         total_songs=total_songs,

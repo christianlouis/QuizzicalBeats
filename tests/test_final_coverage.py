@@ -740,3 +740,31 @@ class TestCoreViewSongs:
         assert b'Server Match' in response.data
         assert b'Server Miss' not in response.data
         assert b'Filters are applied server-side' in response.data
+
+    def test_view_songs_supports_analytics_action_filters(self, app, client):
+        """Analytics links should land on actionable song-library filters."""
+        _login(app, client)
+        with app.app_context():
+            db.session.add(Song(title='Missing Preview', artist='Analytics', genre='Rock', used_count=0))
+            db.session.add(
+                Song(
+                    title='Has Preview',
+                    artist='Analytics',
+                    genre='Rock',
+                    used_count=3,
+                    preview_url='https://example.com/has-preview.mp3',
+                )
+            )
+            db.session.add(Song(title='Unknown Genre', artist='Analytics', genre='Unknown', used_count=0))
+            db.session.commit()
+
+        missing_preview = client.get('/view-songs?has_preview=false')
+        unused = client.get('/view-songs?used_max=0')
+        missing_genre = client.get('/view-songs?genre=__missing__')
+
+        assert b'Missing Preview' in missing_preview.data
+        assert b'Has Preview' not in missing_preview.data
+        assert b'Missing Preview' in unused.data
+        assert b'Has Preview' not in unused.data
+        assert b'Unknown Genre' in missing_genre.data
+        assert b'Has Preview' not in missing_genre.data
