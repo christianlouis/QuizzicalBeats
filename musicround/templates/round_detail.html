@@ -90,7 +90,9 @@
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 rounded-md p-3">
                         <div>
                             <div class="font-semibold text-gray-900">{{ share.user.username }}</div>
+                            {% if can_manage_shares %}
                             <div class="text-sm text-gray-500">{{ share.user.email }}</div>
+                            {% endif %}
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'editor' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-800{% endif %}">

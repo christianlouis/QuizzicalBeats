@@ -89,7 +89,8 @@ def run_migration():
                             songs_seen INTEGER NOT NULL DEFAULT 0,
                             songs_imported INTEGER NOT NULL DEFAULT 0,
                             error_message TEXT,
-                            notes TEXT
+                            notes TEXT,
+                            FOREIGN KEY(seed_source_id) REFERENCES seed_source(id) ON DELETE CASCADE
                         )
                         """
                     )

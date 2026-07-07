@@ -14,6 +14,7 @@ import json
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
 from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 from musicround.models import PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, Song, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
@@ -492,6 +493,7 @@ def round_detail(round_id):
         round_shares = (
             RoundShare.query.filter_by(round_id=rnd.id)
             .join(User)
+            .options(selectinload(RoundShare.user))
             .order_by(User.username.asc(), RoundShare.id.asc())
             .all()
         )

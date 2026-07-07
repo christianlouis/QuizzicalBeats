@@ -247,9 +247,11 @@ def _seed_source_run_summary(run: SeedSourceRun) -> dict[str, Any]:
 
 
 def _seed_source_summary(source: SeedSource, include_runs: bool = False) -> dict[str, Any]:
-    latest_run = (
-        source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()).first()
-    )
+    ordered_runs = source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc())
+    runs = ordered_runs.limit(20).all() if include_runs else []
+    latest_run = runs[0] if include_runs and runs else None
+    if not include_runs:
+        latest_run = ordered_runs.first()
     payload = {
         "id": source.id,
         "name": source.name,
@@ -265,10 +267,7 @@ def _seed_source_summary(source: SeedSource, include_runs: bool = False) -> dict
         "latest_run": _seed_source_run_summary(latest_run) if latest_run else None,
     }
     if include_runs:
-        payload["runs"] = [
-            _seed_source_run_summary(run)
-            for run in source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()).limit(20).all()
-        ]
+        payload["runs"] = [_seed_source_run_summary(run) for run in runs]
     return payload
 
 

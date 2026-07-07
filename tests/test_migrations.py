@@ -40,6 +40,11 @@ def _index_names(database_path, table_name):
         return [row[1] for row in conn.execute(f"PRAGMA index_list({table_name})").fetchall()]
 
 
+def _foreign_keys(database_path, table_name):
+    with sqlite3.connect(database_path) as conn:
+        return conn.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
+
+
 def _table_names(database_path):
     with sqlite3.connect(database_path) as conn:
         return [
@@ -314,6 +319,10 @@ def test_add_seed_source_registry_to_legacy_database(tmp_path):
     assert "idx_seed_source_type_active" in _index_names(database_path, "seed_source")
     assert "idx_seed_source_run_source_status" in _index_names(database_path, "seed_source_run")
     assert "notes" in _column_names(database_path, "seed_source")
+    assert any(
+        row[2] == "seed_source" and row[3] == "seed_source_id" and row[4] == "id"
+        for row in _foreign_keys(database_path, "seed_source_run")
+    )
     assert SeedSource.__tablename__ == "seed_source"
     assert SeedSourceRun.__tablename__ == "seed_source_run"
     assert "idx_seed_source_type_active" in {index.name for index in SeedSource.__table__.indexes}
