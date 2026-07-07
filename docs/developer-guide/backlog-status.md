@@ -21,30 +21,33 @@ issue after verification or continue with the remaining follow-up.
 
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
-| #56 Add readiness and schedule status columns to rounds list | Ready to close | `musicround/routes/rounds.py`, `musicround/templates/rounds.html`, `tests/test_rounds_routes.py` | Verify deployed rounds list after release. |
-| #57 Normalize and curate tags shown in the round builder | Ready to close | `musicround/routes/generate.py`, `tests/test_generate.py` | Verify production tag dropdown contains no internal import tags. |
-| #58 Reduce song library memory usage and lazy-load previews | Ready to close | `musicround/routes/core.py`, `musicround/templates/view_songs.html`, `tests/test_final_coverage.py` | Browser-smoke large catalog after deploy. |
-| #65 ROADMAP.md / TODO.md status drift | Ready to close | `ROADMAP.md`, `TODO.md`, this status page | Close after release smoke confirms the published docs include this crosswalk. |
-| #66 Add retry and dead-letter handling for import jobs | Ready to close | `musicround/helpers/import_queue.py`, `musicround/services/automation.py`, `tests/test_import_queue.py` | Verify one failed import can be retried in production. |
-| #67 Expose import progress events for active jobs | Ready to close | `musicround/mcp_server.py`, `musicround/services/automation.py`, `musicround/templates/import_queue_status.html` | Optional browser auto-refresh polish can be a separate issue. |
-| #68 Add text and CSV playlist parser service | Ready to close | `musicround/services/automation.py`, `musicround/mcp_server.py`, `tests/test_automation_service.py` | None for parser/MCP scope. |
 | #69 Add review workflow for low-confidence text imports | Ready to close after deploy smoke | Browser review UI, exact eight-song create gate, MCP/parser review payloads | Smoke paste one unresolved and one complete eight-song text list. |
-| #70 Add quizmaster preference model and MCP summary | Ready to close | `UserPreferences`, `quizmaster_context`, MCP docs | Verify one real quizmaster context call in MCP after deploy. |
-| #71 Add planned quiz date model for scheduled round generation | Ready to close | `PlannedQuizRound`, browser calendar, MCP planning tools | Verify upcoming production quiz dates render after deploy. |
-| #72 Add recent usage and fatigue summary API for agents | Ready to close | `recent_usage_summary`, `round_analytics_summary`, `round_planning_brief` | None for API/MCP scope. |
-| #73 Add MCP tool to draft round intro, replay, and outro scripts | Ready to close | `draft_round_audio_scripts`, MCP docs, round detail actions | Verify one draft for a real round after deploy. |
-| #74 Store and review generated TTS scripts before audio assignment | Ready to close | `RoundAudioScript`, review routes, `generate_tts_from_script` | Verify approved script-to-audio assignment with configured TTS provider. |
 | #75 Add chart and festival seed source registry | Partial | `SeedSource`, `SeedSourceRun`, admin views, MCP registry/run tools | Scrapers/importers for individual chart/festival providers remain separate slices. |
-| #79 Add round ownership and sharing roles | Ready to close | `RoundShare`, `RoundAccessEvent`, owner filtering, viewer/editor/producer checks, MCP share tools, browser share/revoke UI, tokenized public read-only links | Verify browser and MCP roles after deploy. |
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
-| #25 Add asset preview and approval page before email delivery | Ready to close | Bundle review page shows embedded MP3/PDF, song list, quality report, review form, script text, send-now and schedule-email controls, and `generate_round_assets` returns `review_url_path` | Verify deployed bundle-review page before closing. |
+
+## Recently Closed From This Crosswalk
+
+- #25 Asset preview and approval page before email delivery
+- #56 Readiness and schedule status columns on the rounds list
+- #57 Normalized, curated round-builder tags
+- #58 Lazy-loaded song previews and paginated song library browsing
+- #65 ROADMAP.md / TODO.md status drift
+- #66 Import retry and dead-letter handling
+- #67 Import progress events
+- #68 Text and CSV playlist parser service
+- #70 Quizmaster preferences and MCP summary
+- #71 Planned quiz date model and MCP planning tools
+- #72 Recent usage and fatigue summary for agents
+- #73 MCP drafting for intro, replay, and outro scripts
+- #74 Reviewable TTS script records and generation handoff
+- #79 Round ownership and sharing roles
 
 ## Next Local Work Blocks
 
-1. Close or comment the "ready to close" issues after a release smoke confirms
-   the linked browser/MCP behavior.
+1. Smoke #69 in the browser with one unresolved and one complete eight-song
+   text list, then close it if the review loop behaves correctly.
 2. For #75, add first provider-specific source fetchers on top of the registry.
 3. For #126/#12, continue with live deployment configuration only through the
    existing 1Password-backed secret flow and credential-safe Kubernetes checks.
