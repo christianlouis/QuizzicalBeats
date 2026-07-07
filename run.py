@@ -33,6 +33,7 @@ def _configured_database_uri_without_fallback(app):
         return configured_uri
     return database_uri_from_postgres_env(os.environ)
 
+
 def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='Quizzical Beats Management Script')
