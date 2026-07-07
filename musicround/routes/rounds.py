@@ -36,6 +36,7 @@ ROUND_MP3_PREVIEW_DOWNLOAD_ERROR = "Song preview audio could not be downloaded. 
 ROUND_MP3_PREVIEW_PROCESSING_ERROR = "Song preview audio could not be processed. Check the server logs."
 ROUND_MP3_EXPORT_ERROR = "MP3 generation failed. Check the server logs."
 ROUND_PDF_GENERATION_ERROR = "PDF generation failed. Check the server logs."
+ROUND_QUALITY_SESSION_REPORT_MAX_CHARS = 2000
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -265,6 +266,19 @@ def _round_generation_failure_response(round_id, log_message, user_message, stat
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 
+def _session_quality_report(report):
+    """Keep repair feedback small enough for Flask's cookie-backed session."""
+    markdown = (report or {}).get('markdown') or ''
+    if len(markdown) <= ROUND_QUALITY_SESSION_REPORT_MAX_CHARS:
+        return markdown
+    suffix = "\n\n[Report truncated; rerun Inspect Round for full details.]"
+    body_max = max(0, ROUND_QUALITY_SESSION_REPORT_MAX_CHARS - len(suffix))
+    return (
+        markdown[:body_max].rstrip()
+        + suffix
+    )
+
+
 def _round_quality_failure_response(round_id, quality, recipient=None, subject=None, body_text=None):
     """Persist and return repairable package-gate failures before email delivery."""
     report = quality.get('report') or {}
@@ -294,7 +308,7 @@ def _round_quality_failure_response(round_id, quality, recipient=None, subject=N
             'report': report,
         }), 422
     flash(error_msg, 'error')
-    session['round_quality_report'] = report.get('markdown')
+    session['round_quality_report'] = _session_quality_report(report)
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 
@@ -1225,7 +1239,7 @@ def send_email(round_id):
 
     try:
         quality = automation.inspect_round_package(round_id=round_id, user_id=current_user.id)
-    except AutomationError as exc:
+    except Exception as exc:
         current_app.logger.error(
             "Round package inspection failed before email for round %s: %s",
             round_id,

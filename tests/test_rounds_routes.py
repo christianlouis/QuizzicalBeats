@@ -5,6 +5,7 @@ from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
 from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
+from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -387,6 +388,28 @@ class TestRoundDetailRoute:
 
         assert response.status_code == 200
         assert b'Failed Export Detail Round is blocked: needs_substitution.' in response.data
+        assert b'text-red-700 mt-1' in response.data
+
+    def test_round_detail_styles_success_email_export_message_as_neutral(self, app, client):
+        """Successful delivery messages should not be shown as red errors."""
+        _login(app, client)
+        song_id = _create_song(app, title='Success Export Detail Song')
+        round_id = _create_round(app, [song_id], name='Success Export Detail Round')
+        with app.app_context():
+            db.session.add(RoundExport(
+                round_id=round_id,
+                export_type='email',
+                destination='rounds@example.com',
+                status='success',
+                error_message='Email delivered to rounds@example.com.',
+            ))
+            db.session.commit()
+
+        response = client.get(f'/rounds/{round_id}')
+
+        assert response.status_code == 200
+        assert b'Email delivered to rounds@example.com.' in response.data
+        assert b'text-gray-500 mt-1' in response.data
 
     def test_round_detail_hides_private_round_owned_by_other_user(self, app, client):
         """Private owned rounds should not be visible to other quizmasters."""
@@ -1223,4 +1246,70 @@ class TestRoundEmailRoute:
         assert b'Redirect Quality Round is blocked' in response.data
         assert b'Replace position 1.' in response.data
         mock_quality.assert_called_once_with(round_id=round_id, user_id=user_id)
+        mock_send.assert_not_called()
+
+    def test_mail_route_redirect_truncates_quality_report_session_payload(self, app, client):
+        """Large repair reports should not exceed Flask session cookie limits."""
+        _login(app, client)
+        song_id = _create_song(app, title='Large Redirect Quality Song')
+        round_id = _create_round(app, [song_id], name='Large Redirect Quality Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+
+        large_tail = 'TAIL_SHOULD_NOT_RENDER'
+        quality = {
+            'ok': False,
+            'status': 'needs_substitution',
+            'hints': ['Large Redirect Quality Song has no preview.'],
+            'report': {
+                'headline': 'Large Redirect Quality Round is blocked: needs_substitution.',
+                'markdown': '# Large Redirect Quality Round is blocked\n\n' + ('x' * 5000) + large_tail,
+            },
+        }
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=quality,
+                ), \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(f'/rounds/{round_id}/mail', follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'Large Redirect Quality Round is blocked' in response.data
+        assert b'Report truncated' in response.data
+        assert large_tail.encode() not in response.data
+        assert len(_session_quality_report(quality['report'])) <= ROUND_QUALITY_SESSION_REPORT_MAX_CHARS
+        mock_send.assert_not_called()
+
+    def test_mail_route_handles_unexpected_quality_gate_exception(self, app, client):
+        """Unexpected inspection failures should return a controlled safe response."""
+        _login(app, client)
+        song_id = _create_song(app, title='Unexpected Quality Error Song')
+        round_id = _create_round(app, [song_id], name='Unexpected Quality Error Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    side_effect=RuntimeError('database exploded'),
+                ), \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 500
+        assert response.get_json() == {
+            'success': False,
+            'error': 'Round quality gate could not run. Please try again later or contact an administrator.',
+        }
         mock_send.assert_not_called()
