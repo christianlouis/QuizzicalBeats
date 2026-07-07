@@ -18,6 +18,18 @@ To export a round to your local device:
 2. Select the round you want to view
 3. Click the "Download MP3" or "Download PDF" button to save the respective file
 
+## Email Delivery
+
+Round email delivery is protected by the package quality gate. Before an email
+is sent, Quizzical Beats checks that the round has the expected number of songs,
+that preview clips are playable and within the configured length range, and that
+the generated MP3/PDF artifacts pass inspection.
+
+If the package gate fails, the email is not sent. The round detail page shows the
+repair feedback, including missing or too-short previews and replacement actions.
+Scheduled emails use the same gate and keep a failed export message on the round
+so the issue can be repaired before resending.
+
 ## Dropbox Export
 
 Quizzical Beats integrates with Dropbox to easily store your rounds in the cloud:
