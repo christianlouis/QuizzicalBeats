@@ -6,6 +6,7 @@ import os
 import re
 import csv
 import math
+import secrets
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -46,6 +47,7 @@ from musicround.models import (
     SeedSource,
     SeedSourceRun,
     Song,
+    SystemSetting,
     Tag,
     User,
 )
@@ -245,6 +247,27 @@ def _validate_round_access_requester(round_obj: Round, requester_user_id: int | 
     raise AutomationError("Only the round owner or an admin can view round access events.")
 
 
+def _validate_round_manager(round_obj: Round, actor_user_id: int | None) -> int | None:
+    actor_id = _validate_round_access_actor(actor_user_id)
+    if actor_id is None:
+        return None
+    actor = db.session.get(User, actor_id)
+    if actor and (actor.is_admin or round_obj.user_id == actor.id):
+        return actor.id
+    raise AutomationError("Only the round owner or an admin can manage public links.")
+
+
+def _public_round_links_enabled() -> bool:
+    return SystemSetting.get("enable_public_rounds", "false") == "true"
+
+
+def _new_public_round_token() -> str:
+    while True:
+        token = secrets.token_urlsafe(24)
+        if not Round.query.filter_by(public_token=token).first():
+            return token
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
@@ -254,6 +277,8 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "owner_user_id": round_obj.user_id,
         "owner": _user_summary(round_obj.owner),
         "visibility": round_obj.visibility,
+        "public_link_enabled": bool(round_obj.public_token),
+        "public_token_created_at": _datetime_payload(round_obj.public_token_created_at),
         "round_type": round_obj.round_type,
         "criteria": round_obj.round_criteria_used,
         "song_ids": ids,
@@ -264,6 +289,19 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "last_generated_at": (
             round_obj.last_generated_at.isoformat() if round_obj.last_generated_at else None
         ),
+    }
+
+
+def _public_round_summary(round_obj: Round) -> dict[str, Any]:
+    return {
+        "id": round_obj.id,
+        "name": round_obj.name,
+        "round_type": round_obj.round_type,
+        "criteria": round_obj.round_criteria_used,
+        "created_at": _datetime_payload(round_obj.created_at),
+        "song_count": len(_round_song_ids(round_obj)),
+        "songs": [_song_summary(song) for song in _ordered_round_songs(round_obj)],
+        "owner": _user_summary(round_obj.owner),
     }
 
 
@@ -1101,6 +1139,75 @@ def list_round_access_events(
         "count": len(events),
         "events": [_round_access_event_summary(event) for event in events],
     }
+
+
+def enable_round_public_link(
+    round_id: int,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Enable a token-based read-only public link for a round."""
+    if not _public_round_links_enabled():
+        raise AutomationError("Public round links are disabled in system settings.")
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    actor_id = _validate_round_manager(round_obj, actor_user_id)
+    created = not bool(round_obj.public_token)
+    if not round_obj.public_token:
+        round_obj.public_token = _new_public_round_token()
+        round_obj.public_token_created_at = datetime.utcnow()
+    round_obj.updated_at = datetime.utcnow()
+    event = _record_round_access_event(
+        round_obj,
+        "public_link_enabled" if created else "public_link_refreshed",
+        actor_user_id=actor_id,
+    )
+    db.session.commit()
+    return {
+        "created": created,
+        "public_token": round_obj.public_token,
+        "public_url_path": f"/rounds/public/{round_obj.public_token}",
+        "public_token_created_at": _datetime_payload(round_obj.public_token_created_at),
+        "access_event": _round_access_event_summary(event),
+        "round": _round_summary(round_obj),
+    }
+
+
+def disable_round_public_link(
+    round_id: int,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Disable a token-based read-only public link for a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    actor_id = _validate_round_manager(round_obj, actor_user_id)
+    had_public_link = bool(round_obj.public_token)
+    round_obj.public_token = None
+    round_obj.public_token_created_at = None
+    round_obj.updated_at = datetime.utcnow()
+    event = _record_round_access_event(
+        round_obj,
+        "public_link_disabled",
+        actor_user_id=actor_id,
+    )
+    db.session.commit()
+    return {
+        "disabled": had_public_link,
+        "access_event": _round_access_event_summary(event),
+        "round": _round_summary(round_obj),
+    }
+
+
+def get_public_round(public_token: str) -> dict[str, Any]:
+    """Return read-only round data for an active public token."""
+    token = (public_token or "").strip()
+    if not token:
+        raise AutomationError("public_token is required.")
+    round_obj = Round.query.filter_by(public_token=token).first()
+    if not round_obj:
+        raise AutomationError("Public round link was not found.")
+    return {"round": _public_round_summary(round_obj)}
 
 
 def register_seed_source(

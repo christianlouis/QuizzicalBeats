@@ -15,7 +15,7 @@ from flask import Blueprint, session, redirect, request, render_template, url_fo
 from flask_login import current_user, login_required
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager, joinedload
-from musicround.models import PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, Song, User, db
+from musicround.models import PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, Song, SystemSetting, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -234,6 +234,16 @@ def _get_editable_round_or_404(round_id):
     if not _can_edit_round(round_obj):
         abort(403)
     return round_obj
+
+
+@rounds_bp.route('/public/<public_token>')
+def public_round(public_token):
+    """Render a token-based read-only public round view."""
+    try:
+        result = automation.get_public_round(public_token)
+    except AutomationError:
+        abort(404)
+    return render_template('public_round.html', round=result['round'])
 
 
 def _storage_failure_response(round_id, storage_health, status_code=503):
@@ -524,6 +534,7 @@ def round_detail(round_id):
             round_shares=round_shares,
             can_manage_shares=can_manage_shares,
             round_access_events=round_access_events,
+            public_rounds_enabled=SystemSetting.get('enable_public_rounds', 'false') == 'true',
         )
     else:
         return 'Round not found'
@@ -646,6 +657,29 @@ def delete_round_share(round_id, user_id):
         flash(str(exc), 'error')
     else:
         flash('Round share removed.', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/public-link', methods=['POST'])
+@login_required
+def update_public_round_link(round_id):
+    """Enable or disable a token-based public read-only link."""
+    rnd = _get_visible_round_or_404(round_id)
+    if not _can_manage_round_shares(rnd):
+        abort(403)
+
+    action = (request.form.get('action') or 'enable').strip().lower()
+    try:
+        if action == 'disable':
+            automation.disable_round_public_link(round_id, actor_user_id=current_user.id)
+            flash('Public round link disabled.', 'success')
+        elif action == 'enable':
+            automation.enable_round_public_link(round_id, actor_user_id=current_user.id)
+            flash('Public round link enabled.', 'success')
+        else:
+            flash('Unknown public link action.', 'error')
+    except AutomationError as exc:
+        flash(str(exc), 'error')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 

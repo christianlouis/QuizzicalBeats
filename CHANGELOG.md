@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   viewer/editor access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration
   workflows.
+- Added token-based public read-only round links with owner/admin controls,
+  MCP helpers, and access-event audit entries.
 - Added a chart/festival seed-source registry with run history, Flask-Admin
   views, migrations, and MCP automation helpers.
 - Added a browser round-ops workflow with round calendar, catalog/fatigue analytics, quizmaster planning briefs, round review/approval state, package quality inspection, actionable replacement suggestions, and browser review of announcement and per-track hint script drafts.

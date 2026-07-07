@@ -5,7 +5,7 @@ from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
-from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare
+from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, SystemSetting
 from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
 
 
@@ -593,6 +593,93 @@ class TestRoundDetailRoute:
         assert b'share_admin_editor' in detail.data
         assert b'share_admin_editor@example.com' not in detail.data
         assert blocked.status_code == 403
+
+    def test_round_owner_can_enable_and_disable_public_readonly_link(self, app, client):
+        """Owners can publish and revoke a token-based read-only round link."""
+        _login(app, client, username='public_owner', email='public_owner@example.com')
+        song_id = _create_song(app, title='Public Route Song', artist='Public Artist')
+        owner_id = _user_id(app, 'public_owner')
+        round_id = _create_round(app, [song_id], name='Public Route Round')
+        with app.app_context():
+            SystemSetting.set('enable_public_rounds', 'true')
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        enable_response = client.post(
+            f'/rounds/{round_id}/public-link',
+            data={'action': 'enable'},
+            follow_redirects=True,
+        )
+
+        assert enable_response.status_code == 200
+        assert b'Public round link enabled.' in enable_response.data
+        assert b'Public Read-only Link' in enable_response.data
+        assert b'Disable Link' in enable_response.data
+        with app.app_context():
+            public_token = db.session.get(Round, round_id).public_token
+            assert public_token
+            assert RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='public_link_enabled',
+                actor_user_id=owner_id,
+            ).count() == 1
+
+        client.get('/users/logout')
+        public_response = client.get(f'/rounds/public/{public_token}')
+
+        assert public_response.status_code == 200
+        assert b'Public Route Round' in public_response.data
+        assert b'Public Route Song' in public_response.data
+        assert b'Read-only' in public_response.data
+        assert b'Delete Quiz' not in public_response.data
+
+        _login(app, client, username='public_owner', email='public_owner@example.com')
+        disable_response = client.post(
+            f'/rounds/{round_id}/public-link',
+            data={'action': 'disable'},
+            follow_redirects=True,
+        )
+        disabled_public_response = client.get(f'/rounds/public/{public_token}')
+
+        assert disable_response.status_code == 200
+        assert b'Public round link disabled.' in disable_response.data
+        assert disabled_public_response.status_code == 404
+
+    def test_public_round_link_honors_admin_setting_and_permissions(self, app, client):
+        """Public link management should require both the system flag and ownership."""
+        _login(app, client, username='public_owner_two', email='public_owner_two@example.com')
+        _login(app, client, username='public_other', email='public_other@example.com')
+        song_id = _create_song(app, title='Public Disabled Song')
+        owner_id = _user_id(app, 'public_owner_two')
+        _login(app, client, username='public_owner_two', email='public_owner_two@example.com')
+        round_id = _create_round(app, [song_id], name='Public Disabled Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            db.session.commit()
+
+        disabled_response = client.post(
+            f'/rounds/{round_id}/public-link',
+            data={'action': 'enable'},
+            follow_redirects=True,
+        )
+
+        assert disabled_response.status_code == 200
+        assert b'Public round links are disabled' in disabled_response.data
+
+        with app.app_context():
+            SystemSetting.set('enable_public_rounds', 'true')
+        client.get('/users/logout')
+        _login(app, client, username='public_other', email='public_other@example.com')
+
+        forbidden_response = client.post(
+            f'/rounds/{round_id}/public-link',
+            data={'action': 'enable'},
+        )
+
+        assert forbidden_response.status_code == 404
 
     def test_update_round_review_marks_approval(self, app, client):
         """Review route should persist approved state and notes."""

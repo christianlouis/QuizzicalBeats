@@ -344,6 +344,33 @@ def list_round_access_events(
 
 
 @mcp.tool()
+def enable_round_public_link(round_id: int) -> dict[str, Any]:
+    """Enable a token-based read-only public link for a round via system automation."""
+    return _with_app_context(
+        automation.enable_round_public_link,
+        round_id=round_id,
+    )
+
+
+@mcp.tool()
+def disable_round_public_link(round_id: int) -> dict[str, Any]:
+    """Disable a token-based read-only public link for a round via system automation."""
+    return _with_app_context(
+        automation.disable_round_public_link,
+        round_id=round_id,
+    )
+
+
+@mcp.tool()
+def get_public_round(public_token: str) -> dict[str, Any]:
+    """Fetch read-only round data for an active public round token."""
+    return _with_app_context(
+        automation.get_public_round,
+        public_token=public_token,
+    )
+
+
+@mcp.tool()
 def register_seed_source(
     name: str,
     source_type: str,

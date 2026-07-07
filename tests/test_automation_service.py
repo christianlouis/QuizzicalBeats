@@ -25,6 +25,7 @@ from musicround.models import (
     SeedSourceRun,
     Song,
     SongTag,
+    SystemSetting,
     Tag,
     User,
     UserPreferences,
@@ -555,6 +556,52 @@ class TestRoundAutomation:
 
             assert owner_events["count"] == 1
             assert admin_events["count"] == 1
+
+    def test_round_public_link_lifecycle_requires_enabled_setting_and_manager(self, app):
+        with app.app_context():
+            owner = _create_user(username="owner", email="owner@example.test")
+            viewer = _create_user(username="viewer", email="viewer@example.test")
+            admin = _create_user(username="admin", email="admin@example.test")
+            admin.is_admin = True
+            song = _create_song(title="Public Song", artist="Artist", genre="Pop", year=1999)
+            round_id = automation.create_round(
+                name="Public Link Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="disabled"):
+                automation.enable_round_public_link(round_id, actor_user_id=owner.id)
+
+            SystemSetting.set("enable_public_rounds", "true")
+            with pytest.raises(automation.AutomationError, match="owner or an admin"):
+                automation.enable_round_public_link(round_id, actor_user_id=viewer.id)
+
+            enabled = automation.enable_round_public_link(round_id, actor_user_id=owner.id)
+            public = automation.get_public_round(enabled["public_token"])
+            refreshed = automation.enable_round_public_link(round_id, actor_user_id=admin.id)
+            disabled = automation.disable_round_public_link(round_id, actor_user_id=owner.id)
+
+            assert enabled["created"] is True
+            assert enabled["public_url_path"].startswith("/rounds/public/")
+            assert enabled["round"]["public_link_enabled"] is True
+            assert public["round"]["name"] == "Public Link Round"
+            assert public["round"]["songs"][0]["title"] == "Public Song"
+            assert refreshed["created"] is False
+            assert refreshed["public_token"] == enabled["public_token"]
+            assert refreshed["access_event"]["action"] == "public_link_refreshed"
+            assert disabled["disabled"] is True
+            assert disabled["round"]["public_link_enabled"] is False
+            with pytest.raises(automation.AutomationError, match="not found"):
+                automation.get_public_round(enabled["public_token"])
+
+            actions = [event.action for event in RoundAccessEvent.query.order_by(RoundAccessEvent.id).all()]
+            assert actions == [
+                "public_link_enabled",
+                "public_link_refreshed",
+                "public_link_disabled",
+            ]
 
 
 class TestAssetInspection:

@@ -136,6 +136,37 @@
         </div>
         {% if can_manage_shares %}
         <div class="mt-6 border-t border-gray-200 pt-4">
+            <h3 class="text-lg font-semibold text-navy-800 mb-3">Public Read-only Link</h3>
+            {% if public_rounds_enabled %}
+                {% if round.public_token %}
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                    <a href="{{ url_for('rounds.public_round', public_token=round.public_token) }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
+                        {{ url_for('rounds.public_round', public_token=round.public_token, _external=True) }}
+                    </a>
+                    <form method="POST" action="{{ url_for('rounds.update_public_round_link', round_id=round.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="hidden" name="action" value="disable"/>
+                        <button type="submit" class="inline-flex items-center px-3 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-md text-sm font-semibold">
+                            <i class="fas fa-link-slash mr-2"></i>Disable Link
+                        </button>
+                    </form>
+                </div>
+                {% else %}
+                <form method="POST" action="{{ url_for('rounds.update_public_round_link', round_id=round.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="action" value="enable"/>
+                    <button type="submit" class="inline-flex items-center px-3 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-md text-sm font-semibold">
+                        <i class="fas fa-link mr-2"></i>Create Public Link
+                    </button>
+                </form>
+                {% endif %}
+            {% else %}
+            <p class="text-sm text-gray-500">Public round links are disabled by an admin setting.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if can_manage_shares %}
+        <div class="mt-6 border-t border-gray-200 pt-4">
             <h3 class="text-lg font-semibold text-navy-800 mb-3">Access History</h3>
             {% if round_access_events %}
             <div class="space-y-2">
