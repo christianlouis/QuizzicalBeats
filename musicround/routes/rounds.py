@@ -271,9 +271,11 @@ def _session_quality_report(report):
     markdown = (report or {}).get('markdown') or ''
     if len(markdown) <= ROUND_QUALITY_SESSION_REPORT_MAX_CHARS:
         return markdown
+    suffix = "\n\n[Report truncated; rerun Inspect Round for full details.]"
+    body_max = max(0, ROUND_QUALITY_SESSION_REPORT_MAX_CHARS - len(suffix))
     return (
-        markdown[:ROUND_QUALITY_SESSION_REPORT_MAX_CHARS].rstrip()
-        + "\n\n[Report truncated; rerun Inspect Round for full details.]"
+        markdown[:body_max].rstrip()
+        + suffix
     )
 
 

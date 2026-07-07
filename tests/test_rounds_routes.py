@@ -5,6 +5,7 @@ from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
 from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
+from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -1281,6 +1282,7 @@ class TestRoundEmailRoute:
         assert b'Large Redirect Quality Round is blocked' in response.data
         assert b'Report truncated' in response.data
         assert large_tail.encode() not in response.data
+        assert len(_session_quality_report(quality['report'])) <= ROUND_QUALITY_SESSION_REPORT_MAX_CHARS
         mock_send.assert_not_called()
 
     def test_mail_route_handles_unexpected_quality_gate_exception(self, app, client):
