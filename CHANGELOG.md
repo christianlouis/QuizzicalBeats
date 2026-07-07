@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a browser text-playlist review workflow that blocks round creation
   until exactly eight pasted rows resolve to catalog songs.
 - Added browser round sharing controls for owners/admins to grant and revoke
-  viewer/editor access from the round detail page.
+  viewer/editor/producer access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration
   workflows.
 - Added token-based public read-only round links with owner/admin controls,
   MCP helpers, and access-event audit entries.
+- Added producer sharing roles that can generate/export/send round assets
+  without granting owner-level sharing or delete rights.
 - Added a chart/festival seed-source registry with run history, Flask-Admin
   views, migrations, and MCP automation helpers.
 - Added a browser round-ops workflow with round calendar, catalog/fatigue analytics, quizmaster planning briefs, round review/approval state, package quality inspection, actionable replacement suggestions, and browser review of announcement and per-track hint script drafts.

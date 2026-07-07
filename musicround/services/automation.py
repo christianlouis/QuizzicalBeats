@@ -68,6 +68,7 @@ AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs.
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
+ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 
 
@@ -1028,8 +1029,8 @@ def share_round(
     actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Grant a user access to a round for future collaboration workflows."""
-    if role not in {"viewer", "editor"}:
-        raise AutomationError("role must be viewer or editor.")
+    if role not in ROUND_SHARE_ROLES:
+        raise AutomationError("role must be viewer, editor, or producer.")
 
     round_obj = db.session.get(Round, round_id)
     if not round_obj:

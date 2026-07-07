@@ -511,6 +511,13 @@ class TestRoundAutomation:
             assert RoundAccessEvent.query.count() == 2
             assert db.session.get(Round, round_id).visibility == "private"
 
+            producer_share = automation.share_round(round_id, viewer.id, role="producer", actor_user_id=owner.id)
+
+            assert producer_share["created"] is True
+            assert producer_share["share"]["role"] == "producer"
+            assert RoundAccessEvent.query.count() == 3
+            assert db.session.get(Round, round_id).visibility == "shared"
+
     def test_share_round_rejects_invalid_actor_user_id(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")

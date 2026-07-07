@@ -504,6 +504,117 @@ class TestRoundDetailRoute:
         with app.app_context():
             assert db.session.get(Round, round_id).name == 'Editor Updated Round'
 
+    def test_shared_editor_cannot_produce_assets_or_delete_round(self, app, client):
+        """Editor shares should not grant production, delivery, export, or delete rights."""
+        _login(app, client, username='producer_block_owner', email='producer_block_owner@example.com')
+        _login(app, client, username='producer_block_editor', email='producer_block_editor@example.com')
+        song_id = _create_song(app, title='Editor Block Song')
+        owner_id = _user_id(app, 'producer_block_owner')
+        editor_id = _user_id(app, 'producer_block_editor')
+        client.get('/users/logout')
+        _login(app, client, username='producer_block_editor', email='producer_block_editor@example.com')
+        round_id = _create_round(app, [song_id], name='Editor Production Block Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=editor_id, role='editor'))
+            db.session.commit()
+
+        update = client.post(
+            f'/rounds/{round_id}/update-name',
+            data={'round_name': 'Editor Still Can Edit'},
+        )
+        mp3 = client.post(
+            f'/rounds/round/{round_id}/mp3',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+        pdf = client.post(
+            f'/rounds/{round_id}/pdf',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+        mail = client.post(
+            f'/rounds/{round_id}/mail',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+        dropbox = client.post(f'/rounds/{round_id}/export-to-dropbox')
+        delete = client.post(f'/rounds/{round_id}/delete')
+
+        assert update.status_code == 302
+        assert mp3.status_code == 403
+        assert pdf.status_code == 403
+        assert mail.status_code == 403
+        assert dropbox.status_code == 403
+        assert delete.status_code == 403
+        with app.app_context():
+            assert db.session.get(Round, round_id).name == 'Editor Still Can Edit'
+
+    def test_shared_producer_can_generate_pdf_but_not_manage_or_delete(self, app, client):
+        """Producer shares can create artifacts without owner-level administration."""
+        _login(app, client, username='producer_owner', email='producer_owner@example.com')
+        _login(app, client, username='producer_user', email='producer_user@example.com')
+        _login(app, client, username='producer_target', email='producer_target@example.com')
+        song_id = _create_song(app, title='Producer Song')
+        owner_id = _user_id(app, 'producer_owner')
+        producer_id = _user_id(app, 'producer_user')
+        client.get('/users/logout')
+        _login(app, client, username='producer_user', email='producer_user@example.com')
+        round_id = _create_round(app, [song_id], name='Producer Shared Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=producer_id, role='producer'))
+            db.session.commit()
+
+        update = client.post(
+            f'/rounds/{round_id}/update-name',
+            data={'round_name': 'Producer Updated Round'},
+        )
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF-1.4 test'):
+            pdf = client.post(
+                f'/rounds/{round_id}/pdf',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+        share = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': 'producer_target', 'role': 'viewer'},
+        )
+        delete = client.post(f'/rounds/{round_id}/delete')
+
+        assert update.status_code == 302
+        assert pdf.status_code == 200
+        assert pdf.get_json()['success'] is True
+        assert share.status_code == 403
+        assert delete.status_code == 403
+        with app.app_context():
+            assert db.session.get(Round, round_id).name == 'Producer Updated Round'
+            assert db.session.get(Round, round_id).pdf_generated is True
+
+    def test_private_round_pdf_generation_requires_visibility(self, app, client):
+        """A logged-in user should not generate PDFs for another user's private round."""
+        _login(app, client, username='private_pdf_owner', email='private_pdf_owner@example.com')
+        _login(app, client, username='private_pdf_other', email='private_pdf_other@example.com')
+        song_id = _create_song(app, title='Private PDF Song')
+        owner_id = _user_id(app, 'private_pdf_owner')
+        client.get('/users/logout')
+        _login(app, client, username='private_pdf_owner', email='private_pdf_owner@example.com')
+        round_id = _create_round(app, [song_id], name='Private PDF Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        client.get('/users/logout')
+        _login(app, client, username='private_pdf_other', email='private_pdf_other@example.com')
+        response = client.post(
+            f'/rounds/{round_id}/pdf',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+
+        assert response.status_code == 404
+
     def test_round_owner_can_share_and_revoke_from_detail(self, app, client):
         """Owners should be able to manage explicit round shares in the browser."""
         _login(app, client, username='share_owner_ui', email='share_owner_ui@example.com')

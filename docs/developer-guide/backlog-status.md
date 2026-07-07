@@ -35,7 +35,7 @@ issue after verification or continue with the remaining follow-up.
 | #73 Add MCP tool to draft round intro, replay, and outro scripts | Ready to close | `draft_round_audio_scripts`, MCP docs, round detail actions | Verify one draft for a real round after deploy. |
 | #74 Store and review generated TTS scripts before audio assignment | Ready to close | `RoundAudioScript`, review routes, `generate_tts_from_script` | Verify approved script-to-audio assignment with configured TTS provider. |
 | #75 Add chart and festival seed source registry | Partial | `SeedSource`, `SeedSourceRun`, admin views, MCP registry/run tools | Scrapers/importers for individual chart/festival providers remain separate slices. |
-| #79 Add round ownership and sharing roles | Partial | `RoundShare`, `RoundAccessEvent`, owner filtering, edit checks, MCP share tools, browser share/revoke UI, tokenized public read-only links | Richer role policy remains open. |
+| #79 Add round ownership and sharing roles | Ready to close | `RoundShare`, `RoundAccessEvent`, owner filtering, viewer/editor/producer checks, MCP share tools, browser share/revoke UI, tokenized public read-only links | Verify browser and MCP roles after deploy. |
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
@@ -45,7 +45,5 @@ issue after verification or continue with the remaining follow-up.
 1. Close or comment the "ready to close" issues after a release smoke confirms
    the linked browser/MCP behavior.
 2. For #75, add first provider-specific source fetchers on top of the registry.
-3. For #79, add richer role policy around `RoundShare` and shared-round
-   operational actions.
-5. For #126/#12, continue with live deployment configuration only through the
+3. For #126/#12, continue with live deployment configuration only through the
    existing 1Password-backed secret flow and credential-safe Kubernetes checks.

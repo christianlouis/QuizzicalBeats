@@ -42,6 +42,9 @@ ROUND_QUALITY_SESSION_REPORT_MAX_CHARS = 2000
 ROUND_MP3_STATUS_EXISTS = 'exists'
 ROUND_MP3_STATUS_GENERATED = 'generated'
 ROUND_MP3_STATUS_REGENERATED = 'regenerated'
+ROUND_SHARE_VALID_ROLES = {'viewer', 'editor', 'producer'}
+ROUND_SHARE_EDIT_ROLES = {'editor', 'producer'}
+ROUND_SHARE_PRODUCE_ROLES = {'producer'}
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -205,15 +208,36 @@ def _can_view_round(round_obj):
     return round_obj.shares.filter_by(user_id=current_user.id).first() is not None
 
 
-def _can_edit_round(round_obj):
+def _can_operate_owned_round(round_obj):
     if current_user.is_admin:
         return True
     if round_obj.user_id is None:
         return True
-    if round_obj.user_id == current_user.id:
+    return round_obj.user_id == current_user.id
+
+
+def _current_user_round_share(round_obj):
+    if not current_user.is_authenticated:
+        return None
+    return round_obj.shares.filter_by(user_id=current_user.id).first()
+
+
+def _can_edit_round(round_obj):
+    if _can_operate_owned_round(round_obj):
         return True
-    share = round_obj.shares.filter_by(user_id=current_user.id).first()
-    return bool(share and share.role == 'editor')
+    share = _current_user_round_share(round_obj)
+    return bool(share and share.role in ROUND_SHARE_EDIT_ROLES)
+
+
+def _can_produce_round(round_obj):
+    if _can_operate_owned_round(round_obj):
+        return True
+    share = _current_user_round_share(round_obj)
+    return bool(share and share.role in ROUND_SHARE_PRODUCE_ROLES)
+
+
+def _can_delete_round(round_obj):
+    return _can_operate_owned_round(round_obj)
 
 
 def _can_manage_round_shares(round_obj):
@@ -232,6 +256,20 @@ def _get_visible_round_or_404(round_id):
 def _get_editable_round_or_404(round_id):
     round_obj = _get_visible_round_or_404(round_id)
     if not _can_edit_round(round_obj):
+        abort(403)
+    return round_obj
+
+
+def _get_producible_round_or_404(round_id):
+    round_obj = _get_visible_round_or_404(round_id)
+    if not _can_produce_round(round_obj):
+        abort(403)
+    return round_obj
+
+
+def _get_deletable_round_or_404(round_id):
+    round_obj = _get_visible_round_or_404(round_id)
+    if not _can_delete_round(round_obj):
         abort(403)
     return round_obj
 
@@ -617,8 +655,8 @@ def add_round_share(round_id):
 
     user_query = (request.form.get('user_query') or '').strip()
     role = (request.form.get('role') or 'viewer').strip().lower()
-    if role not in {'viewer', 'editor'}:
-        flash('Share role must be viewer or editor.', 'error')
+    if role not in ROUND_SHARE_VALID_ROLES:
+        flash('Share role must be viewer, editor, or producer.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
     if not user_query:
         flash('Enter a username or email address to share with.', 'error')
@@ -872,7 +910,7 @@ def round_mp3(round_id):
         if not current_user.is_authenticated:
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-    round = _get_editable_round_or_404(round_id)
+    round = _get_producible_round_or_404(round_id)
     song_ids = round.song_id_list
     if not song_ids:
         error_msg = 'Round contains no songs. Please add songs before generating an MP3.'
@@ -1263,9 +1301,7 @@ def generate_pdf(round_id):
 @login_required
 def round_pdf(round_id):
     """Generate a PDF file for a round"""
-    rnd = db.session.get(Round, round_id)
-    if not rnd:
-        return jsonify({'success': False, 'error': 'Round not found'})
+    rnd = _get_producible_round_or_404(round_id)
     if not rnd.song_id_list:
         return jsonify({
             'success': False,
@@ -1341,7 +1377,7 @@ def send_email(round_id):
             return jsonify({'error': 'Authentication required'}), 401
     
     # Check if the round exists
-    rnd = _get_editable_round_or_404(round_id)
+    rnd = _get_producible_round_or_404(round_id)
 
     storage = check_round_artifact_storage(include_mp3=True, include_pdf=True)
     if not storage['ok']:
@@ -1481,7 +1517,7 @@ def send_email(round_id):
 @login_required
 def delete_round(round_id):
     """Delete a round and its associated files"""
-    rnd = _get_editable_round_or_404(round_id)
+    rnd = _get_deletable_round_or_404(round_id)
     
     try:
         # Delete associated MP3 file if it exists
@@ -1514,7 +1550,7 @@ def export_to_dropbox(round_id):
     Export a round to the user's Dropbox account, including metadata and optionally MP3 files
     """
     current_app.logger.info(f"Starting Dropbox export for round ID {round_id} by user {current_user.username}")
-    round_obj = _get_visible_round_or_404(round_id)
+    round_obj = _get_producible_round_or_404(round_id)
     
     # Properly parse boolean parameters from form data
     include_mp3s = request.form.get('include_mp3s', 'true').lower() == 'true'

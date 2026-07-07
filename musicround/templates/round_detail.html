@@ -83,7 +83,7 @@
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
             <div class="flex-1">
                 <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-2">Sharing</h2>
-                <p class="text-sm text-gray-600 mb-4">Give another quizmaster read-only or edit access to this round.</p>
+                <p class="text-sm text-gray-600 mb-4">Give another quizmaster read-only, edit, or production access to this round.</p>
                 {% if round_shares %}
                 <div class="space-y-2">
                     {% for share in round_shares %}
@@ -95,7 +95,7 @@
                             {% endif %}
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'editor' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'producer' %}bg-purple-100 text-purple-800{% elif share.role == 'editor' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-800{% endif %}">
                                 {{ share.role|capitalize }}
                             </span>
                             {% if can_manage_shares %}
@@ -126,6 +126,7 @@
                     <select id="share_role" name="role" class="px-3 py-2 border border-gray-300 rounded-md w-full">
                         <option value="viewer">Viewer</option>
                         <option value="editor">Editor</option>
+                        <option value="producer">Producer</option>
                     </select>
                 </div>
                 <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">

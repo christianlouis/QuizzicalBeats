@@ -225,7 +225,7 @@ The `RoundShare` table stores explicit round access grants.
 | id         | Integer     | Primary key                          |
 | round_id   | Integer     | Foreign key to Round                 |
 | user_id    | Integer     | Foreign key to shared user           |
-| role       | String(20)  | Share role (viewer, editor)          |
+| role       | String(20)  | Share role (viewer, editor, producer) |
 | created_at | DateTime    | When the share was created           |
 
 ### RoundAccessEvent
