@@ -62,16 +62,41 @@ database to a managed SQL database without exposing credentials in logs or Git.
 ## Dry Run
 
 1. Restore the SQLite backup into a disposable workspace.
-2. Import into a disposable managed database using a tested migration tool such
-   as `pgloader` or an equivalent schema-aware export/import process.
-3. Start the app against the disposable managed URI and run:
+2. Point the app environment at the disposable managed database. Prefer the
+   component variables so the password can come from a Secret key:
+
+   ```bash
+   export PGHOST=quizzicalbeats-db-rw.quizzicalbeats.svc
+   export PGDATABASE=quizzicalbeats
+   export PGUSER=quizzicalbeats
+   export PGPASSWORD='from-secret-manager'
+   unset SQLALCHEMY_DATABASE_URI
+   ```
+
+3. Run the built-in dry run first. It prints only row counts and redacted
+   targets, never the source path or database password:
+
+   ```bash
+   python /app/run.py database migrate-sqlite --source /restore/song_data.db
+   ```
+
+4. Execute only after the dry run looks right. The target database must be
+   empty unless `--replace-target` is explicitly passed after taking a backup:
+
+   ```bash
+   python /app/run.py database migrate-sqlite \
+     --source /restore/song_data.db \
+     --execute
+   ```
+
+5. Start the app against the disposable managed URI and run:
 
    ```bash
    python /app/run.py database preflight
    python -m pytest tests/test_app_factory.py tests/test_automation_service.py
    ```
 
-4. Verify the core counts match the SQLite source: songs, rounds, users, tags,
+6. Verify the core counts match the SQLite source: songs, rounds, users, tags,
    and scheduled exports.
 
 ## Production Cutover
@@ -101,14 +126,32 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
 2. Deploy the app with `DATABASE_REQUIRE_MANAGED=true` and without a ConfigMap
    `SQLALCHEMY_DATABASE_URI` SQLite fallback.
-3. Restart the web deployment after the secret has synced:
+3. Run the production dry run from a one-off pod or the web pod with the new
+   target database environment. Do not pass `--execute` until backup and
+   rollback are confirmed:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- \
+     python /app/run.py database migrate-sqlite --source /data/song_data.db
+   ```
+
+4. Execute the copy during the maintenance window:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- \
+     python /app/run.py database migrate-sqlite \
+       --source /data/song_data.db \
+       --execute
+   ```
+
+5. Restart the web deployment after the secret has synced:
 
    ```bash
    kubectl -n quizzicalbeats rollout restart deploy/quizzicalbeats
    kubectl -n quizzicalbeats rollout status deploy/quizzicalbeats
    ```
 
-4. Verify without printing credentials:
+6. Verify without printing credentials:
 
    ```bash
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
@@ -121,7 +164,7 @@ database to a managed SQL database without exposing credentials in logs or Git.
    PY
    ```
 
-5. Verify web, MCP, and scheduled-email execution share the same config:
+7. Verify web, MCP, and scheduled-email execution share the same config:
 
    ```bash
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight

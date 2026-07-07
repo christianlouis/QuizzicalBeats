@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
 - Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
 - Added PostgreSQL component-variable database configuration so Kubernetes/CNPG deployments can use `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` without storing one full database URI secret.
+- Added a dry-run-first SQLite-to-managed-database migration CLI with row-count validation, target safety checks, and credential-safe output.
 
 ### Fixed
 - Hid internal/noisy import tags from the music-round builder while keeping raw tags in storage, and mapped common public aliases such as `hip hop` to `Hip-Hop`.

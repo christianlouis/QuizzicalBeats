@@ -39,6 +39,30 @@ def main():
         action='store_true',
         help='Report diagnostics without failing on SQLite; useful before cutover work starts',
     )
+    migrate_parser = database_subparsers.add_parser(
+        'migrate-sqlite',
+        help='Dry-run or execute a SQLite-to-configured-database row copy',
+    )
+    migrate_parser.add_argument(
+        '--source',
+        required=True,
+        help='Path to the source SQLite database file, for example /data/song_data.db',
+    )
+    migrate_parser.add_argument(
+        '--execute',
+        action='store_true',
+        help='Actually copy data. Omit this for the default dry run.',
+    )
+    migrate_parser.add_argument(
+        '--replace-target',
+        action='store_true',
+        help='Delete existing target rows before copying. Requires --execute.',
+    )
+    migrate_parser.add_argument(
+        '--allow-sqlite-target',
+        action='store_true',
+        help='Allow a SQLite target for local tests only. Production should use managed SQL.',
+    )
 
     health_parser = subparsers.add_parser('health', help='Health diagnostics')
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
@@ -70,6 +94,36 @@ def main():
                     print(f"Retention policy failed: {result['message']}")
                     return 1
     elif args.command == 'database':
+        if args.database_action == 'migrate-sqlite':
+            if args.replace_target and not args.execute:
+                print(
+                    "Database migration error: --replace-target requires --execute.",
+                    file=sys.stderr,
+                )
+                return 78
+            with contextlib.redirect_stdout(sys.stderr):
+                app = create_app()
+            with app.app_context():
+                from musicround import db
+                from musicround.helpers.database_migration import (
+                    DatabaseMigrationError,
+                    migrate_sqlite_to_configured_database,
+                )
+
+                try:
+                    result = migrate_sqlite_to_configured_database(
+                        args.source,
+                        db.engine,
+                        execute=args.execute,
+                        replace_target=args.replace_target,
+                        allow_sqlite_target=args.allow_sqlite_target,
+                    )
+                except DatabaseMigrationError as exc:
+                    print(f"Database migration error: {exc}", file=sys.stderr)
+                    return 78
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return 0
+
         from flask import Flask
         from musicround import _configure_database_uri
         from musicround.config import Config
@@ -81,6 +135,8 @@ def main():
 
         app = Flask(__name__)
         app.config.from_object(Config)
+        if "SQLALCHEMY_DATABASE_URI" not in os.environ:
+            app.config["SQLALCHEMY_DATABASE_URI"] = None
         if args.database_action == 'preflight':
             app.config['DATABASE_REQUIRE_MANAGED'] = not args.allow_sqlite
         try:
