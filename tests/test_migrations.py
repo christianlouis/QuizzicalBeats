@@ -9,6 +9,7 @@ from musicround.models import (
     ImportJobRecord,
     PlannedQuizRound,
     Round,
+    RoundAccessEvent,
     RoundAudioScript,
     RoundExport,
     RoundShare,
@@ -255,8 +256,15 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     assert {"user_id", "visibility"}.issubset(round_columns)
     assert "idx_round_owner_created" in _index_names(database_path, "round")
     assert "round_share" in _table_names(database_path)
+    assert "round_access_event" in _table_names(database_path)
     assert "round_audio_script" in _table_names(database_path)
     assert "idx_round_share_user" in _index_names(database_path, "round_share")
+    assert "idx_round_access_event_round_created" in _index_names(
+        database_path, "round_access_event"
+    )
+    assert "idx_round_access_event_actor" in _index_names(
+        database_path, "round_access_event"
+    )
     assert "idx_round_audio_script_round_status" in _index_names(
         database_path, "round_audio_script"
     )
@@ -266,6 +274,7 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     assert "cue_position" in _column_names(database_path, "round_audio_script")
     assert "user_id" in Round.__table__.columns.keys()
     assert RoundShare.__tablename__ == "round_share"
+    assert RoundAccessEvent.__tablename__ == "round_access_event"
     assert RoundAudioScript.__tablename__ == "round_audio_script"
     assert "cue_position" in RoundAudioScript.__table__.columns.keys()
 

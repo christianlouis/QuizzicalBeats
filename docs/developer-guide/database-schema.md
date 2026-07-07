@@ -225,6 +225,22 @@ The `RoundShare` table stores explicit round access grants.
 | role       | String(20)  | Share role (viewer, editor)          |
 | created_at | DateTime    | When the share was created           |
 
+### RoundAccessEvent
+
+The `RoundAccessEvent` table stores an audit trail for ownership and sharing
+changes on collaborative rounds.
+
+| Column         | Type        | Description                                  |
+|----------------|-------------|----------------------------------------------|
+| id             | Integer     | Primary key                                  |
+| round_id       | Integer     | Foreign key to Round                         |
+| actor_user_id  | Integer     | User who performed the action, when known    |
+| target_user_id | Integer     | User whose access changed, when applicable   |
+| action         | String(40)  | Event type such as share_created/revoked     |
+| role           | String(20)  | Role involved in the event                   |
+| details        | Text        | Optional event details                       |
+| created_at     | DateTime    | When the event was recorded                  |
+
 ### RoundAudioScript
 
 The `RoundAudioScript` table stores reviewable intro, replay, and outro text

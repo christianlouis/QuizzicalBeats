@@ -104,6 +104,25 @@ def run_migration():
                 )
                 changes_made = True
 
+            if not _table_exists(inspector, "round_access_event"):
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE round_access_event (
+                            id INTEGER PRIMARY KEY,
+                            round_id INTEGER NOT NULL,
+                            actor_user_id INTEGER,
+                            target_user_id INTEGER,
+                            action VARCHAR(40) NOT NULL,
+                            role VARCHAR(20),
+                            details TEXT,
+                            created_at DATETIME
+                        )
+                        """
+                    )
+                )
+                changes_made = True
+
             inspector = inspect(db.engine)
             if _table_exists(inspector, "round_audio_script"):
                 script_columns = _columns(inspector, "round_audio_script")
@@ -115,6 +134,21 @@ def run_migration():
             for table_name, index_name, columns in (
                 ("round", "idx_round_owner_created", ["user_id", "created_at"]),
                 ("round_share", "idx_round_share_user", ["user_id", "role"]),
+                (
+                    "round_access_event",
+                    "idx_round_access_event_round_created",
+                    ["round_id", "created_at"],
+                ),
+                (
+                    "round_access_event",
+                    "idx_round_access_event_actor",
+                    ["actor_user_id", "created_at"],
+                ),
+                (
+                    "round_access_event",
+                    "idx_round_access_event_target",
+                    ["target_user_id", "created_at"],
+                ),
                 (
                     "round_audio_script",
                     "idx_round_audio_script_round_status",

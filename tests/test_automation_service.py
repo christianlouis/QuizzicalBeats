@@ -17,6 +17,7 @@ from musicround.models import (
     ImportJobRecord,
     PlannedQuizRound,
     Round,
+    RoundAccessEvent,
     RoundAudioScript,
     RoundExport,
     RoundShare,
@@ -486,16 +487,27 @@ class TestRoundAutomation:
                 user_id=owner.id,
             )["round"]["id"]
 
-            shared = automation.share_round(round_id, viewer.id, role="editor")
+            shared = automation.share_round(round_id, viewer.id, role="editor", actor_user_id=owner.id)
             listed = automation.list_round_shares(round_id)
-            revoked = automation.revoke_round_share(round_id, viewer.id)
+            events_after_share = automation.list_round_access_events(round_id)
+            revoked = automation.revoke_round_share(round_id, viewer.id, actor_user_id=owner.id)
+            events_after_revoke = automation.list_round_access_events(round_id)
 
             assert shared["created"] is True
             assert shared["share"]["role"] == "editor"
+            assert shared["access_event"]["action"] == "share_created"
+            assert shared["access_event"]["actor_user_id"] == owner.id
+            assert shared["access_event"]["target_user_id"] == viewer.id
             assert listed["count"] == 1
             assert listed["owner"]["id"] == owner.id
+            assert events_after_share["count"] == 1
+            assert events_after_share["events"][0]["action"] == "share_created"
             assert revoked["revoked"] is True
+            assert revoked["access_event"]["action"] == "share_revoked"
+            assert events_after_revoke["count"] == 2
+            assert events_after_revoke["events"][0]["action"] == "share_revoked"
             assert RoundShare.query.count() == 0
+            assert RoundAccessEvent.query.count() == 2
             assert db.session.get(Round, round_id).visibility == "private"
 
 
@@ -1613,6 +1625,7 @@ class TestDatastoreCrudAutomation:
 
             assert "song" in schema["object_types"]
             assert "round" in schema["object_types"]
+            assert "round_access_event" in schema["object_types"]
             assert "user" in schema["object_types"]
             song_schema = next(
                 item for item in schema["objects"] if item["object_type"] == "song"

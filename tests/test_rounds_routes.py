@@ -5,7 +5,7 @@ from datetime import datetime
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
-from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAudioScript, RoundExport, RoundShare
+from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare
 from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
 
 
@@ -529,9 +529,19 @@ class TestRoundDetailRoute:
         assert b'share_target_ui' in add_response.data
         assert b'share_target_ui@example.com' in add_response.data
         assert b'Editor' in add_response.data
+        assert b'Access History' in add_response.data
+        assert b'Share Created' in add_response.data
+        assert b'by share_owner_ui' in add_response.data
         with app.app_context():
             share = RoundShare.query.filter_by(round_id=round_id, user_id=target_id).one()
+            share_event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                target_user_id=target_id,
+                action='share_created',
+            ).one()
             assert share.role == 'editor'
+            assert share_event.actor_user_id == owner_id
+            assert share_event.role == 'editor'
             assert db.session.get(Round, round_id).visibility == 'shared'
 
         delete_response = client.post(
@@ -541,8 +551,16 @@ class TestRoundDetailRoute:
 
         assert delete_response.status_code == 200
         assert b'This round is not shared with other quizmasters.' in delete_response.data
+        assert b'Share Revoked' in delete_response.data
         with app.app_context():
             assert RoundShare.query.filter_by(round_id=round_id, user_id=target_id).count() == 0
+            revoke_event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                target_user_id=target_id,
+                action='share_revoked',
+            ).one()
+            assert revoke_event.actor_user_id == owner_id
+            assert revoke_event.role == 'editor'
             assert db.session.get(Round, round_id).visibility == 'private'
 
     def test_shared_editor_cannot_manage_round_shares(self, app, client):
@@ -571,6 +589,7 @@ class TestRoundDetailRoute:
 
         assert detail.status_code == 200
         assert b'id="round-share-form"' not in detail.data
+        assert b'Access History' not in detail.data
         assert b'share_admin_editor' in detail.data
         assert b'share_admin_editor@example.com' not in detail.data
         assert blocked.status_code == 403

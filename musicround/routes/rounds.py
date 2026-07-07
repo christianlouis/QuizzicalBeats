@@ -15,7 +15,7 @@ from flask import Blueprint, session, redirect, request, render_template, url_fo
 from flask_login import current_user, login_required
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
-from musicround.models import PlannedQuizRound, Round, RoundAudioScript, RoundExport, RoundShare, Song, User, db
+from musicround.models import PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, Song, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -498,6 +498,16 @@ def round_detail(round_id):
             .all()
         )
 
+        can_manage_shares = _can_manage_round_shares(rnd)
+        round_access_events = []
+        if can_manage_shares:
+            round_access_events = (
+                RoundAccessEvent.query.filter_by(round_id=rnd.id)
+                .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
+                .limit(10)
+                .all()
+            )
+
         return render_template(
             'round_detail.html',
             round=rnd,
@@ -508,7 +518,8 @@ def round_detail(round_id):
             audio_scripts=audio_scripts,
             scheduled_exports=scheduled_exports,
             round_shares=round_shares,
-            can_manage_shares=_can_manage_round_shares(rnd),
+            can_manage_shares=can_manage_shares,
+            round_access_events=round_access_events,
         )
     else:
         return 'Round not found'
@@ -609,7 +620,7 @@ def add_round_share(round_id):
         return redirect(url_for('rounds.round_detail', round_id=round_id))
 
     try:
-        automation.share_round(round_id, target_user.id, role=role)
+        automation.share_round(round_id, target_user.id, role=role, actor_user_id=current_user.id)
     except AutomationError as exc:
         flash(str(exc), 'error')
     else:
@@ -626,7 +637,7 @@ def delete_round_share(round_id, user_id):
         abort(403)
 
     try:
-        automation.revoke_round_share(round_id, user_id)
+        automation.revoke_round_share(round_id, user_id, actor_user_id=current_user.id)
     except AutomationError as exc:
         flash(str(exc), 'error')
     else:
