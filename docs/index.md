@@ -24,6 +24,7 @@ This documentation is organized into several sections:
 - **[User Guide](user-guide/getting-started.md)**: Learn how to use Quizzical Beats
 - **[Admin Guide](admin-guide/installation.md)**: Installation and maintenance information
 - **[Developer Guide](developer-guide/architecture.md)**: Technical documentation for developers
+- **[Agentic Backlog Status](developer-guide/backlog-status.md)**: Current GitHub issue crosswalk for coding agents
 - **[FAQ](faq.md)**: Frequently asked questions
 - **[Changelog](changelog.md)**: Version history and feature additions
 

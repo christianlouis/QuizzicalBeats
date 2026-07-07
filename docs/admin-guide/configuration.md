@@ -90,8 +90,7 @@ For optimal metadata quality, we recommend configuring at least Spotify and Last
 ### Database Configuration
 
 ```bash
-# SQLite (default)
-SQLALCHEMY_DATABASE_URI=sqlite:////data/song_data.db
+# SQLite fallback for local development. Leave SQLALCHEMY_DATABASE_URI unset.
 SQLALCHEMY_TRACK_MODIFICATIONS=False
 
 # Application file storage
@@ -104,11 +103,21 @@ ROUND_PDF_DIR=/data/pdfs
 
 # For PostgreSQL:
 # SQLALCHEMY_DATABASE_URI=postgresql://username:password@localhost/musicround
+
+# Or use split PostgreSQL variables for secretKeyRef-based deployments:
+# DATABASE_REQUIRE_MANAGED=true
+# PGHOST=postgres-rw.namespace.svc.cluster.local
+# PGPORT=5432
+# PGDATABASE=quizzicalbeats
+# PGUSER=quizzicalbeats
+# PGPASSWORD=change-me
 ```
 
 When `SQLALCHEMY_DATABASE_URI` is omitted, the local SQLite fallback is created
 as `song_data.db` inside `DATA_DIR`. Production deployments should configure
-PostgreSQL instead and enable `DATABASE_REQUIRE_MANAGED=true`.
+PostgreSQL instead and enable `DATABASE_REQUIRE_MANAGED=true`. If both
+`SQLALCHEMY_DATABASE_URI` and `PG*` variables are set, the full URI wins; remove
+or blank it before relying on split PostgreSQL variables.
 
 ### OAuth Provider Configuration
 
