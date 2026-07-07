@@ -185,10 +185,21 @@
                             <td class="px-4 py-3">{{ song.year }}</td>
                             <td class="px-4 py-3">{{ song.genre }}</td>
                             <td class="px-4 py-3">
-                                <audio controls class="w-full max-w-[200px]" src="{{ song.preview_url }}">Your browser does not support the audio element.</audio>
+                                {% if song.preview_url %}
+                                <button type="button"
+                                        class="round-preview-load-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-transparent px-3 py-2 text-teal-600 transition-all hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800"
+                                        data-preview-url="{{ song.preview_url|e }}"
+                                        title="Load preview for {{ song.title|e }} by {{ song.artist|e }}"
+                                        aria-label="Load preview for {{ song.title|e }} by {{ song.artist|e }}">
+                                    <i class="fas fa-play"></i>
+                                    <span class="ml-2 hidden sm:inline">Preview</span>
+                                </button>
+                                {% else %}
+                                <span class="text-gray-400">No preview</span>
+                                {% endif %}
                             </td>
                             <td class="px-4 py-3">
-                                <button type="button" class="remove-song text-red-500 hover:text-red-700" data-id="{{ song.id }}">
+                                <button type="button" class="remove-song inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-red-500 hover:bg-red-50 hover:text-red-700" data-id="{{ song.id }}" aria-label="Remove {{ song.title|e }} by {{ song.artist|e }} from this round" title="Remove {{ song.title|e }} by {{ song.artist|e }}">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </td>
@@ -694,6 +705,58 @@
                 }[character];
             });
         }
+
+        function renderRoundPreviewCell(previewUrl, title, artist) {
+            if (!previewUrl) {
+                return '<span class="text-gray-400">No preview</span>';
+            }
+
+            const label = `Load preview for ${title || 'song'}${artist ? ` by ${artist}` : ''}`;
+            return `
+                <button type="button"
+                        class="round-preview-load-btn inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-transparent px-3 py-2 text-teal-600 transition-all hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800"
+                        data-preview-url="${escapeHtml(previewUrl)}"
+                        title="${escapeHtml(label)}"
+                        aria-label="${escapeHtml(label)}">
+                    <i class="fas fa-play"></i>
+                    <span class="ml-2 hidden sm:inline">Preview</span>
+                </button>
+            `;
+        }
+
+        document.addEventListener('click', function(event) {
+            const previewButton = event.target.closest('.round-preview-load-btn');
+            if (!previewButton) {
+                return;
+            }
+
+            event.preventDefault();
+            const previewUrl = previewButton.dataset.previewUrl;
+            if (!previewUrl) {
+                return;
+            }
+
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.preload = 'none';
+            audio.className = 'preview-audio w-full min-w-[180px] max-w-[260px]';
+            audio.src = previewUrl;
+            audio.textContent = 'Your browser does not support audio.';
+            previewButton.replaceWith(audio);
+            audio.load();
+            audio.play().catch(function() {});
+        });
+
+        document.addEventListener('play', function(event) {
+            if (event.target.tagName !== 'AUDIO') {
+                return;
+            }
+            document.querySelectorAll('audio').forEach(function(player) {
+                if (player !== event.target) {
+                    player.pause();
+                }
+            });
+        }, true);
         
         // Close toast button event
         toastCloseBtn.addEventListener('click', hideToast);
@@ -853,11 +916,9 @@
                 <td class="px-4 py-3">${songData.artist}</td>
                 <td class="px-4 py-3">${songData.year}</td>
                 <td class="px-4 py-3">${songData.genre}</td>
+                <td class="px-4 py-3">${renderRoundPreviewCell(songData.preview, songData.title, songData.artist)}</td>
                 <td class="px-4 py-3">
-                    <audio controls class="w-full max-w-[200px]" src="${songData.preview}">Your browser does not support the audio element.</audio>
-                </td>
-                <td class="px-4 py-3">
-                    <button type="button" class="remove-song text-red-500 hover:text-red-700" data-id="${songData.id}">
+                    <button type="button" class="remove-song inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-red-500 hover:bg-red-50 hover:text-red-700" data-id="${songData.id}" aria-label="Remove ${escapeHtml(songData.title)} by ${escapeHtml(songData.artist)} from this round" title="Remove ${escapeHtml(songData.title)} by ${escapeHtml(songData.artist)}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>

@@ -82,6 +82,17 @@
                 @apply rounded border-gray-300 text-teal-600 focus:ring-teal-500;
             }
         }
+
+        @layer components {
+            .nav-dropdown-menu {
+                display: none;
+            }
+
+            .nav-dropdown:hover .nav-dropdown-menu,
+            .nav-dropdown.is-open .nav-dropdown-menu {
+                display: flex;
+            }
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -94,17 +105,17 @@
                         <img src="{{ url_for('static', filename='img/dark/logo.png') }}" alt="Quizzical Beats" class="h-8 mr-2">
                         <span class="hidden sm:inline">Quizzical Beats</span>
                     </a>
-                    <button id="menu-toggle" class="md:hidden focus:outline-none">
+                    <button id="menu-toggle" type="button" class="md:hidden focus:outline-none focus:ring-2 focus:ring-teal-300 rounded p-2" aria-controls="navbar-menu" aria-expanded="false" aria-label="Toggle navigation menu">
                         <i class="fas fa-bars"></i>
                     </button>
                     <div id="navbar-menu" class="hidden md:flex flex-grow items-center">
                         <ul class="flex flex-col md:flex-row space-y-2 md:space-y-0 md:ml-8 md:space-x-6 mt-4 md:mt-0">
                             {% if current_user.is_authenticated %}
-                                <li class="group relative">
-                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                <li class="nav-dropdown group relative">
+                                    <button type="button" class="nav-dropdown-trigger peer flex items-center text-white hover:text-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-1 py-1" aria-haspopup="true" aria-expanded="false">
                                         <i class="fab fa-spotify mr-2"></i>Import Spotify <i class="fas fa-chevron-down ml-1"></i>
                                     </button>
-                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                    <ul class="nav-dropdown-menu flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10" aria-label="Import Spotify options">
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_song') }}">Song</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_playlist') }}">Playlist</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('import_songs.import_album') }}">Album</a></li>
@@ -118,11 +129,11 @@
                                         </li>
                                     </ul>
                                 </li>
-                                <li class="group relative">
-                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                <li class="nav-dropdown group relative">
+                                    <button type="button" class="nav-dropdown-trigger peer flex items-center text-white hover:text-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-1 py-1" aria-haspopup="true" aria-expanded="false">
                                         <i class="fab fa-deezer mr-2"></i>Import Deezer <i class="fas fa-chevron-down ml-1"></i>
                                     </button>
-                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                    <ul class="nav-dropdown-menu flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10" aria-label="Import Deezer options">
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_track') }}">Song</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_playlist') }}">Playlist</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('deezer.import_deezer_album') }}">Album</a></li>
@@ -145,22 +156,22 @@
                                 <li>
                                     <a class="text-white hover:text-teal-500" href="{{ url_for('rounds.rounds_list') }}">View Rounds</a>
                                 </li>
-                                <li class="group relative">
-                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                <li class="nav-dropdown group relative">
+                                    <button type="button" class="nav-dropdown-trigger peer flex items-center text-white hover:text-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-1 py-1" aria-haspopup="true" aria-expanded="false">
                                         Round Ops <i class="fas fa-chevron-down ml-1"></i>
                                     </button>
-                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                    <ul class="nav-dropdown-menu flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10" aria-label="Round operations options">
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.rounds_calendar') }}">Calendar</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.rounds_analytics') }}">Analytics</a></li>
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('rounds.round_planning') }}">Planning Brief</a></li>
                                     </ul>
                                 </li>
                                 {% if current_user.is_admin %}
-                                <li class="group relative">
-                                    <button class="peer flex items-center text-white hover:text-teal-500">
+                                <li class="nav-dropdown group relative">
+                                    <button type="button" class="nav-dropdown-trigger peer flex items-center text-white hover:text-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-300 rounded px-1 py-1" aria-haspopup="true" aria-expanded="false">
                                         <i class="fas fa-shield-alt mr-2"></i>Admin <i class="fas fa-chevron-down ml-1"></i>
                                     </button>
-                                    <ul class="hidden peer-hover:flex hover:flex flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10">
+                                    <ul class="nav-dropdown-menu flex-col absolute bg-white text-gray-800 shadow-md py-2 rounded-md w-48 z-10" aria-label="Admin options">
                                         <li><a class="block px-4 py-2 hover:bg-navy-50" href="{{ url_for('admin.index') }}">
                                             <span class="flex items-center">
                                                 <i class="fas fa-database mr-2"></i> Data Manager
@@ -244,9 +255,96 @@
 
     <!-- Mobile menu script -->
     <script>
-        document.getElementById('menu-toggle').addEventListener('click', function() {
+        const menuToggle = document.getElementById('menu-toggle');
+
+        menuToggle.addEventListener('click', function() {
             const menu = document.getElementById('navbar-menu');
             menu.classList.toggle('hidden');
+            menuToggle.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
+        });
+
+        const dropdowns = Array.from(document.querySelectorAll('.nav-dropdown'));
+        const closeDropdown = (dropdown) => {
+            dropdown.classList.remove('is-open');
+            dropdown.querySelector('.nav-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
+        };
+        const openDropdown = (dropdown) => {
+            dropdowns.forEach((candidate) => {
+                if (candidate !== dropdown) {
+                    closeDropdown(candidate);
+                }
+            });
+            dropdown.classList.add('is-open');
+            dropdown.querySelector('.nav-dropdown-trigger')?.setAttribute('aria-expanded', 'true');
+        };
+
+        dropdowns.forEach((dropdown) => {
+            const trigger = dropdown.querySelector('.nav-dropdown-trigger');
+            const menuLinks = Array.from(dropdown.querySelectorAll('.nav-dropdown-menu a'));
+            if (!trigger || menuLinks.length === 0) {
+                return;
+            }
+
+            dropdown.addEventListener('mouseenter', () => {
+                trigger.setAttribute('aria-expanded', 'true');
+            });
+            dropdown.addEventListener('mouseleave', () => {
+                if (!dropdown.classList.contains('is-open') && !dropdown.contains(document.activeElement)) {
+                    trigger.setAttribute('aria-expanded', 'false');
+                }
+            });
+            dropdown.addEventListener('focusout', () => {
+                window.setTimeout(() => {
+                    if (!dropdown.contains(document.activeElement)) {
+                        closeDropdown(dropdown);
+                    }
+                }, 0);
+            });
+
+            trigger.addEventListener('click', () => {
+                if (dropdown.classList.contains('is-open')) {
+                    closeDropdown(dropdown);
+                } else {
+                    openDropdown(dropdown);
+                }
+            });
+
+            trigger.addEventListener('keydown', (event) => {
+                if (['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+                    event.preventDefault();
+                    openDropdown(dropdown);
+                    menuLinks[0].focus();
+                }
+                if (event.key === 'Escape') {
+                    closeDropdown(dropdown);
+                    trigger.focus();
+                }
+            });
+
+            menuLinks.forEach((link, index) => {
+                link.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape') {
+                        closeDropdown(dropdown);
+                        trigger.focus();
+                    }
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        menuLinks[(index + 1) % menuLinks.length].focus();
+                    }
+                    if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        menuLinks[(index - 1 + menuLinks.length) % menuLinks.length].focus();
+                    }
+                });
+            });
+        });
+
+        document.addEventListener('click', (event) => {
+            dropdowns.forEach((dropdown) => {
+                if (!dropdown.contains(event.target)) {
+                    closeDropdown(dropdown);
+                }
+            });
         });
     </script>
 

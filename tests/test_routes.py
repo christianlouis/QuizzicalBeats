@@ -235,11 +235,53 @@ class TestAuthenticatedRoutes:
         response = client.get('/view-songs')
         assert response.status_code == 200
 
+    def test_navigation_dropdowns_are_keyboard_accessible(self, app, client):
+        """Header dropdowns should expose state and keyboard hooks."""
+        self._login(app, client)
+        response = client.get('/')
+
+        assert response.status_code == 200
+        assert b'class="nav-dropdown-trigger' in response.data
+        assert b'aria-haspopup="true"' in response.data
+        assert b'aria-expanded="false"' in response.data
+        assert b'aria-label="Toggle navigation menu"' in response.data
+        assert b'.nav-dropdown:focus-within .nav-dropdown-menu' not in response.data
+
     def test_search_accessible_when_logged_in(self, app, client):
         """Test that search page is accessible when logged in."""
         self._login(app, client)
         response = client.get('/search')
         assert response.status_code == 200
+
+    def test_build_music_round_tag_select_has_label(self, app, client):
+        """The tag round select should have an explicit accessible label."""
+        self._login(app, client)
+        response = client.get('/build-music-round')
+
+        assert response.status_code == 200
+        assert b'for="tag_name"' in response.data
+        assert b'id="tag_name"' in response.data
+
+    def test_audio_settings_controls_have_explicit_labels(self, app, client):
+        """Audio settings should render unique input ids and matching labels."""
+        self._login(app, client)
+        app.config['OPENAI_API_KEY'] = 'test-openai-key'
+
+        response = client.get('/users/audio-settings?tts_service=openai')
+
+        assert response.status_code == 200
+        assert b'for="intro_audio_file"' in response.data
+        assert b'id="intro_audio_file"' in response.data
+        assert b'for="outro_audio_file"' in response.data
+        assert b'id="outro_audio_file"' in response.data
+        assert b'for="replay_audio_file"' in response.data
+        assert b'id="replay_audio_file"' in response.data
+        assert b'for="intro_tts_service"' in response.data
+        assert b'id="intro_tts_service"' in response.data
+        assert b'for="outro_tts_voice"' in response.data
+        assert b'id="outro_tts_voice"' in response.data
+        assert b'for="replay_tts_text"' in response.data
+        assert b'id="replay_tts_text"' in response.data
 
     def test_index_accessible_when_logged_in(self, app, client):
         """Test that homepage is accessible when logged in."""

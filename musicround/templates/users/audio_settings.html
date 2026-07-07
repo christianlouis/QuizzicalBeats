@@ -57,7 +57,8 @@
                         
                         <div class="flex items-center space-x-4">
                             <div class="flex-grow">
-                                <input type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
+                                <label for="intro_audio_file" class="sr-only">Upload intro MP3</label>
+                                <input id="intro_audio_file" type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
                             </div>
                             <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
                                 Upload
@@ -71,8 +72,8 @@
                     {% if has_tts_services %}
                         <form method="GET" class="mb-4 flex items-end space-x-2">
                             <input type="hidden" name="mp3_type" value="intro">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
-                            <select name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                            <label for="intro_tts_service" class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
+                            <select id="intro_tts_service" name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                 {% for svc in tts_services %}
                                     <option value="{{ svc.id }}" {% if selected_service and svc.id == selected_service.id %}selected{% endif %}>{{ svc.name }}</option>
                                 {% endfor %}
@@ -86,8 +87,8 @@
                             <input type="hidden" name="tts_service" value="{{ selected_service.id }}">
                             <p class="mt-1 text-sm text-gray-500">{{ selected_service.description if selected_service else '' }}</p>
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
-                                <select name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                <label for="intro_tts_voice" class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
+                                <select id="intro_tts_voice" name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                     {% for voice in selected_service.voices %}
                                         <option value="{{ voice.id }}">{{ voice.name }} ({{ voice.gender }}, {{ voice.language }})</option>
                                     {% endfor %}
@@ -95,8 +96,8 @@
                             </div>
                             {% if selected_service.id == 'openai' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
-                                    <select name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="intro_openai_model" class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
+                                    <select id="intro_openai_model" name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -105,8 +106,8 @@
                             {% endif %}
                             {% if selected_service.id == 'elevenlabs' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                                    <select name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="intro_elevenlabs_model" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                                    <select id="intro_elevenlabs_model" name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -117,16 +118,16 @@
                                 <div class="mb-4 bg-gray-50 p-4 rounded-md">
                                     <h5 class="font-medium text-gray-700 mb-2">Voice Settings</h5>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="intro_stability" class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="intro_stability" type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More variable</span>
                                             <span>More stable</span>
                                         </div>
                                     </div>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="intro_similarity_boost" class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="intro_similarity_boost" type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More unique</span>
                                             <span>More similar</span>
@@ -135,8 +136,8 @@
                                 </div>
                             {% endif %}
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
-                                <textarea name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500" 
+                                <label for="intro_tts_text" class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
+                                <textarea id="intro_tts_text" name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500"
                                     placeholder="Enter text for intro announcement...">{{ default_texts.intro }}</textarea>
                             </div>
                             <div class="flex justify-end">
@@ -203,7 +204,8 @@
                         
                         <div class="flex items-center space-x-4">
                             <div class="flex-grow">
-                                <input type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
+                                <label for="outro_audio_file" class="sr-only">Upload outro MP3</label>
+                                <input id="outro_audio_file" type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
                             </div>
                             <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
                                 Upload
@@ -217,8 +219,8 @@
                     {% if has_tts_services %}
                         <form method="GET" class="mb-4 flex items-end space-x-2">
                             <input type="hidden" name="mp3_type" value="outro">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
-                            <select name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                            <label for="outro_tts_service" class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
+                            <select id="outro_tts_service" name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                 {% for svc in tts_services %}
                                     <option value="{{ svc.id }}" {% if selected_service and svc.id == selected_service.id %}selected{% endif %}>{{ svc.name }}</option>
                                 {% endfor %}
@@ -232,8 +234,8 @@
                             <input type="hidden" name="tts_service" value="{{ selected_service.id }}">
                             <p class="mt-1 text-sm text-gray-500">{{ selected_service.description if selected_service else '' }}</p>
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
-                                <select name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                <label for="outro_tts_voice" class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
+                                <select id="outro_tts_voice" name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                     {% for voice in selected_service.voices %}
                                         <option value="{{ voice.id }}">{{ voice.name }} ({{ voice.gender }}, {{ voice.language }})</option>
                                     {% endfor %}
@@ -241,8 +243,8 @@
                             </div>
                             {% if selected_service.id == 'openai' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
-                                    <select name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="outro_openai_model" class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
+                                    <select id="outro_openai_model" name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -251,8 +253,8 @@
                             {% endif %}
                             {% if selected_service.id == 'elevenlabs' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                                    <select name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="outro_elevenlabs_model" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                                    <select id="outro_elevenlabs_model" name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -263,16 +265,16 @@
                                 <div class="mb-4 bg-gray-50 p-4 rounded-md">
                                     <h5 class="font-medium text-gray-700 mb-2">Voice Settings</h5>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="outro_stability" class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="outro_stability" type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More variable</span>
                                             <span>More stable</span>
                                         </div>
                                     </div>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="outro_similarity_boost" class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="outro_similarity_boost" type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More unique</span>
                                             <span>More similar</span>
@@ -281,8 +283,8 @@
                                 </div>
                             {% endif %}
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
-                                <textarea name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500" 
+                                <label for="outro_tts_text" class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
+                                <textarea id="outro_tts_text" name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500"
                                     placeholder="Enter text for outro announcement...">{{ default_texts.outro }}</textarea>
                             </div>
                             <div class="flex justify-end">
@@ -344,7 +346,8 @@
                         <input type="hidden" name="mp3_type" value="replay">
                         <div class="flex items-center space-x-4">
                             <div class="flex-grow">
-                                <input type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
+                                <label for="replay_audio_file" class="sr-only">Upload replay MP3</label>
+                                <input id="replay_audio_file" type="file" name="audio_file" accept=".mp3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500">
                             </div>
                             <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors">
                                 Upload
@@ -357,8 +360,8 @@
                     {% if has_tts_services %}
                         <form method="GET" class="mb-4 flex items-end space-x-2">
                             <input type="hidden" name="mp3_type" value="replay">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
-                            <select name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                            <label for="replay_tts_service" class="block text-sm font-medium text-gray-700 mb-1">TTS Service</label>
+                            <select id="replay_tts_service" name="tts_service" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                 {% for svc in tts_services %}
                                     <option value="{{ svc.id }}" {% if selected_service and svc.id == selected_service.id %}selected{% endif %}>{{ svc.name }}</option>
                                 {% endfor %}
@@ -372,8 +375,8 @@
                             <input type="hidden" name="tts_service" value="{{ selected_service.id }}">
                             <p class="mt-1 text-sm text-gray-500">{{ selected_service.description if selected_service else '' }}</p>
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
-                                <select name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                <label for="replay_tts_voice" class="block text-sm font-medium text-gray-700 mb-1">Voice</label>
+                                <select id="replay_tts_voice" name="tts_voice" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                     {% for voice in selected_service.voices %}
                                         <option value="{{ voice.id }}">{{ voice.name }} ({{ voice.gender }}, {{ voice.language }})</option>
                                     {% endfor %}
@@ -381,8 +384,8 @@
                             </div>
                             {% if selected_service.id == 'openai' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
-                                    <select name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="replay_openai_model" class="block text-sm font-medium text-gray-700 mb-1">Model Quality</label>
+                                    <select id="replay_openai_model" name="openai_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -391,8 +394,8 @@
                             {% endif %}
                             {% if selected_service.id == 'elevenlabs' and selected_service.models %}
                                 <div class="mb-4">
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                                    <select name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
+                                    <label for="replay_elevenlabs_model" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                                    <select id="replay_elevenlabs_model" name="elevenlabs_model" class="px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500 w-full">
                                         {% for model in selected_service.models %}
                                             <option value="{{ model.id }}">{{ model.name }}</option>
                                         {% endfor %}
@@ -403,16 +406,16 @@
                                 <div class="mb-4 bg-gray-50 p-4 rounded-md">
                                     <h5 class="font-medium text-gray-700 mb-2">Voice Settings</h5>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="replay_stability" class="block text-sm font-medium text-gray-700 mb-1">Stability <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="replay_stability" type="range" name="stability" min="0" max="1" step="0.05" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More variable</span>
                                             <span>More stable</span>
                                         </div>
                                     </div>
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
-                                        <input type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                        <label for="replay_similarity_boost" class="block text-sm font-medium text-gray-700 mb-1">Similarity Boost <span class="text-xs text-gray-500">(0.0 - 1.0)</span></label>
+                                        <input id="replay_similarity_boost" type="range" name="similarity_boost" min="0" max="1" step="0.05" value="0.75" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                         <div class="flex justify-between text-xs text-gray-500 mt-1">
                                             <span>More unique</span>
                                             <span>More similar</span>
@@ -421,8 +424,8 @@
                                 </div>
                             {% endif %}
                             <div class="mb-4">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
-                                <textarea name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500"
+                                <label for="replay_tts_text" class="block text-sm font-medium text-gray-700 mb-1">Text to Convert</label>
+                                <textarea id="replay_tts_text" name="tts_text" rows="3" class="w-full px-4 py-2 border rounded-md focus:ring-orange-500 focus:border-orange-500"
                                     placeholder="Enter text for replay announcement...">{{ default_texts.replay }}</textarea>
                             </div>
                             <div class="flex justify-end">
