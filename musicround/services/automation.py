@@ -1839,7 +1839,7 @@ def generate_round_assets(
         ) from exc
     assets: dict[str, Any] = {
         "round_id": round_id,
-        "review_url_path": f"/rounds/{round_id}",
+        "review_url_path": f"/rounds/{round_id}/bundle-review",
     }
     if include_pdf:
         assets["pdf"] = generate_round_pdf(round_id)
@@ -3608,6 +3608,7 @@ def schedule_round_email(
     user_id: int | None = None,
     subject: str | None = None,
     body_text: str | None = None,
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
     """Generate, inspect, and schedule a robust round email for a future worker run."""
     round_obj = db.session.get(Round, round_id)
@@ -3620,6 +3621,17 @@ def schedule_round_email(
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
     scheduled_at = _parse_datetime_utc(scheduled_for)
+    if scheduled_at <= datetime.utcnow():
+        raise AutomationError(
+            "Scheduled delivery time must be in the future.",
+            details={
+                "scheduled": False,
+                "status": "schedule_in_past",
+                "recipient": target,
+                "scheduled_for": _datetime_payload(scheduled_at),
+                "hints": ["Choose a future delivery time before scheduling the round email."],
+            },
+        )
     email_health = email_service_health(required=True)
     if not email_health["ok"]:
         message = "Email configuration is not ready for scheduled delivery."
@@ -3653,6 +3665,24 @@ def schedule_round_email(
             },
         )
 
+    replaced_exports = []
+    if replace_existing:
+        existing_exports = (
+            RoundExport.query.filter_by(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                status="scheduled",
+            )
+            .filter(RoundExport.scheduled_for.isnot(None))
+            .all()
+        )
+        for existing in existing_exports:
+            existing.status = "superseded"
+            existing.processed_at = datetime.utcnow()
+            existing.error_message = "Replaced by a newer scheduled delivery."
+            replaced_exports.append(_round_export_summary(existing))
+
     export = RoundExport(
         round_id=round_id,
         user_id=user.id,
@@ -3669,6 +3699,7 @@ def schedule_round_email(
     return {
         "scheduled": True,
         "export": _round_export_summary(export),
+        "replaced_exports": replaced_exports,
         "assets": assets,
         "quality": quality,
     }
@@ -3699,6 +3730,29 @@ def list_scheduled_round_emails(
         "count": len(exports),
         "scheduled_exports": [_round_export_summary(item) for item in exports],
     }
+
+
+def cancel_scheduled_round_email(
+    export_id: int,
+    user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Cancel a pending scheduled round email before the scheduler sends it."""
+    export = db.session.get(RoundExport, export_id)
+    if not export:
+        raise AutomationError(f"RoundExport {export_id} was not found.")
+    if export.export_type != "email" or export.scheduled_for is None:
+        raise AutomationError(f"RoundExport {export_id} is not a scheduled email export.")
+    if user_id is not None and export.user_id != user_id:
+        raise AutomationError(f"RoundExport {export_id} is not owned by user {user_id}.")
+    if export.status != "scheduled":
+        raise AutomationError(f"RoundExport {export_id} is already {export.status}.")
+
+    export.status = "cancelled"
+    export.processed_at = datetime.utcnow()
+    export.error_message = reason or "Cancelled before scheduled delivery."
+    db.session.commit()
+    return {"cancelled": True, "export": _round_export_summary(export)}
 
 
 def process_due_scheduled_round_emails(

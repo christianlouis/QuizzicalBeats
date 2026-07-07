@@ -927,6 +927,7 @@ def schedule_round_email(
     user_id: int | None = None,
     subject: str | None = None,
     body_text: str | None = None,
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
     """Schedule a round email for a future worker run."""
     return _with_app_context(
@@ -937,6 +938,7 @@ def schedule_round_email(
         user_id=user_id,
         subject=subject,
         body_text=body_text,
+        replace_existing=replace_existing,
     )
 
 
@@ -952,6 +954,21 @@ def list_scheduled_round_emails(
         user_id=user_id,
         include_processed=include_processed,
         limit=limit,
+    )
+
+
+@mcp.tool()
+def cancel_scheduled_round_email(
+    export_id: int,
+    user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Cancel a pending scheduled round email before the scheduler sends it."""
+    return _with_app_context(
+        automation.cancel_scheduled_round_email,
+        export_id=export_id,
+        user_id=user_id,
+        reason=reason,
     )
 
 

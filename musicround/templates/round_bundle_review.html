@@ -1,0 +1,220 @@
+{% extends 'base.html' %}
+
+{% block title %}Bundle Review - {{ round.name or 'Round #' + round.id|string }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-navy-800 font-montserrat">Bundle Review</h1>
+            <p class="text-gray-600 mt-1">{{ round.name or 'Round #' + round.id|string }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ url_for('rounds.round_detail', round_id=round.id) }}" class="inline-flex items-center px-4 py-2 bg-navy-700 hover:bg-navy-800 text-white rounded-md transition-colors">
+                <i class="fas fa-arrow-left mr-2"></i> Back to Round
+            </a>
+            {% if can_produce %}
+            <a href="{{ url_for('rounds.download_mp3', round_id=round.id) }}" class="inline-flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md transition-colors">
+                <i class="fas fa-music mr-2"></i> Download MP3
+            </a>
+            <a href="{{ url_for('rounds.download_pdf', round_id=round.id) }}" class="inline-flex items-center px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-md transition-colors">
+                <i class="fas fa-file-pdf mr-2"></i> Download PDF
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div class="xl:col-span-2 space-y-6">
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Generated Audio</h2>
+                {% if mp3_exists %}
+                <audio controls class="w-full" preload="metadata" src="{{ url_for('rounds.download_mp3', round_id=round.id, inline=1) }}"></audio>
+                {% else %}
+                <div class="border border-orange-200 bg-orange-50 text-orange-900 rounded-md p-4">
+                    MP3 is not generated yet.
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Generated PDF</h2>
+                {% if pdf_exists %}
+                <iframe title="Generated PDF preview" src="{{ url_for('rounds.download_pdf', round_id=round.id, inline=1) }}" class="w-full h-[640px] border border-gray-200 rounded-md"></iframe>
+                {% else %}
+                <div class="border border-orange-200 bg-orange-50 text-orange-900 rounded-md p-4">
+                    PDF is not generated yet.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="space-y-6">
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Quality Gate</h2>
+                {% if round_quality_report %}
+                <div class="border border-orange-200 bg-orange-50 text-orange-900 rounded-md p-3 mb-4 whitespace-pre-wrap">{{ round_quality_report }}</div>
+                {% endif %}
+                {% if quality_error %}
+                <div class="border border-red-200 bg-red-50 text-red-800 rounded-md p-3">{{ quality_error }}</div>
+                {% elif quality %}
+                {% set report = quality.report or {} %}
+                {% set quality_payload = quality.quality or {} %}
+                <div class="mb-3">
+                    <span class="px-2 py-1 text-xs font-semibold rounded-full {% if report.ok %}bg-green-100 text-green-800{% else %}bg-orange-100 text-orange-800{% endif %}">
+                        {{ quality_payload.status or report.status or 'unknown' }}
+                    </span>
+                </div>
+                <p class="font-semibold text-gray-900 mb-2">{{ report.headline or report.summary or 'Quality report available.' }}</p>
+                {% if report.blockers %}
+                <h3 class="font-semibold text-red-800 mt-4 mb-2">Blockers</h3>
+                <ul class="list-disc pl-5 text-sm text-red-800 space-y-1">
+                    {% for blocker in report.blockers %}
+                    <li>{{ blocker }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if report.warnings %}
+                <h3 class="font-semibold text-orange-800 mt-4 mb-2">Warnings</h3>
+                <ul class="list-disc pl-5 text-sm text-orange-800 space-y-1">
+                    {% for warning in report.warnings %}
+                    <li>{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if report.failed_positions %}
+                <h3 class="font-semibold text-navy-800 mt-4 mb-2">Repair Positions</h3>
+                <div class="space-y-2">
+                    {% for item in report.failed_positions %}
+                    <div class="border border-gray-200 rounded-md p-2 text-sm">
+                        <span class="font-semibold">#{{ item.position }}</span>
+                        {{ item.artist or '' }}{% if item.artist and item.title %} - {% endif %}{{ item.title or '' }}
+                        {% if item.issue_code %}<span class="text-gray-500">({{ item.issue_code }})</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% else %}
+                <p class="text-sm text-gray-600">No quality result is available.</p>
+                {% endif %}
+            </div>
+
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Review State</h2>
+                <form method="POST" action="{{ url_for('rounds.update_round_review', round_id=round.id) }}" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="review_status">Status</label>
+                        <select id="review_status" name="review_status" class="px-3 py-2 border border-gray-300 rounded-md w-full">
+                            {% for status in ['draft', 'reviewed', 'approved', 'rejected'] %}
+                            <option value="{{ status }}" {% if round.review_status == status %}selected{% endif %}>{{ status|capitalize }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="review_notes">Notes</label>
+                        <textarea id="review_notes" name="review_notes" rows="4" class="px-3 py-2 border border-gray-300 rounded-md w-full">{{ round.review_notes or '' }}</textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-navy-700 hover:bg-navy-800 text-white py-2 px-4 rounded transition-colors font-semibold">
+                        <i class="fas fa-check mr-2"></i> Save Review
+                    </button>
+                </form>
+            </div>
+
+            {% if can_produce %}
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Delivery</h2>
+                <form method="POST" action="{{ url_for('rounds.send_email', round_id=round.id) }}" class="mb-5">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" class="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded transition-colors font-semibold">
+                        <i class="fas fa-paper-plane mr-2"></i> Send to My Inbox Now
+                    </button>
+                </form>
+                <form method="POST" action="{{ url_for('rounds.schedule_round_email', round_id=round.id) }}" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="scheduled_for">Schedule For</label>
+                        <input id="scheduled_for" name="scheduled_for" type="datetime-local" required class="px-3 py-2 border border-gray-300 rounded-md w-full">
+                        <p class="text-xs text-gray-500 mt-1">Local timezone: {{ schedule_timezone }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="recipient">Recipient</label>
+                        <input id="recipient" name="recipient" type="email" value="{{ current_user.email or '' }}" class="px-3 py-2 border border-gray-300 rounded-md w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="subject">Subject</label>
+                        <input id="subject" name="subject" type="text" value="{{ round.name or 'Pub Quiz Round #' + round.id|string }}" class="px-3 py-2 border border-gray-300 rounded-md w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="body_text">Mail Text</label>
+                        <textarea id="body_text" name="body_text" rows="3" class="px-3 py-2 border border-gray-300 rounded-md w-full">Attached please find the MP3 and PDF files for the quiz round.</textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white py-2 px-4 rounded transition-colors font-semibold">
+                        <i class="fas fa-clock mr-2"></i> Schedule Email
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Songs</h2>
+                <ol class="space-y-2">
+                    {% for song in songs %}
+                    <li class="border border-gray-200 rounded-md p-2 text-sm">
+                        <span class="font-semibold">{{ loop.index }}.</span>
+                        {{ song.artist }} - {{ song.title }}
+                    </li>
+                    {% endfor %}
+                </ol>
+            </div>
+
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Audio Scripts</h2>
+                {% if audio_scripts %}
+                <div class="space-y-3">
+                    {% for script in audio_scripts %}
+                    <div class="border border-gray-200 rounded-md p-3">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="font-semibold text-navy-800">{{ script.script_type|capitalize }}</span>
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">{{ script.status|capitalize }}</span>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ script.text }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-600">No reviewed audio scripts yet.</p>
+                {% endif %}
+            </div>
+
+            {% if scheduled_exports %}
+            <div class="bg-white shadow-md rounded-lg p-6">
+                <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-4">Email History</h2>
+                <div class="space-y-2">
+                    {% for export in scheduled_exports %}
+                    <div class="border border-gray-200 rounded-md p-2 text-sm">
+                        <div class="font-semibold">{{ export.status|capitalize }}</div>
+                        <div class="text-gray-500">{{ export.destination or 'No recipient' }}</div>
+                        {% if export.scheduled_for %}
+                        <div class="text-gray-500">{{ export.scheduled_for.strftime('%Y-%m-%d %H:%M') }}</div>
+                        {% endif %}
+                        {% if export.error_message %}
+                        <div class="{% if export.status == 'failed' %}text-red-700{% else %}text-gray-500{% endif %} mt-1">{{ export.error_message }}</div>
+                        {% endif %}
+                        {% if can_produce and export.status == 'scheduled' and (current_user.is_admin or export.user_id == current_user.id) %}
+                        <form method="POST" action="{{ url_for('rounds.cancel_scheduled_round_email', round_id=round.id, export_id=export.id) }}" class="mt-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="inline-flex items-center px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded transition-colors">
+                                <i class="fas fa-ban mr-2"></i> Cancel Scheduled Email
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

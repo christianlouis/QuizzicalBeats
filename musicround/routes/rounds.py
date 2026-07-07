@@ -10,6 +10,7 @@ import re
 import zipfile
 import io
 import json
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
@@ -60,6 +61,23 @@ def _int_arg(name, default=None, minimum=None, maximum=None):
     if maximum is not None:
         value = min(maximum, value)
     return value
+
+
+def _scheduled_datetime_value(raw_value):
+    """Return a timezone-aware ISO value from the browser scheduling form."""
+    value = (raw_value or '').strip()
+    if not value:
+        return ''
+    normalized = f"{value[:-1]}+00:00" if value.endswith('Z') else value
+    scheduled = datetime.fromisoformat(normalized)
+    if scheduled.tzinfo:
+        return scheduled.isoformat()
+    timezone_name = current_app.config.get('APP_TIMEZONE', 'Europe/Berlin')
+    try:
+        local_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        local_timezone = ZoneInfo('UTC')
+    return scheduled.replace(tzinfo=local_timezone).isoformat()
 
 
 def _rounds_list_statuses(rounds):
@@ -586,6 +604,58 @@ def round_detail(round_id):
     else:
         return 'Round not found'
 
+
+@rounds_bp.route('/<int:round_id>/bundle-review')
+@login_required
+def round_bundle_review(round_id):
+    """Review generated round assets before scheduling or sending."""
+    rnd = _get_visible_round_or_404(round_id)
+    round_quality_report = session.pop('round_quality_report', None)
+    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
+    pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
+    audio_scripts = (
+        RoundAudioScript.query.filter_by(round_id=rnd.id)
+        .order_by(RoundAudioScript.created_at.desc(), RoundAudioScript.id.desc())
+        .limit(25)
+        .all()
+    )
+    scheduled_exports = (
+        RoundExport.query.filter_by(round_id=rnd.id, export_type='email')
+        .order_by(RoundExport.timestamp.desc(), RoundExport.id.desc())
+        .limit(10)
+        .all()
+    )
+    quality = None
+    quality_error = None
+    try:
+        quality = automation.round_repair_report(round_id=round_id, user_id=current_user.id)
+    except AutomationError as exc:
+        quality_error = str(exc)
+    except Exception as exc:
+        current_app.logger.error(
+            "Bundle review quality check failed for round %s: %s",
+            round_id,
+            exc,
+            exc_info=True,
+        )
+        quality_error = "Quality check could not run. Please try again later."
+
+    return render_template(
+        'round_bundle_review.html',
+        round=rnd,
+        songs=rnd.song_list,
+        mp3_exists=os.path.exists(mp3_file_path),
+        pdf_exists=os.path.exists(pdf_file_path),
+        quality=quality,
+        quality_error=quality_error,
+        round_quality_report=round_quality_report,
+        audio_scripts=audio_scripts,
+        scheduled_exports=scheduled_exports,
+        can_produce=_can_produce_round(rnd),
+        schedule_timezone=current_app.config.get('APP_TIMEZONE', 'Europe/Berlin'),
+    )
+
+
 @rounds_bp.route('/<int:round_id>/update-name', methods=['POST'])
 @login_required
 def update_round_name(round_id):
@@ -652,6 +722,74 @@ def update_round_review(round_id):
         })
     flash('Round review status updated', 'success')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/schedule-email', methods=['POST'])
+@login_required
+def schedule_round_email(round_id):
+    """Schedule a generated round bundle for later email delivery."""
+    rnd = _get_producible_round_or_404(round_id)
+    scheduled_for_raw = (request.form.get('scheduled_for') or '').strip()
+    scheduled_for = ''
+    if scheduled_for_raw:
+        try:
+            scheduled_for = _scheduled_datetime_value(scheduled_for_raw)
+        except ValueError:
+            flash('Enter a valid delivery date and time before scheduling the round email.', 'error')
+            return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
+    if not scheduled_for:
+        flash('Choose a delivery date and time before scheduling the round email.', 'error')
+        return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
+
+    recipient = (request.form.get('recipient') or '').strip() or current_user.email
+    subject = (request.form.get('subject') or '').strip() or (rnd.name or f'Pub Quiz Round #{round_id}')
+    body_text = (request.form.get('body_text') or '').strip() or (
+        'Attached please find the MP3 and PDF files for the quiz round.'
+    )
+    try:
+        result = automation.schedule_round_email(
+            round_id=round_id,
+            scheduled_for=scheduled_for,
+            recipient=recipient,
+            user_id=current_user.id,
+            subject=subject,
+            body_text=body_text,
+            replace_existing=True,
+        )
+    except AutomationError as exc:
+        details = exc.details if isinstance(exc.details, dict) else {}
+        report = details.get('report') if isinstance(details.get('report'), dict) else {}
+        if report:
+            session['round_quality_report'] = _session_quality_report(report)
+        flash(str(exc), 'error')
+        return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
+
+    export = result.get('export', {})
+    scheduled_label = export.get('scheduled_for') or scheduled_for
+    flash(f'Round email scheduled for {scheduled_label}.', 'success')
+    return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/scheduled-emails/<int:export_id>/cancel', methods=['POST'])
+@login_required
+def cancel_scheduled_round_email(round_id, export_id):
+    """Cancel one pending scheduled email for this round."""
+    _get_producible_round_or_404(round_id)
+    export = RoundExport.query.get_or_404(export_id)
+    if export.round_id != round_id:
+        abort(404)
+    try:
+        automation.cancel_scheduled_round_email(
+            export_id=export_id,
+            user_id=None if current_user.is_admin else current_user.id,
+            reason='Cancelled from bundle review.',
+        )
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
+
+    flash('Scheduled email cancelled.', 'success')
+    return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
 
 
 @rounds_bp.route('/<int:round_id>/shares', methods=['POST'])
@@ -1105,7 +1243,7 @@ def download_mp3(round_id):
         flash('MP3 file not found. Please generate the MP3 first.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
         
-    return send_file(mp3_file_path, as_attachment=True)
+    return send_file(mp3_file_path, as_attachment=request.args.get('inline') != '1')
 
 @rounds_bp.route('/download/pdf/round_<int:round_id>', methods=['GET'])
 @login_required
@@ -1118,7 +1256,7 @@ def download_pdf(round_id):
         flash('PDF file not found. Please generate the PDF first.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
         
-    return send_file(pdf_file_path, as_attachment=True)
+    return send_file(pdf_file_path, as_attachment=request.args.get('inline') != '1')
 
 def generate_pdf(round_id):
     """

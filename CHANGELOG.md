@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
 - Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
+- Added a bundle-review page for generated rounds with embedded MP3/PDF previews,
+  quality feedback, review state, script context, send-now, and scheduled-email
+  controls.
+- Added safe replacement of an existing pending scheduled email when scheduling
+  again from the bundle-review page.
+- Added browser and MCP cancellation for pending scheduled round emails before
+  the scheduler sends them.
+- Added future-time validation for scheduled round emails so past timestamps do
+  not become immediate sends on the next worker run.
 - Added PostgreSQL component-variable database configuration so Kubernetes/CNPG deployments can use `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` without storing one full database URI secret.
 - Added a dry-run-first SQLite-to-managed-database migration CLI with row-count validation, target safety checks, and credential-safe output.
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.

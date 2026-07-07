@@ -88,6 +88,7 @@ class Config:
     DATA_DIR = os.getenv("DATA_DIR", "/data")
     ROUND_MP3_DIR = os.getenv("ROUND_MP3_DIR", "/data/rounds")
     ROUND_PDF_DIR = os.getenv("ROUND_PDF_DIR", "/data/pdfs")
+    APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Berlin")
     
     # Automation settings
     AUTOMATION_TOKEN = os.getenv("AUTOMATION_TOKEN")

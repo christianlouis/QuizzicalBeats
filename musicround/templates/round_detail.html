@@ -7,6 +7,9 @@
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold text-navy-800 font-montserrat">{{ round.name or 'Music Quiz #' + round.id|string }}</h1>
         <div class="flex space-x-2">
+            <a href="{{ url_for('rounds.round_bundle_review', round_id=round.id) }}" class="inline-flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md transition-colors">
+                <i class="fas fa-headphones mr-2"></i> Bundle Review
+            </a>
             <button id="delete-round-btn" class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors">
                 <i class="fas fa-trash-alt mr-2"></i> Delete Quiz
             </button>

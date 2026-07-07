@@ -7,6 +7,7 @@ from flask import jsonify
 from pydub import AudioSegment
 from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, SystemSetting
 from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
+from musicround.services.automation import AutomationError
 
 
 def _login(app, client, username='roundsuser', email='rounds@example.com'):
@@ -395,6 +396,241 @@ class TestRoundDetailRoute:
         assert response.status_code == 200
         assert b'Reviewed' in response.data
         assert b'Welcome to the review round' in response.data
+        assert f'/rounds/{round_id}/bundle-review'.encode() in response.data
+
+    def test_round_bundle_review_shows_assets_quality_songs_and_scripts(self, app, client):
+        """Bundle review should collect generated files and review context."""
+        _login(app, client)
+        song_id = _create_song(app, title='Bundle Song', artist='Bundle Artist')
+        round_id = _create_round(app, [song_id], name='Bundle Review Round')
+        with app.app_context():
+            db.session.add(RoundAudioScript(
+                round_id=round_id,
+                script_type='intro',
+                text='Bundle intro text',
+                status='approved',
+            ))
+            db.session.add(RoundExport(
+                round_id=round_id,
+                user_id=_user_id(app, 'roundsuser'),
+                export_type='email',
+                destination='quizmaster@example.test',
+                include_mp3s=True,
+                status='scheduled',
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            ))
+            db.session.commit()
+            with open(os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3'), 'wb') as handle:
+                handle.write(b'fake mp3')
+            with open(os.path.join(app.config['ROUND_PDF_DIR'], f'round_{round_id}.pdf'), 'wb') as handle:
+                handle.write(b'%PDF-1.4 fake pdf')
+
+        quality = {
+            'quality': {'status': 'ok'},
+            'report': {
+                'ok': True,
+                'status': 'ok',
+                'headline': 'Bundle Review Round is ready.',
+                'blockers': [],
+                'warnings': ['Minor timing drift.'],
+                'failed_positions': [],
+            },
+        }
+        with patch('musicround.routes.rounds.automation.round_repair_report', return_value=quality):
+            response = client.get(f'/rounds/{round_id}/bundle-review')
+
+        assert response.status_code == 200
+        assert b'Bundle Review' in response.data
+        assert b'Bundle Review Round is ready.' in response.data
+        assert b'Minor timing drift.' in response.data
+        assert b'Bundle Artist - Bundle Song' in response.data
+        assert b'Bundle intro text' in response.data
+        assert b'Send to My Inbox Now' in response.data
+        assert b'Schedule Email' in response.data
+        assert b'Local timezone: Europe/Berlin' in response.data
+        assert b'Cancel Scheduled Email' in response.data
+        assert f'/rounds/download/mp3/round_{round_id}?inline=1'.encode() in response.data
+        assert f'/rounds/download/pdf/round_{round_id}?inline=1'.encode() in response.data
+
+    def test_round_bundle_review_can_schedule_email_delivery(self, app, client):
+        """Bundle review schedule form should call the robust scheduler service."""
+        _login(app, client)
+        song_id = _create_song(app, title='Scheduled Bundle Song')
+        round_id = _create_round(app, [song_id], name='Scheduled Bundle Round')
+
+        scheduled = {
+            'scheduled': True,
+            'export': {
+                'id': 42,
+                'scheduled_for': '2026-07-09T17:00:00Z',
+            },
+        }
+        with patch('musicround.routes.rounds.automation.schedule_round_email', return_value=scheduled) as mock_schedule:
+            response = client.post(
+                f'/rounds/{round_id}/schedule-email',
+                data={
+                    'scheduled_for': '2026-07-09T19:00',
+                    'recipient': 'quizmaster@example.test',
+                    'subject': 'Thursday Round',
+                    'body_text': 'Here comes the round.',
+                },
+            )
+
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith(f'/rounds/{round_id}/bundle-review')
+        mock_schedule.assert_called_once_with(
+            round_id=round_id,
+            scheduled_for='2026-07-09T19:00:00+02:00',
+            recipient='quizmaster@example.test',
+            user_id=_user_id(app, 'roundsuser'),
+            subject='Thursday Round',
+            body_text='Here comes the round.',
+            replace_existing=True,
+        )
+
+    def test_round_bundle_review_rejects_invalid_schedule_time(self, app, client):
+        """Invalid schedule form values should not reach the scheduler service."""
+        _login(app, client)
+        song_id = _create_song(app, title='Invalid Schedule Song')
+        round_id = _create_round(app, [song_id], name='Invalid Schedule Round')
+
+        with patch('musicround.routes.rounds.automation.schedule_round_email') as mock_schedule:
+            response = client.post(
+                f'/rounds/{round_id}/schedule-email',
+                data={'scheduled_for': 'not-a-date'},
+            )
+
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith(f'/rounds/{round_id}/bundle-review')
+        mock_schedule.assert_not_called()
+
+    def test_round_bundle_review_schedule_returns_to_review_on_quality_failure(self, app, client):
+        """Schedule failures should keep the user in the review workflow."""
+        _login(app, client)
+        song_id = _create_song(app, title='Blocked Bundle Song')
+        round_id = _create_round(app, [song_id], name='Blocked Bundle Round')
+        error = AutomationError(
+            'Round quality gate failed: Missing preview.',
+            details={'report': {'headline': 'Missing preview.', 'markdown': '# Missing'}},
+        )
+
+        with patch('musicround.routes.rounds.automation.schedule_round_email', side_effect=error):
+            response = client.post(
+                f'/rounds/{round_id}/schedule-email',
+                data={'scheduled_for': '2026-07-09T19:00'},
+            )
+
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith(f'/rounds/{round_id}/bundle-review')
+        with client.session_transaction() as flask_session:
+            assert '# Missing' in flask_session['round_quality_report']
+        quality = {
+            'quality': {'status': 'needs_substitution'},
+            'report': {
+                'ok': False,
+                'status': 'needs_substitution',
+                'headline': 'Blocked Bundle Round is blocked.',
+                'blockers': [],
+                'warnings': [],
+                'failed_positions': [],
+            },
+        }
+        with patch('musicround.routes.rounds.automation.round_repair_report', return_value=quality):
+            review_response = client.get(f'/rounds/{round_id}/bundle-review')
+
+        assert review_response.status_code == 200
+        assert b'# Missing' in review_response.data
+        with client.session_transaction() as flask_session:
+            assert 'round_quality_report' not in flask_session
+
+    def test_round_bundle_review_can_cancel_scheduled_email(self, app, client):
+        """Bundle review should let a producer cancel a pending scheduled email."""
+        _login(app, client)
+        song_id = _create_song(app, title='Cancel Schedule Song')
+        round_id = _create_round(app, [song_id], name='Cancel Schedule Round')
+        with app.app_context():
+            export = RoundExport(
+                round_id=round_id,
+                user_id=_user_id(app, 'roundsuser'),
+                export_type='email',
+                destination='quizmaster@example.test',
+                include_mp3s=True,
+                status='scheduled',
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+            export_id = export.id
+
+        response = client.post(f'/rounds/{round_id}/scheduled-emails/{export_id}/cancel')
+
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith(f'/rounds/{round_id}/bundle-review')
+        with app.app_context():
+            export = db.session.get(RoundExport, export_id)
+            assert export.status == 'cancelled'
+            assert export.error_message == 'Cancelled from bundle review.'
+
+    def test_round_bundle_review_cancel_blocks_other_user_export(self, app, client):
+        """Cancel route should not cancel another user's pending export."""
+        _login(app, client)
+        song_id = _create_song(app, title='Other Export Song')
+        round_id = _create_round(app, [song_id], name='Other Export Round')
+        _login(app, client, username='other_scheduler', email='other@example.test')
+        other_user_id = _user_id(app, 'other_scheduler')
+        _login(app, client)
+        with app.app_context():
+            export = RoundExport(
+                round_id=round_id,
+                user_id=other_user_id,
+                export_type='email',
+                destination='other@example.test',
+                include_mp3s=True,
+                status='scheduled',
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+            export_id = export.id
+
+        response = client.post(f'/rounds/{round_id}/scheduled-emails/{export_id}/cancel')
+
+        assert response.status_code == 302
+        with app.app_context():
+            export = db.session.get(RoundExport, export_id)
+            assert export.status == 'scheduled'
+
+    def test_round_bundle_review_hides_private_round_owned_by_other_user(self, app, client):
+        """Bundle review should use the same visibility boundary as detail view."""
+        _login(app, client, username='bundle_viewer', email='bundle_viewer@example.com')
+        _login(app, client, username='bundle_owner', email='bundle_owner@example.com')
+        song_id = _create_song(app, title='Hidden Bundle Song')
+        owner_id = _user_id(app, 'bundle_owner')
+        _login(app, client, username='bundle_viewer', email='bundle_viewer@example.com')
+        round_id = _create_round(app, [song_id], name='Hidden Bundle Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        response = client.get(f'/rounds/{round_id}/bundle-review')
+
+        assert response.status_code == 404
+
+    def test_round_pdf_inline_preview_is_not_attachment(self, app, client):
+        """PDF preview mode should be embeddable by the bundle review page."""
+        _login(app, client)
+        song_id = _create_song(app, title='Inline PDF Song')
+        round_id = _create_round(app, [song_id], name='Inline PDF Round')
+        with app.app_context():
+            with open(os.path.join(app.config['ROUND_PDF_DIR'], f'round_{round_id}.pdf'), 'wb') as handle:
+                handle.write(b'%PDF-1.4 inline')
+
+        response = client.get(f'/rounds/download/pdf/round_{round_id}?inline=1')
+
+        assert response.status_code == 200
+        assert not response.headers.get('Content-Disposition', '').startswith('attachment')
 
     def test_round_detail_shows_failed_email_export_message(self, app, client):
         """Round detail should show persisted delivery/quality failure feedback."""

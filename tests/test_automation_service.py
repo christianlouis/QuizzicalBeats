@@ -59,6 +59,12 @@ def _configure_mail(app):
     )
 
 
+def _future_schedule_pair(days=7):
+    scheduled_at = (datetime.utcnow() + timedelta(days=days)).replace(microsecond=0)
+    due_at = scheduled_at + timedelta(minutes=1)
+    return f"{scheduled_at.isoformat()}Z", f"{due_at.isoformat()}Z", scheduled_at
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -1499,6 +1505,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, _, scheduled_at = _future_schedule_pair()
 
             with (
                 patch(
@@ -1512,7 +1519,7 @@ class TestAssetInspection:
             ):
                 result = automation.schedule_round_email(
                     round_id,
-                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    scheduled_for=scheduled_for,
                     user_id=user.id,
                     subject="Scheduled subject",
                 )
@@ -1523,7 +1530,85 @@ class TestAssetInspection:
             assert export.status == "scheduled"
             assert export.destination == user.email
             assert export.subject == "Scheduled subject"
-            assert result["export"]["scheduled_for"] == "2026-07-09T17:00:00Z"
+            assert result["export"]["scheduled_for"] == f"{scheduled_at.isoformat()}Z"
+
+    def test_schedule_round_email_blocks_past_delivery_before_generation(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Past Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Past Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            scheduled_for = (datetime.utcnow() - timedelta(minutes=5)).replace(microsecond=0)
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError, match="future") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for=f"{scheduled_for.isoformat()}Z",
+                        user_id=user.id,
+                    )
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "schedule_in_past"
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
+    def test_schedule_round_email_can_replace_existing_pending_export(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Replace Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Replace Thursday Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            existing = RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination=user.email,
+                include_mp3s=True,
+                status="scheduled",
+                scheduled_for=(datetime.utcnow() + timedelta(days=3)).replace(microsecond=0),
+            )
+            db.session.add(existing)
+            db.session.commit()
+            existing_id = existing.id
+            scheduled_for, _, _ = _future_schedule_pair(days=14)
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                result = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for=scheduled_for,
+                    user_id=user.id,
+                    replace_existing=True,
+                )
+
+            old_export = RoundExport.query.get(existing_id)
+            new_export = RoundExport.query.get(result["export"]["id"])
+            assert old_export.status == "superseded"
+            assert old_export.error_message == "Replaced by a newer scheduled delivery."
+            assert new_export.status == "scheduled"
+            assert result["replaced_exports"][0]["id"] == existing_id
+            assert RoundExport.query.filter_by(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                status="scheduled",
+            ).count() == 1
 
     def test_schedule_round_email_blocks_missing_email_config_before_generation(self, app):
         with app.app_context():
@@ -1535,12 +1620,13 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, _, _ = _future_schedule_pair()
 
             with patch("musicround.services.automation.generate_round_assets") as mock_assets:
                 with pytest.raises(automation.AutomationError, match="Email configuration") as exc_info:
                     automation.schedule_round_email(
                         round_id,
-                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        scheduled_for=scheduled_for,
                         user_id=user.id,
                     )
 
@@ -1559,6 +1645,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, _, _ = _future_schedule_pair()
 
             with (
                 patch(
@@ -1578,7 +1665,7 @@ class TestAssetInspection:
                 with pytest.raises(automation.AutomationError, match="quality gate") as exc_info:
                     automation.schedule_round_email(
                         round_id,
-                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        scheduled_for=scheduled_for,
                         user_id=user.id,
                     )
 
@@ -1596,12 +1683,13 @@ class TestAssetInspection:
                 song_ids=[song.id],
             )["round"]["id"]
             app.config["ROUND_MP3_DIR"] = os.path.join(app.instance_path, "missing-rounds")
+            scheduled_for, _, _ = _future_schedule_pair()
 
             with patch("musicround.services.automation.generate_round_pdf") as mock_pdf:
                 with pytest.raises(automation.AutomationError, match="storage") as exc_info:
                     automation.schedule_round_email(
                         round_id,
-                        scheduled_for="2026-07-09T19:00:00+02:00",
+                        scheduled_for=scheduled_for,
                         user_id=user.id,
                     )
 
@@ -1655,7 +1743,7 @@ class TestAssetInspection:
                 result = automation.generate_round_assets(round_id, user_id=user.id)
 
             assert result["round_id"] == round_id
-            assert result["review_url_path"] == f"/rounds/{round_id}"
+            assert result["review_url_path"] == f"/rounds/{round_id}/bundle-review"
             assert result["pdf"]["path"] == "/tmp/round.pdf"
             assert result["mp3"]["path"] == "/tmp/round.mp3"
 
@@ -1669,6 +1757,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, _, _ = _future_schedule_pair()
             with (
                 patch(
                     "musicround.services.automation.generate_round_assets",
@@ -1681,7 +1770,7 @@ class TestAssetInspection:
             ):
                 automation.schedule_round_email(
                     round_id,
-                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    scheduled_for=scheduled_for,
                     user_id=user.id,
                 )
 
@@ -1690,6 +1779,65 @@ class TestAssetInspection:
             assert result["count"] == 1
             assert result["scheduled_exports"][0]["round_id"] == round_id
             assert result["scheduled_exports"][0]["status"] == "scheduled"
+
+    def test_cancel_scheduled_round_email_marks_pending_export_cancelled(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Cancel Listed", artist="Artist")
+            round_id = automation.create_round(
+                name="Cancel Listed Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            export = RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination=user.email,
+                include_mp3s=True,
+                status="scheduled",
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+            export_id = export.id
+
+            result = automation.cancel_scheduled_round_email(
+                export_id=export_id,
+                user_id=user.id,
+                reason="No quiz this week.",
+            )
+
+            export = RoundExport.query.get(export_id)
+            assert result["cancelled"] is True
+            assert result["export"]["status"] == "cancelled"
+            assert export.status == "cancelled"
+            assert export.processed_at is not None
+            assert export.error_message == "No quiz this week."
+
+    def test_cancel_scheduled_round_email_blocks_processed_export(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Already Sent", artist="Artist")
+            round_id = automation.create_round(
+                name="Already Sent Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            export = RoundExport(
+                round_id=round_id,
+                user_id=user.id,
+                export_type="email",
+                destination=user.email,
+                include_mp3s=True,
+                status="success",
+                scheduled_for=datetime(2026, 7, 9, 17, 0),
+            )
+            db.session.add(export)
+            db.session.commit()
+
+            with pytest.raises(automation.AutomationError, match="already success"):
+                automation.cancel_scheduled_round_email(export_id=export.id, user_id=user.id)
 
     def test_process_due_scheduled_round_emails_sends_due_exports(self, app):
         with app.app_context():
@@ -1701,6 +1849,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
                     "musicround.services.automation.generate_round_assets",
@@ -1713,7 +1862,7 @@ class TestAssetInspection:
             ):
                 scheduled = automation.schedule_round_email(
                     round_id,
-                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    scheduled_for=scheduled_for,
                     user_id=user.id,
                 )
 
@@ -1722,7 +1871,7 @@ class TestAssetInspection:
                 return_value={"success": True, "message": "sent"},
             ) as mock_email:
                 result = automation.process_due_scheduled_round_emails(
-                    now="2026-07-09T19:01:00+02:00"
+                    now=due_at,
                 )
 
             assert result["processed_count"] == 1
@@ -1741,6 +1890,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
                     "musicround.services.automation.generate_round_assets",
@@ -1753,7 +1903,7 @@ class TestAssetInspection:
             ):
                 scheduled = automation.schedule_round_email(
                     round_id,
-                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    scheduled_for=scheduled_for,
                     user_id=user.id,
                 )
 
@@ -1762,7 +1912,7 @@ class TestAssetInspection:
                 side_effect=RuntimeError("smtp-secret token=mail-secret traceback"),
             ):
                 result = automation.process_due_scheduled_round_emails(
-                    now="2026-07-09T19:01:00+02:00"
+                    now=due_at,
                 )
 
             body = str(result)
@@ -1785,6 +1935,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
                     "musicround.services.automation.generate_round_assets",
@@ -1797,7 +1948,7 @@ class TestAssetInspection:
             ):
                 scheduled = automation.schedule_round_email(
                     round_id,
-                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    scheduled_for=scheduled_for,
                     user_id=user.id,
                 )
 
@@ -1822,7 +1973,7 @@ class TestAssetInspection:
                 ),
             ):
                 result = automation.process_due_scheduled_round_emails(
-                    now="2026-07-09T19:01:00+02:00"
+                    now=due_at,
                 )
 
             body = str(result)

@@ -39,7 +39,7 @@ issue after verification or continue with the remaining follow-up.
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
-| #25 Add asset preview and approval page before email delivery | Partial | Round detail shows quality gate, review state, MP3/PDF actions, and `generate_round_assets` returns `review_url_path` | Dedicated bundle preview page with embedded PDF/MP3, approve/send controls, and script text remains. |
+| #25 Add asset preview and approval page before email delivery | Ready to close | Bundle review page shows embedded MP3/PDF, song list, quality report, review form, script text, send-now and schedule-email controls, and `generate_round_assets` returns `review_url_path` | Verify deployed bundle-review page before closing. |
 
 ## Next Local Work Blocks
 
