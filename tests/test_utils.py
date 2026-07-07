@@ -49,6 +49,32 @@ class TestGenerateToken:
             generate_token(length=length)
 
 
+class TestSafeRedirectUrl:
+    """Tests for local redirect URL validation."""
+
+    @pytest.mark.parametrize('target', ['/rounds/', '/users/profile?next=/rounds', '/'])
+    def test_accepts_local_absolute_paths(self, target):
+        from musicround.helpers.utils import is_safe_url
+        assert is_safe_url(target) is True
+
+    @pytest.mark.parametrize(
+        'target',
+        [
+            None,
+            '',
+            'rounds/',
+            'https://evil.example/rounds',
+            '//evil.example/rounds',
+            '/\\evil.example',
+            '\\/evil.example',
+            '/rounds\\evil',
+        ],
+    )
+    def test_rejects_external_or_ambiguous_targets(self, target):
+        from musicround.helpers.utils import is_safe_url
+        assert is_safe_url(target) is False
+
+
 class TestAllowedFile:
     """Tests for the allowed_file function."""
 

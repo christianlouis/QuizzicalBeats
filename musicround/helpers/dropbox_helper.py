@@ -7,6 +7,7 @@ from musicround.helpers.logging_utils import redact_authorization_header
 import requests
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from flask_login import current_user
 
@@ -19,6 +20,19 @@ DROPBOX_REFRESH_ERROR_MESSAGE = 'Dropbox token refresh failed. Please try again 
 DROPBOX_UPLOAD_ERROR_MESSAGE = 'Dropbox upload failed. Please try again or reconnect Dropbox.'
 DROPBOX_SHARED_LINK_ERROR_MESSAGE = 'Dropbox shared-link creation failed. Please try again or reconnect Dropbox.'
 DROPBOX_API_TIMEOUT_SECONDS = 10
+
+
+def format_dropbox_path(path):
+    """Normalize a path for Dropbox APIs."""
+    if not path or path == '/':
+        return ""
+
+    normalized = re.sub(r'/+', '/', str(path).strip())
+    if not normalized.startswith('/'):
+        normalized = '/' + normalized
+    if len(normalized) > 1:
+        normalized = normalized.rstrip('/')
+    return "" if normalized == '/' else normalized
 
 
 def get_dropbox_auth_url():
@@ -169,9 +183,7 @@ def upload_and_share(file_path, dropbox_path):
         current_app.logger.error("No valid Dropbox token available")
         return None
     
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     # First, upload the file
     try:
@@ -338,9 +350,7 @@ def upload_to_dropbox(access_token, dropbox_path, data, mode='binary'):
     Returns:
         dict: {'success': True/False, 'message': 'success or error message', 'metadata': file metadata if successful}
     """
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     try:
         # Convert string data to bytes if text mode
@@ -425,9 +435,7 @@ def create_shared_link(access_token, dropbox_path):
     Returns:
         dict: {'success': True/False, 'message': 'success or error message', 'url': shared link URL if successful}
     """
-    # Make sure dropbox_path starts with /
-    if not dropbox_path.startswith('/'):
-        dropbox_path = '/' + dropbox_path
+    dropbox_path = format_dropbox_path(dropbox_path)
     
     try:
         current_app.logger.debug(

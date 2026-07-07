@@ -82,6 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.
 - Hardened the managed-database guard so common truthy `DATABASE_REQUIRE_MANAGED` values fail fast before container startup can fall back to SQLite.
+- Hardened login and OAuth redirect targets against open redirects.
+- Escaped browser error metadata instead of injecting raw JSON into the error template.
+- Normalized Dropbox API paths for folder browsing, folder creation, upload, and shared-link creation.
+- Optimized genre picker and least-used genre helpers to avoid loading full song and round tables.
 
 ## [1.9.0] - 2026-02-06 - "Security Hardening"
 

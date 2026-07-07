@@ -72,11 +72,13 @@ def get_all_genres():
     """
     Return a list of all genres in the Song table.
     """
-    all_genres = []
-    for song in Song.query.all():
-        if song.genre and song.genre not in all_genres:
-            all_genres.append(song.genre)
-    return all_genres
+    rows = (
+        Song.query.with_entities(Song.genre)
+        .filter(Song.genre.isnot(None), Song.genre != '')
+        .distinct()
+        .all()
+    )
+    return [genre for (genre,) in rows]
 
 def get_all_tags():
     """
@@ -157,11 +159,16 @@ def get_least_used_genres():
     genre_usage = {g: 0 for g in all_genres_list}
 
     # Count how many times each genre appears in Rounds of type 'genre'
-    used_genre_rounds = Round.query.filter_by(round_type='genre').all()
-    for rnd in used_genre_rounds:
+    used_genre_counts = (
+        db.session.query(Round.round_criteria_used, db.func.count(Round.id))
+        .filter_by(round_type='genre')
+        .group_by(Round.round_criteria_used)
+        .all()
+    )
+    for genre, count in used_genre_counts:
         # Ensure we only increment if it exists in genre_usage
-        if rnd.round_criteria_used in genre_usage:
-            genre_usage[rnd.round_criteria_used] += 1
+        if genre in genre_usage:
+            genre_usage[genre] += count
 
     # If we have no genres at all, return an empty list
     if not genre_usage:

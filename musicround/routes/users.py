@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
 
 from musicround.models import db, User, Role, SystemSetting
-from musicround.helpers.utils import get_available_voices
+from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
 from musicround.helpers.spotify_helper import (
@@ -238,7 +238,7 @@ def google_callback():
         
         # Redirect to next page or home
         next_page = request.args.get('next')
-        if not next_page or not next_page.startswith('/'):
+        if not is_safe_url(next_page):
             next_page = url_for('core.index')
             
         flash('You have been logged in via Google!', 'success')
@@ -295,7 +295,7 @@ def authentik_callback():
         
         # Redirect to next page or home
         next_page = request.args.get('next')
-        if not next_page or not next_page.startswith('/'):
+        if not is_safe_url(next_page):
             next_page = url_for('core.index')
             
         flash('You have been logged in via Authentik!', 'success')
@@ -536,7 +536,7 @@ def login():
         db.session.commit()
         
         next_page = request.args.get('next')
-        if not next_page or not next_page.startswith('/'):
+        if not is_safe_url(next_page):
             next_page = url_for('core.index')
             
         flash('You have been logged in!', 'success')

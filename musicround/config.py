@@ -1,7 +1,6 @@
 import os
 import openai
 from dotenv import load_dotenv
-import tempfile
 from datetime import timedelta
 
 from musicround.helpers.database_config import bool_from_config

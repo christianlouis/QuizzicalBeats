@@ -59,3 +59,15 @@ class TestGetVersionStr:
         """Test that the version string contains the release name."""
         result = get_version_str()
         assert VERSION_INFO['release_name'] in result
+
+    def test_truthy_non_boolean_values(self):
+        """Truthy include_build values should include the build number."""
+        for value in ['yes', 1, [1], {'a': 1}]:
+            result = get_version_str(include_build=value)
+            assert VERSION_INFO['build_number'] in result
+
+    def test_falsy_non_boolean_values(self):
+        """Falsy include_build values should omit the build number."""
+        for value in [None, '', 0, [], {}]:
+            result = get_version_str(include_build=value)
+            assert VERSION_INFO['build_number'] not in result
