@@ -1051,7 +1051,7 @@
                 mp3Loading.classList.add('hidden');
                 
                 if (data.success) {
-                    if (data.message === 'MP3 file already exists') {
+                    if (data.mp3_status === 'exists') {
                         mp3StatusTitle.textContent = 'MP3 Already Exists';
                         mp3StatusMessage.textContent = 'An MP3 is already available. Download it or regenerate it.';
                         regenerateMp3Btn.classList.remove('hidden');
