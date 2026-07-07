@@ -2452,7 +2452,7 @@ def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
         Song.youtube_preview_url.is_(None),
     ).count()
 
-    genre_rows = db.session.query(Song.genre).all()
+    genre_rows = db.session.query(Song.genre).order_by(Song.id.asc()).yield_per(1000)
     unknown_genre_count = 0
     genre_counts_by_key: dict[str, int] = {}
     genre_labels_by_key: dict[str, str] = {}
