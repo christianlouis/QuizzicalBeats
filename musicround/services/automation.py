@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import csv
+import math
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -1889,10 +1890,14 @@ def inspect_round_package(
     """Validate a generated round bundle before it is allowed to leave by email."""
     if expected_song_count < 1:
         raise AutomationError("expected_song_count must be at least 1.")
+    if not math.isfinite(min_preview_seconds) or not math.isfinite(max_preview_seconds):
+        raise AutomationError("preview duration limits must be finite.")
     if min_preview_seconds < 0 or max_preview_seconds < 0:
         raise AutomationError("preview duration limits must not be negative.")
     if min_preview_seconds > max_preview_seconds:
         raise AutomationError("min_preview_seconds must not exceed max_preview_seconds.")
+    if not math.isfinite(duration_tolerance_seconds):
+        raise AutomationError("duration_tolerance_seconds must be finite.")
     if duration_tolerance_seconds < 0:
         raise AutomationError("duration_tolerance_seconds must not be negative.")
 

@@ -967,6 +967,20 @@ class TestAssetInspection:
                     duration_tolerance_seconds=-1,
                 )
 
+            for parameter_name in ("min_preview_seconds", "max_preview_seconds", "duration_tolerance_seconds"):
+                with pytest.raises(automation.AutomationError, match="must be finite"):
+                    automation.inspect_round_package(
+                        round_id,
+                        expected_song_count=1,
+                        **{parameter_name: float("nan")},
+                    )
+                with pytest.raises(automation.AutomationError, match="must be finite"):
+                    automation.inspect_round_package(
+                        round_id,
+                        expected_song_count=1,
+                        **{parameter_name: float("inf")},
+                    )
+
     def test_inspect_round_package_tolerates_minor_mp3_duration_variance(self, app):
         with app.app_context():
             user = _create_user()
