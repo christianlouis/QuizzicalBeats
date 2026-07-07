@@ -526,6 +526,17 @@ class TestGetBackupSummary:
         assert 'schedule_enabled' in summary
         assert 'backup_location' in summary
 
+    def test_get_backup_summary_uses_configured_data_dir(self, app, tmp_path):
+        """Backup summary should report the configured backup location."""
+        from musicround.helpers.backup_helper import get_backup_summary
+
+        app.config["DATA_DIR"] = str(tmp_path)
+
+        with patch('musicround.helpers.backup_helper.list_backups', return_value=[]):
+            summary = get_backup_summary()
+
+        assert summary['backup_location'] == os.path.join(str(tmp_path), 'backups')
+
     def test_get_backup_summary_with_backups(self, app):
         """Test get_backup_summary with existing backups."""
         from musicround.helpers.backup_helper import get_backup_summary

@@ -8,6 +8,7 @@ import time
 import requests
 import logging
 from flask import current_app
+from musicround.helpers.paths import app_data_path
 
 class SpotifyDirectClient:
     """
@@ -17,7 +18,7 @@ class SpotifyDirectClient:
     def __init__(self, client_id=None, client_secret=None, cache_path=None, bearer_token=None):
         self.client_id = client_id or current_app.config['SPOTIFY_CLIENT_ID']
         self.client_secret = client_secret or current_app.config['SPOTIFY_CLIENT_SECRET']
-        self.cache_path = cache_path or os.path.join('/data', '.spotifycache')
+        self.cache_path = cache_path or app_data_path('.spotifycache')
         self.base_url = 'https://api.spotify.com/v1'
         self.token_url = 'https://accounts.spotify.com/api/token'
         self.access_token = bearer_token  # Use provided bearer token if available

@@ -85,6 +85,7 @@ class Config:
 
     # Round artifact storage. These directories must already exist and be
     # writable before MP3/PDF generation, export, scheduling, or delivery.
+    DATA_DIR = os.getenv("DATA_DIR", "/data")
     ROUND_MP3_DIR = os.getenv("ROUND_MP3_DIR", "/data/rounds")
     ROUND_PDF_DIR = os.getenv("ROUND_PDF_DIR", "/data/pdfs")
     

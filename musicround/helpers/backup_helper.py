@@ -13,6 +13,7 @@ import tempfile
 from flask import current_app
 
 from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
+from musicround.helpers.paths import app_data_path, backup_dir
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -135,11 +136,11 @@ def create_backup(backup_name=None, include_mp3s=True, include_config=True):
             backup_name = f"backup_{timestamp}"
         
         # Ensure backup directory exists
-        backup_dir = os.path.join('/data', 'backups')
-        os.makedirs(backup_dir, exist_ok=True)
+        backups_path = backup_dir()
+        os.makedirs(backups_path, exist_ok=True)
         
         # Create backup zip file path
-        backup_path = os.path.join(backup_dir, f"{backup_name}.zip")
+        backup_path = os.path.join(backups_path, f"{backup_name}.zip")
         
         # Create a temporary directory for collecting files
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -268,17 +269,17 @@ def list_backups():
     Returns:
         list: List of backup information dictionaries
     """
-    backup_dir = os.path.join('/data', 'backups')
+    backups_path = backup_dir()
     
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir, exist_ok=True)
+    if not os.path.exists(backups_path):
+        os.makedirs(backups_path, exist_ok=True)
         return []
     
     backups = []
     
-    for filename in os.listdir(backup_dir):
+    for filename in os.listdir(backups_path):
         if filename.endswith('.zip'):
-            backup_path = os.path.join(backup_dir, filename)
+            backup_path = os.path.join(backups_path, filename)
             try:
                 # Extract metadata from ZIP file
                 with zipfile.ZipFile(backup_path, 'r') as zipf:
@@ -325,8 +326,8 @@ def delete_backup(backup_filename):
     Returns:
         dict: Operation status information
     """
-    backup_dir = os.path.join('/data', 'backups')
-    backup_path = os.path.join(backup_dir, backup_filename)
+    backups_path = backup_dir()
+    backup_path = os.path.join(backups_path, backup_filename)
     
     if not os.path.exists(backup_path):
         return {
@@ -357,8 +358,8 @@ def restore_backup(backup_filename):
     Returns:
         dict: Operation status information
     """
-    backup_dir = os.path.join('/data', 'backups')
-    backup_path = os.path.join(backup_dir, backup_filename)
+    backups_path = backup_dir()
+    backup_path = os.path.join(backups_path, backup_filename)
     
     if not os.path.exists(backup_path):
         return {
@@ -517,8 +518,8 @@ def verify_backup(backup_filename):
     Returns:
         dict: Verification result
     """
-    backup_dir = os.path.join('/data', 'backups')
-    backup_path = os.path.join(backup_dir, backup_filename)
+    backups_path = backup_dir()
+    backup_path = os.path.join(backups_path, backup_filename)
     
     if not os.path.exists(backup_path):
         return {
@@ -681,7 +682,7 @@ def get_backup_summary():
         "schedule_time": schedule_time,
         "schedule_frequency": schedule_frequency,
         "next_backup": next_backup,
-        "backup_location": "/data/backups",
+        "backup_location": backup_dir(),
         "retention_days": retention_days,
         "supports_application_backup": application_backup["supported"],
         "backup_warning": application_backup["warning"],
@@ -871,8 +872,8 @@ def upload_backup(file):
     """
     try:
         # Ensure backup directory exists
-        backup_dir = os.path.join('/data', 'backups')
-        os.makedirs(backup_dir, exist_ok=True)
+        backups_path = backup_dir()
+        os.makedirs(backups_path, exist_ok=True)
         
         # Generate a unique filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -881,7 +882,7 @@ def upload_backup(file):
         # This preserves the original filename but ensures uniqueness
         secure_filename = file.filename.replace(' ', '_')
         save_filename = f"{timestamp}_{secure_filename}"
-        save_path = os.path.join(backup_dir, save_filename)
+        save_path = os.path.join(backups_path, save_filename)
         
         # Save the uploaded file
         file.save(save_path)
@@ -960,7 +961,7 @@ def update_ofelia_config(retention_days=30):
         schedule_cron = frequency_map.get(schedule_frequency, '@daily')
         
         # Determine the config file path - use environment variable or default
-        config_dir = os.environ.get('OFELIA_CONFIG_DIR', '/data/config')
+        config_dir = os.environ.get('OFELIA_CONFIG_DIR', app_data_path('config'))
         os.makedirs(config_dir, exist_ok=True)
         config_path = os.path.join(config_dir, 'ofelia.ini')
         

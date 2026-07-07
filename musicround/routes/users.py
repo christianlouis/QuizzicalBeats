@@ -15,6 +15,7 @@ from musicround.models import db, User, Role, SystemSetting
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
+from musicround.helpers.paths import app_data_dir, backup_dir
 from musicround.helpers.spotify_helper import (
     clear_manual_spotify_bearer_token,
     get_spotify_token,
@@ -1578,8 +1579,8 @@ def download_backup(filename):
         abort(400, "Invalid file type")
     
     # Only allow downloading from the backup directory
-    backup_dir = os.path.join('/data', 'backups')
-    backup_path = os.path.join(backup_dir, filename)
+    backups_path = backup_dir()
+    backup_path = os.path.join(backups_path, filename)
     
     # Check if the file exists
     if not os.path.exists(backup_path):
@@ -1740,8 +1741,8 @@ def system_health():
     
     # Check important directories
     dirs_to_check = [
-        {"path": '/data', "name": "Data Directory"},
-        {"path": '/data/backups', "name": "Backups Directory"},
+        {"path": app_data_dir(), "name": "Data Directory"},
+        {"path": backup_dir(), "name": "Backups Directory"},
         {"path": round_mp3_dir(), "name": "Round MP3 Directory"},
         {"path": round_pdf_dir(), "name": "Round PDF Directory"},
         {"path": os.path.join(current_app.root_path, 'static'), "name": "Static Files"}
