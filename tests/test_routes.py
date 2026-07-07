@@ -245,6 +245,7 @@ class TestAuthenticatedRoutes:
         assert b'aria-haspopup="true"' in response.data
         assert b'aria-expanded="false"' in response.data
         assert b'aria-label="Toggle navigation menu"' in response.data
+        assert b'.nav-dropdown:focus-within .nav-dropdown-menu' not in response.data
 
     def test_search_accessible_when_logged_in(self, app, client):
         """Test that search page is accessible when logged in."""
