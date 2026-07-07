@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made the rounds list flag non-eight-song rounds, unresolved song IDs, and failed email deliveries before quiz rounds reach inbox workflows.
 - Preserved Spotify playlist import order when the importer returns database song IDs directly.
 - Kept round package preview failures aligned to stored round positions even when unresolved song IDs create gaps.
+- Blocked browser email delivery on the same round-package quality gate used by MCP and scheduled email exports.
+- Persisted scheduled-email quality failures as repairable, credential-safe round export messages.
+- Showed round email quality feedback and failed delivery messages on the round detail page.
 - Added playlist import position maps to MCP round-creation success and repair payloads.
 - Fixed Spotify playlist imports so already-cataloged tracks count as resolved positions and successful imports always return their result payload.
 - Added credential-safe health and CLI warnings when production still points at the legacy `/data/song_data.db` SQLite file.

@@ -3051,6 +3051,25 @@ def _round_export_summary(export: RoundExport) -> dict[str, Any]:
     }
 
 
+def _scheduled_email_error_message(exc: Exception) -> str:
+    """Return a persisted, credential-safe scheduled email failure summary."""
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        report = details.get("report")
+        if isinstance(report, dict) and report.get("headline"):
+            return str(report["headline"])
+        quality = details.get("quality")
+        if isinstance(quality, dict):
+            quality_report = quality.get("report")
+            if isinstance(quality_report, dict) and quality_report.get("headline"):
+                return str(quality_report["headline"])
+            if quality.get("status"):
+                return f"Round quality gate failed: {quality['status']}."
+        if details.get("status"):
+            return f"Scheduled round email failed: {details['status']}."
+    return AUTOMATION_SCHEDULED_EMAIL_ERROR
+
+
 def schedule_round_email(
     round_id: int,
     scheduled_for: str | datetime,
@@ -3190,19 +3209,20 @@ def process_due_scheduled_round_emails(
         except Exception as exc:
             export.status = "failed"
             export.processed_at = datetime.utcnow()
+            safe_error_message = _scheduled_email_error_message(exc)
             current_app.logger.error(
                 "Scheduled round email export %s failed: %s",
                 export.id,
                 exc,
                 exc_info=True,
             )
-            export.error_message = AUTOMATION_SCHEDULED_EMAIL_ERROR
+            export.error_message = safe_error_message
             db.session.commit()
             details = getattr(exc, "details", None)
             results.append(
                 {
                     "export": _round_export_summary(export),
-                    "error": AUTOMATION_SCHEDULED_EMAIL_ERROR,
+                    "error": safe_error_message,
                     "details": details,
                 }
             )
