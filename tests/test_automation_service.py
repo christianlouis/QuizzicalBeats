@@ -1255,6 +1255,68 @@ class TestAssetInspection:
             assert export.status == "failed"
             assert export.error_message == automation.AUTOMATION_SCHEDULED_EMAIL_ERROR
 
+    def test_process_due_scheduled_round_email_persists_quality_feedback(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Due Quality Failure", artist="Artist")
+            round_id = automation.create_round(
+                name="Due Quality Failure Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                scheduled = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2026-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
+
+            quality_details = {
+                "success": False,
+                "status": "needs_substitution",
+                "quality": {
+                    "status": "needs_substitution",
+                    "report": {
+                        "headline": "Due Quality Failure Round is blocked: needs_substitution.",
+                    },
+                },
+                "report": {
+                    "headline": "Due Quality Failure Round is blocked: needs_substitution.",
+                },
+            }
+            with patch(
+                "musicround.services.automation.email_round",
+                side_effect=automation.AutomationError(
+                    "Round quality gate failed: preview missing token=secret",
+                    details=quality_details,
+                ),
+            ):
+                result = automation.process_due_scheduled_round_emails(
+                    now="2026-07-09T19:01:00+02:00"
+                )
+
+            body = str(result)
+            assert result["processed_count"] == 1
+            assert result["results"][0]["error"] == (
+                "Due Quality Failure Round is blocked: needs_substitution."
+            )
+            assert "token=secret" not in body
+            export = RoundExport.query.get(scheduled["export"]["id"])
+            assert export.status == "failed"
+            assert export.error_message == (
+                "Due Quality Failure Round is blocked: needs_substitution."
+            )
+
 
 class TestTTSAutomation:
     """Tests for TTS snippet assignment."""
