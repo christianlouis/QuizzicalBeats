@@ -492,7 +492,7 @@ def round_detail(round_id):
         )
         round_shares = (
             RoundShare.query.filter_by(round_id=rnd.id)
-            .join(User)
+            .join(RoundShare.user)
             .options(contains_eager(RoundShare.user))
             .order_by(User.username.asc(), RoundShare.id.asc())
             .all()
