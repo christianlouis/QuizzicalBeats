@@ -247,10 +247,23 @@ def _seed_source_run_summary(run: SeedSourceRun) -> dict[str, Any]:
 
 
 def _seed_source_summary(source: SeedSource, include_runs: bool = False) -> dict[str, Any]:
+    """Summarize a seed source and optionally include recent run history.
+
+    Args:
+        source: Seed source model to serialize.
+        include_runs: When true, include up to 20 recent runs and derive
+            latest_run from that fetched list. When false, only latest_run is
+            queried.
+
+    Returns:
+        Dictionary payload suitable for MCP and automation responses.
+    """
     ordered_runs = source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc())
-    runs = ordered_runs.limit(20).all() if include_runs else []
-    latest_run = runs[0] if include_runs and runs else None
-    if not include_runs:
+    if include_runs:
+        runs = ordered_runs.limit(20).all()
+        latest_run = runs[0] if runs else None
+    else:
+        runs = []
         latest_run = ordered_runs.first()
     payload = {
         "id": source.id,

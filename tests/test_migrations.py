@@ -329,6 +329,67 @@ def test_add_seed_source_registry_to_legacy_database(tmp_path):
     assert "idx_seed_source_run_source_status" in {index.name for index in SeedSourceRun.__table__.indexes}
 
 
+def test_add_seed_source_registry_rebuilds_existing_run_table_with_foreign_key(tmp_path):
+    """Legacy seed source run tables without constraints are rebuilt safely."""
+    database_path = tmp_path / "legacy-seed-source-run-no-fk.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE seed_source (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                source_type VARCHAR(50) NOT NULL,
+                provider VARCHAR(100),
+                url VARCHAR(500),
+                cadence VARCHAR(50),
+                active BOOLEAN NOT NULL DEFAULT 1,
+                priority INTEGER NOT NULL DEFAULT 100,
+                created_at DATETIME NOT NULL,
+                UNIQUE(name, provider)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE seed_source_run (
+                id INTEGER PRIMARY KEY,
+                seed_source_id INTEGER NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'planned',
+                started_at DATETIME NOT NULL,
+                completed_at DATETIME,
+                songs_seen INTEGER NOT NULL DEFAULT 0,
+                songs_imported INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                notes TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO seed_source (id, name, source_type, created_at) VALUES (1, 'Charts', 'chart', '2026-07-07')"
+        )
+        conn.execute(
+            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) VALUES (10, 1, 'success', '2026-07-07')"
+        )
+        conn.execute(
+            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) VALUES (11, 999, 'orphan', '2026-07-07')"
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_seed_source_registry
+
+        assert add_seed_source_registry.run_migration() is True
+        assert add_seed_source_registry.run_migration() is None
+
+    assert any(
+        row[2] == "seed_source" and row[3] == "seed_source_id" and row[4] == "id"
+        for row in _foreign_keys(database_path, "seed_source_run")
+    )
+    with sqlite3.connect(database_path) as conn:
+        rows = conn.execute("SELECT id, seed_source_id, status FROM seed_source_run").fetchall()
+    assert rows == [(10, 1, "success")]
+
+
 def test_add_planned_quiz_rounds_to_legacy_database(tmp_path):
     """Existing databases get planned quiz production-board schema."""
     database_path = tmp_path / "legacy-planned-quiz.db"

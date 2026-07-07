@@ -23,6 +23,16 @@ def _index_exists(inspector, table_name, index_name):
     return any(index.get("name") == index_name for index in inspector.get_indexes(table_name))
 
 
+def _foreign_key_exists(inspector, table_name, referred_table, constrained_columns):
+    expected_columns = set(constrained_columns)
+    for foreign_key in inspector.get_foreign_keys(table_name):
+        if foreign_key.get("referred_table") != referred_table:
+            continue
+        if set(foreign_key.get("constrained_columns") or []) == expected_columns:
+            return True
+    return False
+
+
 def _create_index(conn, inspector, table_name, index_name, columns):
     if _index_exists(inspector, table_name, index_name):
         return False
@@ -31,6 +41,74 @@ def _create_index(conn, inspector, table_name, index_name, columns):
     quoted_index = _quote(index_name, preparer)
     quoted_columns = ", ".join(_quote(column, preparer) for column in columns)
     conn.execute(text(f"CREATE INDEX {quoted_index} ON {quoted_table} ({quoted_columns})"))
+    return True
+
+
+def _create_seed_source_run_table(conn, table_name="seed_source_run"):
+    preparer = conn.dialect.identifier_preparer
+    quoted_table = _quote(table_name, preparer)
+    conn.execute(
+        text(
+            f"""
+            CREATE TABLE {quoted_table} (
+                id INTEGER PRIMARY KEY,
+                seed_source_id INTEGER NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'planned',
+                started_at DATETIME NOT NULL,
+                completed_at DATETIME,
+                songs_seen INTEGER NOT NULL DEFAULT 0,
+                songs_imported INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                notes TEXT,
+                FOREIGN KEY(seed_source_id) REFERENCES seed_source(id) ON DELETE CASCADE
+            )
+            """
+        )
+    )
+
+
+def _rebuild_seed_source_run_with_foreign_key(conn):
+    """Recreate legacy seed_source_run with the model's foreign key constraint."""
+    temp_table = "seed_source_run_with_fk"
+    preparer = conn.dialect.identifier_preparer
+    quoted_temp = _quote(temp_table, preparer)
+    quoted_run = _quote("seed_source_run", preparer)
+    _create_seed_source_run_table(conn, temp_table)
+    conn.execute(
+        text(
+            f"""
+            INSERT INTO {quoted_temp} (
+                id,
+                seed_source_id,
+                status,
+                started_at,
+                completed_at,
+                songs_seen,
+                songs_imported,
+                error_message,
+                notes
+            )
+            SELECT
+                run.id,
+                run.seed_source_id,
+                run.status,
+                run.started_at,
+                run.completed_at,
+                run.songs_seen,
+                run.songs_imported,
+                run.error_message,
+                run.notes
+            FROM {quoted_run} AS run
+            WHERE EXISTS (
+                SELECT 1
+                FROM seed_source AS source
+                WHERE source.id = run.seed_source_id
+            )
+            """
+        )
+    )
+    conn.execute(text(f"DROP TABLE {quoted_run}"))
+    conn.execute(text(f"ALTER TABLE {quoted_temp} RENAME TO {quoted_run}"))
     return True
 
 
@@ -77,24 +155,10 @@ def run_migration():
 
             inspector = inspect(db.engine)
             if not _table_exists(inspector, "seed_source_run"):
-                conn.execute(
-                    text(
-                        """
-                        CREATE TABLE seed_source_run (
-                            id INTEGER PRIMARY KEY,
-                            seed_source_id INTEGER NOT NULL,
-                            status VARCHAR(30) NOT NULL DEFAULT 'planned',
-                            started_at DATETIME NOT NULL,
-                            completed_at DATETIME,
-                            songs_seen INTEGER NOT NULL DEFAULT 0,
-                            songs_imported INTEGER NOT NULL DEFAULT 0,
-                            error_message TEXT,
-                            notes TEXT,
-                            FOREIGN KEY(seed_source_id) REFERENCES seed_source(id) ON DELETE CASCADE
-                        )
-                        """
-                    )
-                )
+                _create_seed_source_run_table(conn)
+                changes_made = True
+            elif not _foreign_key_exists(inspector, "seed_source_run", "seed_source", ["seed_source_id"]):
+                _rebuild_seed_source_run_with_foreign_key(conn)
                 changes_made = True
 
             inspector = inspect(db.engine)
