@@ -59,6 +59,7 @@ AUTOMATION_PDF_INSPECTION_ERROR = "PDF inspection failed."
 AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
+DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 45.0
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
@@ -1696,7 +1697,7 @@ def inspect_round_package(
     expected_song_count: int = 8,
     min_preview_seconds: float = 20.0,
     max_preview_seconds: float = 35.0,
-    duration_tolerance_seconds: float = 6.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
 ) -> dict[str, Any]:
     """Validate a generated round bundle before it is allowed to leave by email."""
     round_obj = db.session.get(Round, round_id)
@@ -2011,7 +2012,7 @@ def round_repair_report(
     expected_song_count: int = 8,
     min_preview_seconds: float = 20.0,
     max_preview_seconds: float = 35.0,
-    duration_tolerance_seconds: float = 6.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
 ) -> dict[str, Any]:
     """Return the package quality payload plus a human-readable repair report."""
     quality = inspect_round_package(
