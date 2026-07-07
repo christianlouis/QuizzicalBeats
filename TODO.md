@@ -91,6 +91,12 @@
 
 ## 🆕 Upcoming Milestones
 
+## Backlog Alignment
+
+* [x] Add an agent-readable GitHub issue crosswalk in `docs/developer-guide/backlog-status.md`
+* [ ] Close or comment ready-to-close implementation issues after release smoke verification
+* [ ] Split partially completed issues into smaller browser/UI or operational follow-ups where needed
+
 
 ### 🎯 Milestone 10: **"Import Infrastructure" Release** – Queue & Worker Setup
 
@@ -260,4 +266,4 @@
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: July 6, 2026*
+*Last updated: July 7, 2026*

@@ -1,7 +1,7 @@
 # Quizzical Beats - Project Roadmap
 
 **Version**: 2026.Q3
-**Last Updated**: July 6, 2026
+**Last Updated**: July 7, 2026
 
 ## Vision Statement
 
@@ -11,7 +11,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Latest Release**: v1.10 - "Import Infrastructure"
 **Active Development**: v2.x - Reliability, Performance, and Agentic Round Production
-**Repository Health**: ✅ Production-Ready
+**Repository Health**: 🟡 Production-hardening in progress; managed database cutover remains the main blocker
 
 ---
 
@@ -314,7 +314,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v3.0 - "Rhythm Roundsmith" *(Q3 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 3-4 weeks
 
@@ -396,7 +396,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v3.3 - "Alert Amplifier" *(Q3 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 Partially Complete
 **Priority**: Medium  
 **Effort**: 1-2 weeks
 
@@ -449,7 +449,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v4.1 - "Collaboration Core" *(Q4 2026 - MEDIUM PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Medium  
 **Effort**: 3 weeks
 
@@ -475,7 +475,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v4.2 - "Profile Personalizer" *(Q4 2026 - LOW PRIORITY)*
-**Status**: 🟡 Partially Complete  
+**Status**: 🟡 Partially Complete
 **Priority**: Low  
 **Effort**: 1 week
 
@@ -515,6 +515,14 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 ## 🔮 Future Considerations (2027+)
+
+## GitHub Issue Alignment
+
+The issue backlog has been split into repository-local slices and live
+operational work in [Agentic Backlog Status](docs/developer-guide/backlog-status.md).
+Agents should use that crosswalk before starting new work so completed slices
+such as import retry handling, text playlist parsing, round readiness badges,
+quizmaster context, planned quiz dates, and TTS script review are not rebuilt.
 
 ### Ideas Under Evaluation
 

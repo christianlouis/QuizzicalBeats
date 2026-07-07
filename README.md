@@ -153,6 +153,7 @@ Comprehensive documentation is available at [quizzicalbeats.readthedocs.io](http
 - [User Guide](https://quizzicalbeats.readthedocs.io/user-guide/getting-started.html)
 - [Admin Guide](https://quizzicalbeats.readthedocs.io/admin-guide/installation.html)
 - [Developer Guide](https://quizzicalbeats.readthedocs.io/developer-guide/architecture.html)
+- [Agentic Backlog Status](docs/developer-guide/backlog-status.md) - issue crosswalk for local coding-agent work
 - [API Reference](https://quizzicalbeats.readthedocs.io/developer-guide/api-reference.html)
 - [FAQ](https://quizzicalbeats.readthedocs.io/faq.html)
 
