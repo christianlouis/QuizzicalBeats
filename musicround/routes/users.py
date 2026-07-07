@@ -1573,14 +1573,19 @@ def download_backup(filename):
     """Download a backup file"""
     import os
     from flask import send_file, abort
+
+    if filename != os.path.basename(filename) or '/' in filename or '\\' in filename:
+        abort(400, "Invalid backup filename")
     
     # Security check: only allow .zip files
     if not filename.endswith('.zip'):
         abort(400, "Invalid file type")
     
     # Only allow downloading from the backup directory
-    backups_path = backup_dir()
-    backup_path = os.path.join(backups_path, filename)
+    backups_path = os.path.realpath(backup_dir())
+    backup_path = os.path.realpath(os.path.join(backups_path, filename))
+    if not backup_path.startswith(backups_path + os.sep) and backup_path != backups_path:
+        abort(400, "Invalid backup path")
     
     # Check if the file exists
     if not os.path.exists(backup_path):
