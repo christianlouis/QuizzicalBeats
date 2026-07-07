@@ -57,7 +57,20 @@ def managed_database_requirement_error(
 
 
 def database_uri_from_postgres_env(environ) -> str | None:
-    """Build a SQLAlchemy PostgreSQL URI from standard PG* environment variables."""
+    """Build a SQLAlchemy PostgreSQL URI from standard PG* environment variables.
+
+    Args:
+        environ: Mapping of environment variable names to values, typically
+            ``os.environ``.
+
+    Returns:
+        A PostgreSQL SQLAlchemy URI, or ``None`` when no required PG* variables
+        are configured.
+
+    Raises:
+        ValueError: If only part of the required PGHOST, PGDATABASE, PGUSER,
+            and PGPASSWORD configuration is present.
+    """
     values = {
         "PGHOST": environ.get("PGHOST"),
         "PGDATABASE": environ.get("PGDATABASE"),
@@ -104,8 +117,10 @@ def redact_database_uri(uri: str | None) -> str:
         return f"{parts.scheme}://[configured]"
 
     host = parts.hostname or "configured-host"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     port = f":{parts.port}" if parts.port else ""
-    username = f"{parts.username}:***@" if parts.username else ""
+    username = f"{quote(parts.username, safe='%')}:***@" if parts.username else ""
     netloc = f"{username}{host}{port}"
     path = parts.path or ""
     return urlunsplit((parts.scheme, netloc, path, "", ""))

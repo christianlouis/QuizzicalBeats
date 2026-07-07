@@ -10,6 +10,9 @@ database to a managed SQL database without exposing credentials in logs or Git.
 - Required database config: either `SQLALCHEMY_DATABASE_URI` or the standard
   PostgreSQL component variables `PGHOST`, `PGDATABASE`, `PGUSER`, and
   `PGPASSWORD`. `PGPORT` defaults to `5432`.
+- Precedence rule: the database resolver uses `SQLALCHEMY_DATABASE_URI` first
+  whenever it is set. Remove or blank the URI before relying on the PG*
+  component variables.
 - Production guard: set `DATABASE_REQUIRE_MANAGED=true` in Kubernetes config.
   The app accepts common truthy values such as `true`, `1`, `yes`, and `on`.
 - Database credentials must stay in 1Password, CNPG-generated Kubernetes
@@ -35,9 +38,11 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
 4. Add the managed database configuration. For PostgreSQL/CNPG, prefer
    `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` from Kubernetes
-   `secretKeyRef` entries so no full URI secret needs to be stored. A complete
-   `SQLALCHEMY_DATABASE_URI` in the 1Password item
-   `quizzicalbeats/quizzicalbeats-secrets` is still supported.
+   `secretKeyRef` entries so no full URI secret needs to be stored. Remove or
+   blank `SQLALCHEMY_DATABASE_URI` before using the component variables; a set
+   URI wins over PG* values by design. A complete `SQLALCHEMY_DATABASE_URI` in
+   the 1Password item `quizzicalbeats/quizzicalbeats-secrets` is still
+   supported.
 
 ## Dry Run
 
@@ -66,11 +71,16 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
    If using CNPG component variables instead, verify the app deployment has
    `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` configured without
-   printing their values:
+   printing their values, then confirm the referenced Secret exposes those keys
+   without printing the secret data:
 
    ```bash
    kubectl -n quizzicalbeats get deploy quizzicalbeats \
      -o jsonpath='{range .spec.template.spec.containers[?(@.name=="web")].env[*]}{.name}{"\n"}{end}' \
+     | grep -E '^(PGHOST|PGDATABASE|PGUSER|PGPASSWORD)$'
+
+   kubectl -n quizzicalbeats get secret quizzicalbeats-secrets -o json \
+     | jq -r '.data | keys[]' \
      | grep -E '^(PGHOST|PGDATABASE|PGUSER|PGPASSWORD)$'
    ```
 

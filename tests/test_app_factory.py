@@ -189,6 +189,17 @@ def test_database_uri_redaction_hides_credentials():
     assert summary['database'] == 'quizzicalbeats'
 
 
+def test_database_uri_redaction_preserves_valid_escaped_username():
+    """Redacted URIs should stay parseable when usernames need escaping."""
+    uri = 'postgresql+psycopg2://qb%20user:super-secret@[2001:db8::1]:5432/quiz%20db'
+
+    redacted = redact_database_uri(uri)
+
+    assert redacted == 'postgresql+psycopg2://qb%20user:***@[2001:db8::1]:5432/quiz%20db'
+    assert 'qb user' not in redacted
+    assert 'super-secret' not in redacted
+
+
 def test_database_uri_from_postgres_env_quotes_secret_components():
     """Generated URIs must be valid and never include raw secret text."""
     environ = {
