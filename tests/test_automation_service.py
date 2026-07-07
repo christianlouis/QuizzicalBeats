@@ -910,7 +910,7 @@ class TestAssetInspection:
                 for issue in result["issues"]
             )
 
-    def test_inspect_round_package_blocks_missing_preview_replay_duration(self, app):
+    def test_inspect_round_package_blocks_material_mp3_duration_shortfall(self, app):
         with app.app_context():
             user = _create_user()
             songs = [
