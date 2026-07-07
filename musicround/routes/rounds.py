@@ -265,6 +265,39 @@ def _round_generation_failure_response(round_id, log_message, user_message, stat
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 
+def _round_quality_failure_response(round_id, quality, recipient=None, subject=None, body_text=None):
+    """Persist and return repairable package-gate failures before email delivery."""
+    report = quality.get('report') or {}
+    error_msg = report.get('headline') or 'Round quality gate failed. Repair the round before sending.'
+    db.session.add(
+        RoundExport(
+            round_id=round_id,
+            user_id=current_user.id,
+            export_type='email',
+            destination=recipient,
+            include_mp3s=True,
+            status='failed',
+            subject=subject,
+            body_text=body_text,
+            error_message=error_msg,
+            processed_at=datetime.utcnow(),
+        )
+    )
+    db.session.commit()
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({
+            'success': False,
+            'error': error_msg,
+            'status': quality.get('status'),
+            'hints': quality.get('hints', []),
+            'quality': quality,
+            'report': report,
+        }), 422
+    flash(error_msg, 'error')
+    session['round_quality_report'] = report.get('markdown')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
 def _selected_track_hint_audio(round_id):
     """Load selected per-track hint audio keyed by one-based song position."""
     hints = {}
@@ -1182,11 +1215,34 @@ def send_email(round_id):
         else:
             session['email_error'] = error_msg
             return redirect(url_for('rounds.round_detail', round_id=round_id))
-    
+
     # Get the round name for the subject
     round_title = f'Pub Quiz Round #{round_id}'
     if rnd and rnd.name:
         round_title = rnd.name
+
+    try:
+        quality = automation.inspect_round_package(round_id=round_id, user_id=current_user.id)
+    except AutomationError as exc:
+        current_app.logger.error(
+            "Round package inspection failed before email for round %s: %s",
+            round_id,
+            exc,
+            exc_info=True,
+        )
+        error_msg = "Round quality gate could not run. Please try again later or contact an administrator."
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'error': error_msg}), 500
+        flash(error_msg, 'error')
+        return redirect(url_for('rounds.round_detail', round_id=round_id))
+    if not quality.get('ok'):
+        return _round_quality_failure_response(
+            round_id,
+            quality,
+            recipient=mail_recipient,
+            subject=round_title,
+            body_text='Attached please find the MP3 and PDF files for the quiz round.',
+        )
 
     try:
         with open(mp3_file_path, 'rb') as mp3_file:

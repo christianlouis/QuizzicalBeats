@@ -50,6 +50,15 @@ def _create_round(app, songs_ids, name='Test Round'):
         return round_.id
 
 
+def _passing_round_quality():
+    return {
+        'ok': True,
+        'status': 'ok',
+        'hints': [],
+        'report': {'headline': 'Round is ready to send.', 'markdown': '# Ready'},
+    }
+
+
 def _user_id(app, username):
     with app.app_context():
         return User.query.filter_by(username=username).one().id
@@ -966,6 +975,10 @@ class TestRoundEmailRoute:
                 patch('musicround.routes.rounds.os.path.exists', return_value=True), \
                 patch('builtins.open', mock_open(read_data=b'ID3 test mp3')), \
                 patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=_passing_round_quality(),
+                ), \
+                patch(
                     'musicround.routes.rounds.send_quiz_email',
                     return_value=(True, 'sent'),
                 ) as mock_send:
@@ -1057,6 +1070,10 @@ class TestRoundEmailRoute:
                     side_effect=regenerate_mp3,
                 ) as mock_round_mp3, \
                 patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=_passing_round_quality(),
+                ), \
+                patch(
                     'musicround.routes.rounds.send_quiz_email',
                     return_value=(True, 'sent'),
                 ) as mock_send:
@@ -1084,6 +1101,10 @@ class TestRoundEmailRoute:
                 patch('musicround.routes.rounds.os.path.exists', return_value=True), \
                 patch('builtins.open', mock_open(read_data=b'ID3 test mp3')), \
                 patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=_passing_round_quality(),
+                ), \
+                patch(
                     'musicround.routes.rounds.send_quiz_email',
                     return_value=(False, 'Missing parameters: MAIL_PASSWORD'),
                 ):
@@ -1096,3 +1117,54 @@ class TestRoundEmailRoute:
         assert response.get_json()['error'] == (
             'Unable to send the email. Please try again later or contact an administrator.'
         )
+
+    def test_mail_route_blocks_failed_package_quality_before_sending(self, app, client):
+        """UI email delivery must not bypass the package quality gate."""
+        _login(app, client)
+        user_id = _user_id(app, 'roundsuser')
+        song_id = _create_song(app, title='Short Preview Song')
+        round_id = _create_round(app, [song_id], name='Blocked Quality Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+
+        quality = {
+            'ok': False,
+            'status': 'needs_substitution',
+            'hints': ['Short Preview Song preview is 10.0s; expected at least 20.0s.'],
+            'report': {
+                'headline': 'Blocked Quality Round is blocked: needs_substitution.',
+                'markdown': '# Blocked Quality Round is blocked',
+                'failed_positions': [{'position': 1}],
+            },
+        }
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch('builtins.open', mock_open(read_data=b'ID3 test mp3')) as opened, \
+                patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=quality,
+                ) as mock_quality, \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(
+                f'/rounds/{round_id}/mail',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 422
+        payload = response.get_json()
+        assert payload['success'] is False
+        assert payload['status'] == 'needs_substitution'
+        assert payload['quality'] == quality
+        assert payload['report'] == quality['report']
+        assert 'Short Preview Song preview' in payload['hints'][0]
+        mock_quality.assert_called_once_with(round_id=round_id, user_id=user_id)
+        mock_send.assert_not_called()
+        opened.assert_not_called()
+        with app.app_context():
+            export = RoundExport.query.filter_by(round_id=round_id, export_type='email').one()
+            assert export.status == 'failed'
+            assert export.destination == 'rounds@example.com'
+            assert export.error_message == quality['report']['headline']
