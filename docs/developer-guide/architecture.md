@@ -86,6 +86,11 @@ def create_app():
 Configuration is handled in `config.py` using environment variables loaded from a `.env` file:
 
 ```python
+import os
+
+from musicround.helpers.database_config import bool_from_config
+
+
 class Config:
     # Core configuration
     DEBUG = os.getenv("DEBUG", "False") == "True"

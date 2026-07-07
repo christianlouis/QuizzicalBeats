@@ -160,9 +160,14 @@ def main():
         if "SQLALCHEMY_DATABASE_URI" not in os.environ:
             app.config["SQLALCHEMY_DATABASE_URI"] = None
         json_output = bool(getattr(args, "json_output", False))
-        preflight_requires_managed = args.database_action == 'preflight' and not args.allow_sqlite
-        if args.database_action == 'preflight':
-            app.config['DATABASE_REQUIRE_MANAGED'] = preflight_requires_managed and not json_output
+        allow_sqlite = bool(getattr(args, "allow_sqlite", False))
+        configured_managed_required = bool(app.config.get('DATABASE_REQUIRE_MANAGED'))
+        preflight_requires_managed = args.database_action == 'preflight' and not allow_sqlite
+        diagnostic_managed_required = preflight_requires_managed or configured_managed_required
+        if json_output and diagnostic_managed_required:
+            app.config['DATABASE_REQUIRE_MANAGED'] = False
+        elif args.database_action == 'preflight':
+            app.config['DATABASE_REQUIRE_MANAGED'] = preflight_requires_managed
         try:
             _configure_database_uri(app)
         except RuntimeError as exc:
@@ -172,7 +177,19 @@ def main():
         summary = database_summary(db_uri)
         readiness = postgres_env_readiness(os.environ)
         issues = []
-        if is_legacy_data_sqlite_uri(db_uri):
+        if diagnostic_managed_required and summary["backend"] == "sqlite":
+            issues.append(
+                {
+                    "code": "managed_database_requirement_failed",
+                    "severity": "error",
+                    "message": "managed database is required but SQLite is configured",
+                    "hint": (
+                        "configure a managed SQL URI or complete PG* credentials "
+                        "via secrets for production"
+                    ),
+                }
+            )
+        elif is_legacy_data_sqlite_uri(db_uri):
             issues.append(
                 {
                     "code": "legacy_sqlite_data_store",
@@ -185,16 +202,22 @@ def main():
                 }
             )
         diagnostics = {
-            "ok": True,
-            "status": "warning" if issues else "ok",
-            "managed_required": preflight_requires_managed or bool(app.config.get('DATABASE_REQUIRE_MANAGED')),
+            "ok": not any(issue["severity"] == "error" for issue in issues),
+            "status": (
+                "error"
+                if any(issue["severity"] == "error" for issue in issues)
+                else "warning" if issues else "ok"
+            ),
+            "managed_required": diagnostic_managed_required,
             "database": summary,
             "postgres_env": readiness,
             "issues": issues,
         }
         if json_output:
             print(json.dumps(diagnostics, indent=2, sort_keys=True))
-            if args.database_action == 'preflight' and issues and not args.allow_sqlite:
+            if any(issue["severity"] == "error" for issue in issues):
+                return 78
+            if args.database_action == 'preflight' and issues and not allow_sqlite:
                 return 78
             return 0
         print(f"Database backend: {summary['backend']}")

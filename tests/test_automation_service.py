@@ -642,6 +642,12 @@ class TestRoundAutomation:
             assert enabled["round"]["public_link_enabled"] is True
             assert public["round"]["name"] == "Public Link Round"
             assert public["round"]["songs"][0]["title"] == "Public Song"
+            assert public["round"]["owner"] == {
+                "id": owner.id,
+                "username": owner.username,
+                "name": None,
+            }
+            assert "email" not in public["round"]["owner"]
             assert refreshed["created"] is False
             assert refreshed["public_token"] == enabled["public_token"]
             assert refreshed["access_event"]["action"] == "public_link_refreshed"

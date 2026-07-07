@@ -260,10 +260,19 @@ def _get_editable_round_or_404(round_id):
     return round_obj
 
 
+def _abort_production_forbidden():
+    response = jsonify({
+        'success': False,
+        'error': 'You do not have permission to produce assets for this round.',
+    })
+    response.status_code = 403
+    abort(response)
+
+
 def _get_producible_round_or_404(round_id):
     round_obj = _get_visible_round_or_404(round_id)
     if not _can_produce_round(round_obj):
-        abort(403)
+        _abort_production_forbidden()
     return round_obj
 
 
