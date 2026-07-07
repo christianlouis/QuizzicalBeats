@@ -118,8 +118,8 @@ def run_migration():
         from musicround import db
 
         changes_made = False
-        inspector = inspect(db.engine)
         with db.engine.connect() as conn:
+            inspector = inspect(conn)
             if not _table_exists(inspector, "seed_source"):
                 conn.execute(
                     text(
@@ -143,7 +143,7 @@ def run_migration():
                 )
                 changes_made = True
 
-            inspector = inspect(db.engine)
+            inspector = inspect(conn)
             if _table_exists(inspector, "seed_source"):
                 source_columns = _columns(inspector, "seed_source")
                 if "notes" not in source_columns:
@@ -153,7 +153,7 @@ def run_migration():
                     conn.execute(text("ALTER TABLE seed_source ADD COLUMN updated_at DATETIME"))
                     changes_made = True
 
-            inspector = inspect(db.engine)
+            inspector = inspect(conn)
             if not _table_exists(inspector, "seed_source_run"):
                 _create_seed_source_run_table(conn)
                 changes_made = True
@@ -161,7 +161,7 @@ def run_migration():
                 _rebuild_seed_source_run_with_foreign_key(conn)
                 changes_made = True
 
-            inspector = inspect(db.engine)
+            inspector = inspect(conn)
             for table_name, index_name, columns in (
                 ("seed_source", "idx_seed_source_type_active", ["source_type", "active", "priority"]),
                 (
