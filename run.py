@@ -81,19 +81,12 @@ def main():
 
         app = Flask(__name__)
         app.config.from_object(Config)
-        if args.database_action == 'preflight' and not args.allow_sqlite:
-            app.config['DATABASE_REQUIRE_MANAGED'] = True
+        if args.database_action == 'preflight':
+            app.config['DATABASE_REQUIRE_MANAGED'] = not args.allow_sqlite
         try:
             _configure_database_uri(app)
         except RuntimeError as exc:
             print(f"Database configuration error: {exc}", file=sys.stderr)
-            readiness = postgres_env_readiness(os.environ)
-            if readiness["configured"] and not readiness["complete"]:
-                print(
-                    "PostgreSQL environment is incomplete; missing keys: "
-                    + ", ".join(readiness["missing_required"]),
-                    file=sys.stderr,
-                )
             return 78
         db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
         summary = database_summary(db_uri)

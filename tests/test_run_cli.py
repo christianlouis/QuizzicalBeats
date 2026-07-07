@@ -87,10 +87,13 @@ def test_database_preflight_blocks_legacy_sqlite_by_default(monkeypatch, capsys)
 def test_database_preflight_can_report_sqlite_without_blocking(monkeypatch, capsys):
     """Operators can inspect early migration state before the managed cutover."""
     import run
+    from musicround.config import Config
 
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
     monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
     monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.setenv("DATABASE_REQUIRE_MANAGED", "true")
+    monkeypatch.setattr(Config, "DATABASE_REQUIRE_MANAGED", True)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -102,6 +105,7 @@ def test_database_preflight_can_report_sqlite_without_blocking(monkeypatch, caps
 
     assert exit_code == 0
     assert "Database backend: sqlite" in output
+    assert "Managed database required: False" in output
     assert "legacy /data SQLite database is configured" in output
     assert "Database preflight passed." in output
 
