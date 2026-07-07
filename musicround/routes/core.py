@@ -383,7 +383,7 @@ def view_songs():
     per_page = _int_arg('per_page', default=25, minimum=1, maximum=200)
     query_text = (request.args.get('q') or '').strip()
     genre = (request.args.get('genre') or '').strip()
-    normalized_genre_filter = " ".join(genre.split()).casefold()
+    normalized_genre_filter = " ".join(genre.split()).lower()
     has_preview = (request.args.get('has_preview') or '').strip().lower()
     year = _int_arg('year')
     used_min = _int_arg('used_min', minimum=0)
@@ -396,6 +396,7 @@ def view_songs():
     normalized_genre = Song.genre
     for whitespace in ("\t", "\n", "\r"):
         normalized_genre = func.replace(normalized_genre, whitespace, " ")
+    # Song.genre is String(100); 7 passes collapse up to 128 spaces to one.
     for _ in range(7):
         normalized_genre = func.replace(normalized_genre, "  ", " ")
     normalized_genre = func.lower(func.trim(normalized_genre))
