@@ -91,7 +91,11 @@
                 </button>
             </div>
             <div id="quality-result" class="border border-gray-200 rounded-md p-4 bg-gray-50 text-sm text-gray-700">
+                {% if round_quality_report %}
+                <div class="border border-orange-200 rounded-md p-3 bg-orange-50 text-orange-900 whitespace-pre-wrap">{{ round_quality_report }}</div>
+                {% else %}
                 <p>Run the package check to see preview, MP3, PDF, and duration readiness.</p>
+                {% endif %}
             </div>
             <div id="repair-suggestions" class="hidden mt-4 border border-orange-200 rounded-md p-4 bg-orange-50">
                 <h3 class="font-semibold text-orange-800 mb-3">Replacement Candidates</h3>
@@ -136,6 +140,9 @@
                     <div class="text-xs border border-gray-200 rounded p-2">
                         <div class="font-semibold">{{ export.status|capitalize }}{% if export.scheduled_for %} for {{ export.scheduled_for.strftime('%Y-%m-%d %H:%M') }}{% endif %}</div>
                         <div class="text-gray-500">{{ export.destination or 'No destination' }}</div>
+                        {% if export.error_message %}
+                        <div class="text-red-700 mt-1">{{ export.error_message }}</div>
+                        {% endif %}
                     </div>
                     {% endfor %}
                 </div>

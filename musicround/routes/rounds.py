@@ -439,6 +439,7 @@ def round_detail(round_id):
         ordered_songs = rnd.song_list
         
         email_error = session.pop('email_error', None)  # Retrieve and remove the error message from the session
+        round_quality_report = session.pop('round_quality_report', None)
         
         # For oauth.spotify, we need to ensure we have a valid token if needed for this view
         user_info = None
@@ -471,6 +472,7 @@ def round_detail(round_id):
             songs=ordered_songs,
             user_info=user_info,
             email_error=email_error,
+            round_quality_report=round_quality_report,
             audio_scripts=audio_scripts,
             scheduled_exports=scheduled_exports,
         )

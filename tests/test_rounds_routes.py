@@ -368,6 +368,26 @@ class TestRoundDetailRoute:
         assert b'Reviewed' in response.data
         assert b'Welcome to the review round' in response.data
 
+    def test_round_detail_shows_failed_email_export_message(self, app, client):
+        """Round detail should show persisted delivery/quality failure feedback."""
+        _login(app, client)
+        song_id = _create_song(app, title='Failed Export Detail Song')
+        round_id = _create_round(app, [song_id], name='Failed Export Detail Round')
+        with app.app_context():
+            db.session.add(RoundExport(
+                round_id=round_id,
+                export_type='email',
+                destination='rounds@example.com',
+                status='failed',
+                error_message='Failed Export Detail Round is blocked: needs_substitution.',
+            ))
+            db.session.commit()
+
+        response = client.get(f'/rounds/{round_id}')
+
+        assert response.status_code == 200
+        assert b'Failed Export Detail Round is blocked: needs_substitution.' in response.data
+
     def test_round_detail_hides_private_round_owned_by_other_user(self, app, client):
         """Private owned rounds should not be visible to other quizmasters."""
         _login(app, client, username='viewer_one', email='viewer_one@example.com')
@@ -1168,3 +1188,39 @@ class TestRoundEmailRoute:
             assert export.status == 'failed'
             assert export.destination == 'rounds@example.com'
             assert export.error_message == quality['report']['headline']
+
+    def test_mail_route_redirect_shows_quality_report(self, app, client):
+        """Non-AJAX email failures should carry repair feedback to round detail."""
+        _login(app, client)
+        user_id = _user_id(app, 'roundsuser')
+        song_id = _create_song(app, title='Redirect Quality Song')
+        round_id = _create_round(app, [song_id], name='Redirect Quality Round')
+        with app.app_context():
+            round_ = Round.query.get(round_id)
+            round_.mp3_generated = True
+            db.session.commit()
+
+        quality = {
+            'ok': False,
+            'status': 'needs_substitution',
+            'hints': ['Redirect Quality Song has no preview.'],
+            'report': {
+                'headline': 'Redirect Quality Round is blocked: needs_substitution.',
+                'markdown': '# Redirect Quality Round is blocked\n\nReplace position 1.',
+            },
+        }
+
+        with patch('musicround.routes.rounds.generate_pdf', return_value=b'%PDF'), \
+                patch('musicround.routes.rounds.os.path.exists', return_value=True), \
+                patch(
+                    'musicround.routes.rounds.automation.inspect_round_package',
+                    return_value=quality,
+                ) as mock_quality, \
+                patch('musicround.routes.rounds.send_quiz_email') as mock_send:
+            response = client.post(f'/rounds/{round_id}/mail', follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'Redirect Quality Round is blocked' in response.data
+        assert b'Replace position 1.' in response.data
+        mock_quality.assert_called_once_with(round_id=round_id, user_id=user_id)
+        mock_send.assert_not_called()
