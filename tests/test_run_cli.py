@@ -211,6 +211,11 @@ def test_database_migrate_sqlite_dry_run_reports_safe_counts(
     monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
     monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
     monkeypatch.setattr(
+        run,
+        "create_app",
+        lambda: (_ for _ in ()).throw(AssertionError("full app factory called")),
+    )
+    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -245,14 +250,16 @@ def test_database_migrate_sqlite_execute_copies_rows(
 ):
     """Explicit execution should copy rows into an empty configured target."""
     import run
+    from musicround.helpers import database_migration
 
     source = tmp_path / "source.db"
     target = tmp_path / "target.db"
-    _create_source_sqlite(source, songs=1)
+    _create_source_sqlite(source, songs=2)
 
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
     monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
     monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
+    monkeypatch.setattr(database_migration, "COPY_BATCH_SIZE", 1)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -273,10 +280,52 @@ def test_database_migrate_sqlite_execute_copies_rows(
 
     assert exit_code == 0
     assert payload["mode"] == "execute"
-    assert payload["total_target_rows_after"] == 1
-    assert _table_payload(payload, "song")["target_rows_after"] == 1
+    assert payload["total_target_rows_after"] == 2
+    assert _table_payload(payload, "song")["target_rows_after"] == 2
     with sqlite3.connect(target) as connection:
         assert connection.execute("SELECT title FROM song").fetchone()[0] == "Test Song"
+
+
+def test_database_migrate_sqlite_execute_reports_existing_target_rows(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """Execute output should preserve per-table pre-copy counts."""
+    import run
+
+    source = tmp_path / "source.db"
+    target = tmp_path / "target.db"
+    _create_source_sqlite(source, songs=2)
+    _create_source_sqlite(target, songs=1)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{target}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "database",
+            "migrate-sqlite",
+            "--source",
+            str(source),
+            "--allow-sqlite-target",
+            "--execute",
+            "--replace-target",
+        ],
+    )
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    song_payload = _table_payload(payload, "song")
+
+    assert exit_code == 0
+    assert payload["total_target_rows_before"] == 1
+    assert song_payload["target_rows_before"] == 1
+    assert song_payload["target_rows_after"] == 2
 
 
 def _create_source_sqlite(path, *, songs: int) -> None:

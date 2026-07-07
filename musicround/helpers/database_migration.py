@@ -13,6 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from musicround import db
 from musicround.helpers.database_config import database_backend, redact_database_uri
 
+COPY_BATCH_SIZE = 500
+
 
 class DatabaseMigrationError(RuntimeError):
     """Raised when a migration precondition fails."""
@@ -60,16 +62,17 @@ def migrate_sqlite_to_configured_database(
             "pass --allow-sqlite-target for local tests only."
         )
 
-    source_engine = create_engine(f"sqlite:///{source_path}")
-    db.create_all()
+    import musicround.models  # noqa: F401 - populate db.metadata for CLI use.
 
+    source_engine = create_engine(f"sqlite:///{source_path}")
     try:
         with source_engine.connect() as source, target_engine.begin() as target:
             source_inspector = inspect(source)
+            target_inspector = inspect(target)
             results = []
             for table in db.metadata.sorted_tables:
                 source_rows = _count_table(source, table.name, source_inspector)
-                target_rows_before = _count_table(target, table.name)
+                target_rows_before = _count_table(target, table.name, target_inspector)
                 results.append(
                     TableCopyResult(
                         table=table.name,
@@ -88,9 +91,15 @@ def migrate_sqlite_to_configured_database(
 
             copied_results = results
             if execute:
+                db.metadata.create_all(bind=target)
                 if replace_target:
                     _delete_target_rows(target)
-                copied_results = _copy_tables(source, target, source_inspector)
+                copied_results = _copy_tables(
+                    source,
+                    target,
+                    source_inspector,
+                    {result.table: result.target_rows_before for result in results},
+                )
                 _reset_postgres_sequences(target_engine, target)
 
             return {
@@ -122,7 +131,12 @@ def _count_table(connection, table_name: str, inspector=None) -> int:
     return int(result.scalar() or 0)
 
 
-def _copy_tables(source, target, source_inspector) -> list[TableCopyResult]:
+def _copy_tables(
+    source,
+    target,
+    source_inspector,
+    target_rows_before_by_table: dict[str, int],
+) -> list[TableCopyResult]:
     results: list[TableCopyResult] = []
     for table in db.metadata.sorted_tables:
         if not source_inspector.has_table(table.name):
@@ -132,19 +146,23 @@ def _copy_tables(source, target, source_inspector) -> list[TableCopyResult]:
             selected_columns = [
                 column for column in table.columns if column.name in source_columns
             ]
-            rows = [
-                dict(row._mapping)
-                for row in source.execute(select(*selected_columns)).fetchall()
-            ]
-            source_rows = len(rows)
-            if rows:
-                target.execute(table.insert(), rows)
+            source_rows = 0
+            if selected_columns:
+                rows_result = source.execute(select(*selected_columns))
+                while rows := rows_result.fetchmany(COPY_BATCH_SIZE):
+                    source_rows += len(rows)
+                    target.execute(
+                        table.insert(),
+                        [dict(row._mapping) for row in rows],
+                    )
+            else:
+                source_rows = _count_table(source, table.name, source_inspector)
         target_rows_after = _count_table(target, table.name)
         results.append(
             TableCopyResult(
                 table=table.name,
                 source_rows=source_rows,
-                target_rows_before=0,
+                target_rows_before=target_rows_before_by_table.get(table.name, 0),
                 target_rows_after=target_rows_after,
             )
         )
