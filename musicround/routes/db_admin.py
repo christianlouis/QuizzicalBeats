@@ -188,7 +188,13 @@ class RoleModelView(AuthModelView):
 
 # Enhanced UserPreferences ModelView
 class UserPreferencesModelView(AuthModelView):
-    column_filters = ['user_id', 'theme', 'enable_intro']
+    column_filters = [
+        'user_id',
+        'theme',
+        'enable_intro',
+        'import_job_email_notifications',
+        'oauth_token_email_notifications',
+    ]
     
 # Enhanced SystemSetting ModelView
 class SystemSettingModelView(AuthModelView):

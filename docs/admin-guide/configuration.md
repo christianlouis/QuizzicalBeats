@@ -170,6 +170,21 @@ Set `IMPORT_JOB_EMAIL_NOTIFICATIONS=True` to notify the owning user when an
 import job completes or exhausts automatic retries and needs manual review.
 Users can still opt out of these status emails from their profile.
 
+Preview OAuth connection warning emails without sending:
+
+```bash
+python run.py notifications oauth-tokens
+```
+
+Send pending Spotify/Dropbox expiry or reconnect warnings:
+
+```bash
+python run.py notifications oauth-tokens --send
+```
+
+The job respects each user's notification preferences and suppresses duplicate
+warnings for the same service issue for 24 hours.
+
 ### Automation Settings
 
 ```bash

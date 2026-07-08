@@ -530,6 +530,7 @@ class TestUserRoutesExtended:
         response = client.get('/users/edit-profile')
         assert response.status_code == 200
         assert b'Import job status emails' in response.data
+        assert b'Connected-service token warnings' in response.data
 
     def test_edit_profile_updates_import_notification_preference(self, app, client):
         """Editing the profile persists import job notification opt-out."""
@@ -548,6 +549,7 @@ class TestUserRoutesExtended:
             user = User.query.filter_by(username='notify_pref_user').one()
             preferences = UserPreferences.query.filter_by(user_id=user.id).one()
             assert preferences.import_job_email_notifications is False
+            assert preferences.oauth_token_email_notifications is False
 
     def test_edit_profile_error_ui_does_not_render_raw_provider_fields(self, app, client):
         """The Dropbox folder-picker UI must not surface raw provider payloads."""

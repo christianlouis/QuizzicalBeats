@@ -92,6 +92,19 @@
                     </span>
                 </span>
             </label>
+            <label class="mt-4 flex items-start gap-3 text-sm text-gray-700" for="oauth_token_email_notifications">
+                <input id="oauth_token_email_notifications"
+                       name="oauth_token_email_notifications"
+                       type="checkbox"
+                       class="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                       {% if preferences.oauth_token_email_notifications %}checked{% endif %}>
+                <span>
+                    <span class="block font-medium">Connected-service token warnings</span>
+                    <span class="block text-xs text-gray-500">
+                        Warn me before Spotify or Dropbox connections block imports or exports.
+                    </span>
+                </span>
+            </label>
         </div>
         
         <div class="flex items-center justify-between">

@@ -736,6 +736,9 @@ def edit_profile():
         preferences.import_job_email_notifications = (
             request.form.get('import_job_email_notifications') == 'on'
         )
+        preferences.oauth_token_email_notifications = (
+            request.form.get('oauth_token_email_notifications') == 'on'
+        )
         
         # Check if username or email already exists and belongs to another user
         if username != current_user.username and User.query.filter_by(username=username).first():

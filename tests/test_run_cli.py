@@ -25,6 +25,23 @@ def test_health_check_command_outputs_public_safe_json(app, monkeypatch, capsys)
     assert "token" not in output.lower()
 
 
+def test_notifications_oauth_tokens_command_defaults_to_dry_run(app, monkeypatch, capsys):
+    """OAuth token notification CLI previews by default."""
+    import run
+
+    monkeypatch.setattr(sys, "argv", ["run.py", "notifications", "oauth-tokens"])
+    monkeypatch.setattr(run, "create_app", lambda: app)
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["candidate_count"] == 0
+    assert "secret" not in output.lower()
+
+
 def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     """The database runbook command should flag the legacy production SQLite file."""
     import run

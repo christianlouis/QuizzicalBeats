@@ -106,6 +106,21 @@ def main():
     health_parser = subparsers.add_parser('health', help='Health diagnostics')
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
     health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
+
+    notifications_parser = subparsers.add_parser('notifications', help='Notification jobs')
+    notifications_subparsers = notifications_parser.add_subparsers(
+        dest='notifications_action',
+        help='Notification action to perform',
+    )
+    oauth_tokens_parser = notifications_subparsers.add_parser(
+        'oauth-tokens',
+        help='Warn users about expiring or broken OAuth connections',
+    )
+    oauth_tokens_parser.add_argument(
+        '--send',
+        action='store_true',
+        help='Send emails. Omit for the default dry run.',
+    )
     
     # Parse the arguments
     args = parser.parse_args()
@@ -290,6 +305,16 @@ def main():
             payload = application_health_payload()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
+    elif args.command == 'notifications':
+        with contextlib.redirect_stdout(sys.stderr):
+            app = create_app()
+        with app.app_context():
+            if args.notifications_action == 'oauth-tokens':
+                from musicround.helpers.oauth_notifications import send_oauth_token_notifications
+
+                result = send_oauth_token_notifications(dry_run=not args.send)
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return 1 if result.get("failed_count") else 0
     else:
         # Default: Run the Flask app
         app = create_app()

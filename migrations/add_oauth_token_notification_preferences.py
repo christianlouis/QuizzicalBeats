@@ -1,4 +1,4 @@
-"""Add user-level notification preference flags."""
+"""Add OAuth token warning notification preference."""
 
 import logging
 
@@ -11,7 +11,7 @@ def run_migration():
 
         inspector = inspect(db.engine)
         existing_columns = [column["name"] for column in inspector.get_columns("user_preferences")]
-        if "import_job_email_notifications" in existing_columns:
+        if "oauth_token_email_notifications" in existing_columns:
             logging.info("No changes were needed")
             return None
 
@@ -19,22 +19,22 @@ def run_migration():
             conn.execute(
                 text(
                     "ALTER TABLE user_preferences "
-                    "ADD COLUMN import_job_email_notifications BOOLEAN DEFAULT TRUE NOT NULL"
+                    "ADD COLUMN oauth_token_email_notifications BOOLEAN DEFAULT TRUE NOT NULL"
                 )
             )
             conn.execute(
                 text(
                     "UPDATE user_preferences "
-                    "SET import_job_email_notifications = 1 "
-                    "WHERE import_job_email_notifications IS NULL"
+                    "SET oauth_token_email_notifications = 1 "
+                    "WHERE oauth_token_email_notifications IS NULL"
                 )
             )
             conn.commit()
 
-        logging.info("Migration add_user_notification_preferences completed successfully")
+        logging.info("Migration add_oauth_token_notification_preferences completed successfully")
         return True
     except Exception as exc:
-        logging.error("Migration add_user_notification_preferences failed: %s", exc)
+        logging.error("Migration add_oauth_token_notification_preferences failed: %s", exc)
         return False
 
 
