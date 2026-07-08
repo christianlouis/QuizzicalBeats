@@ -141,6 +141,55 @@ def test_performance_smoke_command_rejects_invalid_sample_size(app, monkeypatch,
     assert "Traceback" not in captured.err
 
 
+def test_deployment_smoke_command_outputs_json(monkeypatch, capsys):
+    """Deployment smoke CLI should expose agent-readable deployment checks."""
+    import run
+
+    def fake_smoke(base_url, **kwargs):
+        return {
+            "ok": True,
+            "base_url": base_url.rstrip("/") + "/",
+            "checks": [{"name": "healthz", "ok": True, "message": "ok"}],
+            "failed_checks": [],
+        }
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "deployment",
+            "smoke",
+            "--base-url",
+            "https://qb.example.test",
+            "--json",
+        ],
+    )
+    monkeypatch.setattr("musicround.helpers.deployment_smoke.run_deployment_smoke", fake_smoke)
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["base_url"] == "https://qb.example.test/"
+
+
+def test_deployment_smoke_command_rejects_invalid_base_url(monkeypatch, capsys):
+    """Deployment smoke CLI should return a clear config error for bad targets."""
+    import run
+
+    monkeypatch.setattr(sys, "argv", ["run.py", "deployment", "smoke", "--base-url", "/relative"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 78
+    assert "base_url" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     """The database runbook command should flag the legacy production SQLite file."""
     import run

@@ -148,6 +148,18 @@ When Flask serves static CSS, JavaScript, image, or default audio assets, QB add
 bounded public cache headers. Disable this when static files are served directly
 by Nginx, a CDN, or another edge layer that owns cache policy.
 
+### Deployment Smoke
+
+```bash
+QB_SMOKE_BASE_URL=https://qb.kaufdeinquiz.com
+python run.py deployment smoke --json
+```
+
+The deployment smoke checks the public `/healthz` endpoint, security headers,
+non-development server header, static asset cache headers, and gzip behavior on
+a public text-like page. Override `--static-path` or `--compression-path` when a
+deployment uses different public probe paths.
+
 ### OAuth Provider Configuration
 
 ```bash
