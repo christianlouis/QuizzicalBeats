@@ -2820,6 +2820,131 @@ def round_repair_report(
     return {"quality": quality, "report": quality["report"]}
 
 
+def inspect_round_package_batch(
+    round_ids: Iterable[int],
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Inspect multiple round packages without aborting on one bad round."""
+    normalized_round_ids: list[int] = []
+    seen_round_ids: set[int] = set()
+    for value in round_ids or []:
+        try:
+            round_id = int(value)
+        except (TypeError, ValueError) as exc:
+            raise AutomationError("round_ids must contain only integer round IDs.") from exc
+        if round_id < 1:
+            raise AutomationError("round_ids must contain positive round IDs.")
+        if round_id in seen_round_ids:
+            continue
+        normalized_round_ids.append(round_id)
+        seen_round_ids.add(round_id)
+
+    if not normalized_round_ids:
+        raise AutomationError("round_ids must contain at least one round ID.")
+    if len(normalized_round_ids) > 50:
+        raise AutomationError("round_ids must contain at most 50 round IDs.")
+
+    rounds: list[dict[str, Any]] = []
+    ok_count = 0
+    warning_count = 0
+    blocked_count = 0
+    error_count = 0
+    needs_repair_count = 0
+
+    for round_id in normalized_round_ids:
+        try:
+            quality = inspect_round_package(
+                round_id=round_id,
+                user_id=user_id,
+                expected_song_count=expected_song_count,
+                min_preview_seconds=min_preview_seconds,
+                max_preview_seconds=max_preview_seconds,
+                duration_tolerance_seconds=duration_tolerance_seconds,
+            )
+        except AutomationError as exc:
+            error_count += 1
+            rounds.append(
+                {
+                    "round_id": round_id,
+                    "ok": False,
+                    "status": "error",
+                    "error": str(exc),
+                    "details": exc.details,
+                    "ready_to_send": False,
+                    "needs_repair": True,
+                }
+            )
+            continue
+
+        report = quality.get("report") or _round_repair_report(quality)
+        round_ok = bool(quality.get("ok"))
+        warnings = quality.get("warnings") or []
+        blocking_issue_count = int(quality.get("blocking_issue_count") or 0)
+        if round_ok:
+            ok_count += 1
+        if warnings:
+            warning_count += 1
+        if blocking_issue_count:
+            blocked_count += 1
+        if not round_ok:
+            needs_repair_count += 1
+        rounds.append(
+            {
+                "round_id": round_id,
+                "round_name": quality.get("round_name"),
+                "ok": round_ok,
+                "status": quality.get("status"),
+                "ready_to_send": round_ok,
+                "needs_repair": not round_ok,
+                "expected_song_count": quality.get("expected_song_count"),
+                "actual_song_count": quality.get("actual_song_count"),
+                "resolved_song_count": quality.get("resolved_song_count"),
+                "blocking_issue_count": blocking_issue_count,
+                "warning_count": len(warnings),
+                "failed_positions": report.get("failed_positions") or [],
+                "repair_actions": report.get("actions") or [],
+                "next_step": report.get("next_step"),
+                "headline": report.get("headline"),
+                "summary": report.get("summary"),
+            }
+        )
+
+    status = "ok"
+    if error_count:
+        status = "error"
+    elif needs_repair_count:
+        status = "needs_repair"
+    elif warning_count:
+        status = "warning"
+
+    return {
+        "ok": needs_repair_count == 0 and error_count == 0,
+        "status": status,
+        "round_ids": normalized_round_ids,
+        "count": len(normalized_round_ids),
+        "ok_count": ok_count,
+        "warning_count": warning_count,
+        "blocked_count": blocked_count,
+        "error_count": error_count,
+        "needs_repair_count": needs_repair_count,
+        "rounds": rounds,
+        "sendable_round_ids": [
+            item["round_id"] for item in rounds if item.get("ready_to_send")
+        ],
+        "repair_round_ids": [
+            item["round_id"] for item in rounds if item.get("needs_repair")
+        ],
+        "hints": [
+            "Send only rounds listed in sendable_round_ids.",
+            "Repair each repair_round_ids entry, regenerate assets, then rerun this batch audit.",
+        ],
+    }
+
+
 def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
     return {
         "id": record.id,

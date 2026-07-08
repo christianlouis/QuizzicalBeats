@@ -1427,6 +1427,74 @@ class TestAssetInspection:
             )
             assert mismatch["severity"] == "error"
 
+    def test_inspect_round_package_batch_splits_sendable_and_repair_rounds(self, app):
+        with app.app_context():
+            user = _create_user()
+
+            def fake_inspect(round_id, **kwargs):
+                if round_id == 1:
+                    return {
+                        "round_id": 1,
+                        "round_name": "Ready",
+                        "ok": True,
+                        "status": "ok",
+                        "expected_song_count": 8,
+                        "actual_song_count": 8,
+                        "resolved_song_count": 8,
+                        "blocking_issue_count": 0,
+                        "warnings": [],
+                        "report": {
+                            "headline": "Ready is ready to send.",
+                            "summary": "8 songs, all checks passed.",
+                            "failed_positions": [],
+                            "actions": [],
+                            "next_step": "Send the round email.",
+                        },
+                    }
+                if round_id == 2:
+                    return {
+                        "round_id": 2,
+                        "round_name": "Needs Repair",
+                        "ok": False,
+                        "status": "needs_substitution",
+                        "expected_song_count": 8,
+                        "actual_song_count": 8,
+                        "resolved_song_count": 7,
+                        "blocking_issue_count": 1,
+                        "warnings": [],
+                        "report": {
+                            "headline": "Needs Repair is blocked.",
+                            "summary": "1 blocker found.",
+                            "failed_positions": [{"position": 4}],
+                            "actions": [{"action": "replace_position", "message": "Replace position 4."}],
+                            "next_step": "Replace position 4.",
+                        },
+                    }
+                raise automation.AutomationError("Round 999 was not found.")
+
+            with patch("musicround.services.automation.inspect_round_package", side_effect=fake_inspect):
+                result = automation.inspect_round_package_batch([1, 2, 999], user_id=user.id)
+
+            assert result["ok"] is False
+            assert result["status"] == "error"
+            assert result["count"] == 3
+            assert result["ok_count"] == 1
+            assert result["blocked_count"] == 1
+            assert result["error_count"] == 1
+            assert result["sendable_round_ids"] == [1]
+            assert result["repair_round_ids"] == [2, 999]
+            assert result["rounds"][1]["failed_positions"] == [{"position": 4}]
+            assert result["rounds"][2]["status"] == "error"
+
+    def test_inspect_round_package_batch_validates_ids(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="at least one"):
+                automation.inspect_round_package_batch([])
+            with pytest.raises(automation.AutomationError, match="positive"):
+                automation.inspect_round_package_batch([0])
+            with pytest.raises(automation.AutomationError, match="at most 50"):
+                automation.inspect_round_package_batch(range(1, 52))
+
     def test_round_audio_component_failures_hide_exception_details(self, app):
         with app.app_context():
             user = _create_user()

@@ -953,6 +953,27 @@ def round_repair_report(
 
 
 @mcp.tool()
+def inspect_round_package_batch(
+    round_ids: list[int],
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Inspect several round packages and return sendable vs repair-needed IDs."""
+    return _with_app_context(
+        automation.inspect_round_package_batch,
+        round_ids=round_ids,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+
+
+@mcp.tool()
 def schedule_round_email(
     round_id: int,
     scheduled_for: str,
