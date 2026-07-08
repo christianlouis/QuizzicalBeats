@@ -13,6 +13,7 @@ import requests  # Import requests for direct API calls
 from musicround.helpers.spotify_helper import get_spotify_token
 from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
 from musicround.helpers.logging_utils import redact_authorization_header
+from musicround.services import automation
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -75,6 +76,21 @@ def _int_arg(name, default=None, minimum=None, maximum=None):
         return default
     try:
         value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _float_arg(name, default=None, minimum=None, maximum=None):
+    raw_value = request.args.get(name)
+    if raw_value in (None, ''):
+        return default
+    try:
+        value = float(raw_value)
     except (TypeError, ValueError):
         return default
     if minimum is not None:
@@ -873,9 +889,22 @@ def search_songs():
         return jsonify([])
     
     current_app.logger.info(f"User {current_user.username} searching for songs with query: {query}")
-        
-    songs = _ordered_song_query(_filtered_song_query()).limit(20).all()
-    return jsonify([_song_payload(song) for song in songs])
+
+    result = automation.find_songs(
+        query=query,
+        genre=request.args.get('genre'),
+        tag=request.args.get('tag'),
+        tags=request.args.getlist('tags') or None,
+        year=_int_arg('year'),
+        year_min=_int_arg('year_min'),
+        year_max=_int_arg('year_max'),
+        tempo_min=_float_arg('tempo_min'),
+        tempo_max=_float_arg('tempo_max'),
+        has_preview=_bool_arg('has_preview'),
+        unused_only=_bool_arg('unused_only') is True,
+        limit=_int_arg('limit', default=20, minimum=1, maximum=100) or 20,
+    )
+    return jsonify(result['songs'])
 
 @api_bp.route('/songs/update-audio-features', methods=['POST'])
 @login_required

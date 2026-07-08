@@ -65,6 +65,7 @@ The MCP server exposes these tools:
 | `seed_default_seed_sources` | Create or update the default mainstream chart and rock/metal festival source registry. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
 | `fetch_seed_source_candidates` | Read a seed source URL or pasted text into reviewable candidates without importing songs. |
+| `find_songs` | Search the catalog with relevance ranking, match explanations, filters for genre/year/preview/usage/tag/tempo, facets, suggestions, and short-lived cache metadata. |
 | `suggest_replacement_songs` | Suggest catalog songs for a failed, unplayable, or overused song. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |

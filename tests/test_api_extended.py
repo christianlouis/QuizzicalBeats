@@ -336,22 +336,30 @@ class TestSongSearchApi:
         """Test legacy search endpoint can use the shared catalog filters."""
         _create_user_and_login(app, client, 'searchfilters', 'searchfilters@example.com')
         with app.app_context():
+            tag = Tag(name='summer')
             songs = [
                 Song(
                     title='Filtered Rock Legacy',
                     artist='Rock Band',
                     genre='Rock',
+                    tempo=118.0,
                     preview_url='https://example.test/legacy.mp3',
                 ),
                 Song(title='Filtered Pop Legacy', artist='Pop Band', genre='Pop'),
             ]
+            songs[0].tags.append(tag)
             db.session.add_all(songs)
             db.session.commit()
 
-        response = client.get('/api/songs/search?q=Filtered&genre=Rock&has_preview=true')
+        response = client.get(
+            '/api/songs/search?q=Filtered&genre=Rock&tag=summer'
+            '&tempo_min=100&tempo_max=130&has_preview=true'
+        )
         assert response.status_code == 200
         data = response.get_json()
         assert [song['title'] for song in data] == ['Filtered Rock Legacy']
+        assert data[0]['search_score'] > 0
+        assert data[0]['match_reasons']
 
     def test_search_songs_returns_platform_preview_fallback(self, app, client):
         """Test compact song payload exposes any available platform preview."""
