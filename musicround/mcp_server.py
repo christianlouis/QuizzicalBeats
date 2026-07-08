@@ -37,9 +37,13 @@ def find_songs(
     title: str | None = None,
     artist: str | None = None,
     genre: str | None = None,
+    tag: str | None = None,
+    tags: list[str] | None = None,
     year: int | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
+    tempo_min: float | None = None,
+    tempo_max: float | None = None,
     has_preview: bool | None = None,
     unused_only: bool = False,
     offset: int = 0,
@@ -49,16 +53,25 @@ def find_songs(
     isrc: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Search the local Quizzical Beats catalog before adding a song."""
+    """Search the local Quizzical Beats catalog before adding a song.
+
+    Supports text, tag, year, tempo, preview, usage, and external-ID filters.
+    Returns songs with search metadata, facets, suggestions, analytics, and
+    cache details for agent workflows.
+    """
     return _with_app_context(
         automation.find_songs,
         query=query,
         title=title,
         artist=artist,
         genre=genre,
+        tag=tag,
+        tags=tags,
         year=year,
         year_min=year_min,
         year_max=year_max,
+        tempo_min=tempo_min,
+        tempo_max=tempo_max,
         has_preview=has_preview,
         unused_only=unused_only,
         offset=offset,

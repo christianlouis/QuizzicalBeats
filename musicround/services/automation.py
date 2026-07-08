@@ -9,8 +9,11 @@ import json
 import math
 import secrets
 import tempfile
+from copy import deepcopy
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
+from threading import RLock
+from time import monotonic
 from typing import Any
 
 import requests
@@ -19,6 +22,7 @@ from flask_login import login_user, logout_user
 from pydub import AudioSegment
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 
 from musicround import db
 from musicround.helpers.database_config import (
@@ -79,6 +83,9 @@ AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 AUTOMATION_SEED_SOURCE_FETCH_ERROR = "Seed source fetch failed. Check the server logs."
+SEARCH_CACHE_TTL_SECONDS = 60.0
+SEARCH_CACHE_MAX_ENTRIES = 128
+SEARCH_RELEVANCE_CANDIDATE_LIMIT = 1000
 
 ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
 ROUND_MANUAL_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected"}
@@ -87,6 +94,8 @@ DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
+_FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_FIND_SONGS_CACHE_LOCK = RLock()
 DEFAULT_SEED_SOURCE_DEFINITIONS = [
     {
         "name": "Billboard Hot 100",
@@ -1128,14 +1137,193 @@ def add_song(
     return {"created": existing is None, "song": _song_summary(song)}
 
 
+def _find_songs_cache_key(**kwargs: Any) -> tuple[Any, ...]:
+    """Build a stable cache key from normalized search arguments."""
+    normalized = []
+    for key in sorted(kwargs):
+        value = kwargs[key]
+        if isinstance(value, list):
+            value = tuple(value)
+        normalized.append((key, value))
+    return tuple(normalized)
+
+
+def _cache_get(cache_key: tuple[Any, ...]) -> dict[str, Any] | None:
+    """Return a cached search payload when it exists and is still fresh."""
+    with _FIND_SONGS_CACHE_LOCK:
+        cached = _FIND_SONGS_CACHE.get(cache_key)
+        if not cached:
+            return None
+        cached_at, payload = cached
+        if monotonic() - cached_at > SEARCH_CACHE_TTL_SECONDS:
+            _FIND_SONGS_CACHE.pop(cache_key, None)
+            return None
+        result = deepcopy(payload)
+    result["cache"] = {
+        "hit": True,
+        "ttl_seconds": SEARCH_CACHE_TTL_SECONDS,
+        "scope": "process",
+    }
+    return result
+
+
+def _cache_set(cache_key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    """Store a search payload while bounding the process-local cache size."""
+    with _FIND_SONGS_CACHE_LOCK:
+        if len(_FIND_SONGS_CACHE) >= SEARCH_CACHE_MAX_ENTRIES:
+            oldest_key = min(_FIND_SONGS_CACHE, key=lambda key: _FIND_SONGS_CACHE[key][0])
+            _FIND_SONGS_CACHE.pop(oldest_key, None)
+        _FIND_SONGS_CACHE[cache_key] = (monotonic(), deepcopy(payload))
+
+
+def _normalized_search_terms(*values: str | None) -> list[str]:
+    """Split user-supplied search fields into lowercase relevance terms."""
+    terms: list[str] = []
+    for value in values:
+        if value:
+            terms.extend(re.findall(r"[\w'-]+", value.casefold()))
+    return [term for term in terms if len(term) > 1]
+
+
+def _preview_available(song: Song) -> bool:
+    """Return whether a song has any playable preview URL."""
+    return bool(
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
+
+
+def _song_relevance(song: Song, terms: list[str]) -> tuple[int, list[str]]:
+    """Score a song against search terms and describe matched fields."""
+    if not terms:
+        return 0, []
+    title = (song.title or "").casefold()
+    artist = (song.artist or "").casefold()
+    album = (song.album_name or "").casefold()
+    genre = (song.genre or "").casefold()
+    tags = [tag.name.casefold() for tag in song.tags if tag.name]
+    score = 0
+    reasons: list[str] = []
+
+    for term in terms:
+        if title == term:
+            score += 100
+            reasons.append("exact title")
+        elif title.startswith(term):
+            score += 60
+            reasons.append("title prefix")
+        elif term in title:
+            score += 35
+            reasons.append("title match")
+
+        if artist == term:
+            score += 80
+            reasons.append("exact artist")
+        elif artist.startswith(term):
+            score += 45
+            reasons.append("artist prefix")
+        elif term in artist:
+            score += 25
+            reasons.append("artist match")
+
+        if genre and term in genre:
+            score += 20
+            reasons.append("genre match")
+        if album and term in album:
+            score += 10
+            reasons.append("album match")
+        if any(term in tag for tag in tags):
+            score += 25
+            reasons.append("tag match")
+        if song.year and term == str(song.year):
+            score += 10
+            reasons.append("year match")
+
+    if _preview_available(song):
+        score += 5
+    if not song.used_count:
+        score += 5
+    return score, sorted(set(reasons))
+
+
+def _song_summary_with_search(song: Song, terms: list[str]) -> dict[str, Any]:
+    """Return a song summary enriched with relevance score and reasons."""
+    score, reasons = _song_relevance(song, terms)
+    summary = _song_summary(song)
+    summary["search_score"] = score
+    summary["match_reasons"] = reasons
+    return summary
+
+
+def _facet_counts(songs: Sequence[Song]) -> dict[str, list[dict[str, Any]]]:
+    """Aggregate genre, decade, tag, and preview facets for search results."""
+    genres: dict[str, int] = {}
+    decades: dict[str, int] = {}
+    tags: dict[str, int] = {}
+    preview = {"with_preview": 0, "without_preview": 0}
+    for song in songs:
+        if song.genre:
+            genres[song.genre] = genres.get(song.genre, 0) + 1
+        decade = _song_decade(song.year)
+        if decade is not None:
+            label = f"{decade}s"
+            decades[label] = decades.get(label, 0) + 1
+        for tag in song.tags:
+            if tag.name:
+                tags[tag.name] = tags.get(tag.name, 0) + 1
+        preview["with_preview" if _preview_available(song) else "without_preview"] += 1
+
+    def top_items(values: dict[str, int], limit: int = 20) -> list[dict[str, Any]]:
+        ordered = sorted(values.items(), key=lambda item: (-item[1], item[0].casefold()))
+        return [{"value": value, "count": count} for value, count in ordered[:limit]]
+
+    return {
+        "genres": top_items(genres),
+        "decades": top_items(decades),
+        "tags": top_items(tags),
+        "preview": [{"value": key, "count": count} for key, count in preview.items()],
+    }
+
+
+def _autocomplete_suggestions(songs: Sequence[Song], query: str | None) -> list[dict[str, Any]]:
+    """Build prefix suggestions from the candidate song set."""
+    prefix = (query or "").strip().casefold()
+    if len(prefix) < 2:
+        return []
+    buckets: dict[tuple[str, str], int] = {}
+    for song in songs:
+        candidates = (
+            ("title", song.title),
+            ("artist", song.artist),
+            ("genre", song.genre),
+            *[("tag", tag.name) for tag in song.tags if tag.name],
+        )
+        for kind, value in candidates:
+            if value and value.casefold().startswith(prefix):
+                key = (kind, value)
+                buckets[key] = buckets.get(key, 0) + 1
+    ordered = sorted(buckets.items(), key=lambda item: (-item[1], item[0][1].casefold()))
+    return [
+        {"type": kind, "value": value, "count": count}
+        for (kind, value), count in ordered[:10]
+    ]
+
+
 def find_songs(
     query: str | None = None,
     title: str | None = None,
     artist: str | None = None,
     genre: str | None = None,
+    tag: str | None = None,
+    tags: list[str] | None = None,
     year: int | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
+    tempo_min: float | None = None,
+    tempo_max: float | None = None,
     has_preview: bool | None = None,
     unused_only: bool = False,
     offset: int = 0,
@@ -1145,28 +1333,76 @@ def find_songs(
     isrc: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Search the local catalog before adding or importing tracks."""
+    """Search the local catalog before adding or importing tracks.
+
+    Supports text, tag, year, tempo, preview, usage, and external-ID filters.
+    The response includes matching songs plus facets, suggestions, analytics,
+    and process-local cache metadata.
+    """
     if limit < 1 or limit > 100:
         raise AutomationError("limit must be between 1 and 100.")
     if offset < 0:
         raise AutomationError("offset must not be negative.")
+    normalized_tags = [item.strip() for item in (tags or []) if item and item.strip()]
+    if tag and tag.strip():
+        normalized_tags.append(tag.strip())
+    if tempo_min is not None and tempo_max is not None and float(tempo_min) > float(tempo_max):
+        raise AutomationError("tempo_min must be less than or equal to tempo_max.")
+    cache_key = _find_songs_cache_key(
+        database_uri=current_app.config.get("SQLALCHEMY_DATABASE_URI"),
+        query=query,
+        title=title,
+        artist=artist,
+        genre=genre,
+        tags=normalized_tags,
+        year=year,
+        year_min=year_min,
+        year_max=year_max,
+        tempo_min=tempo_min,
+        tempo_max=tempo_max,
+        has_preview=has_preview,
+        unused_only=unused_only,
+        offset=offset,
+        order_by=order_by,
+        spotify_id=spotify_id,
+        deezer_id=deezer_id,
+        isrc=isrc,
+        limit=limit,
+    )
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    started_at = monotonic()
 
     filters = []
     if query:
         pattern = f"%{query.strip()}%"
-        filters.append(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
+        filters.append(or_(
+            Song.title.ilike(pattern),
+            Song.artist.ilike(pattern),
+            Song.genre.ilike(pattern),
+            Song.album_name.ilike(pattern),
+            Song.tags.any(Tag.name.ilike(pattern)),
+        ))
     if title:
         filters.append(Song.title.ilike(f"%{title.strip()}%"))
     if artist:
         filters.append(Song.artist.ilike(f"%{artist.strip()}%"))
     if genre:
         filters.append(Song.genre.ilike(genre.strip()))
+    if normalized_tags:
+        for tag_name in normalized_tags:
+            filters.append(Song.tags.any(Tag.name.ilike(f"%{tag_name}%")))
     if year is not None:
         filters.append(Song.year == int(year))
     if year_min is not None:
         filters.append(Song.year >= int(year_min))
     if year_max is not None:
         filters.append(Song.year <= int(year_max))
+    if tempo_min is not None:
+        filters.append(Song.tempo >= float(tempo_min))
+    if tempo_max is not None:
+        filters.append(Song.tempo <= float(tempo_max))
     if has_preview is True:
         filters.append(or_(
             Song.preview_url.isnot(None),
@@ -1192,14 +1428,18 @@ def find_songs(
     if isrc:
         filters.append(Song.isrc == isrc)
 
-    song_query = Song.query
+    song_query = Song.query.options(selectinload(Song.tags))
     for condition in filters:
         song_query = song_query.filter(condition)
     total = song_query.count()
 
     descending = order_by.startswith("-")
     field_name = order_by[1:] if descending else order_by
+    if field_name == "artist" and query:
+        field_name = "relevance"
+        descending = True
     allowed_order = {
+        "relevance": None,
         "artist": Song.artist,
         "title": Song.title,
         "genre": Song.genre,
@@ -1209,16 +1449,38 @@ def find_songs(
         "id": Song.id,
     }
     column = allowed_order.get(field_name)
-    if column is None:
+    if field_name not in allowed_order:
         raise AutomationError(
-            "order_by must be one of artist, title, genre, year, used_count, last_used, id."
+            "order_by must be one of relevance, artist, title, genre, year, used_count, last_used, id."
         )
-    song_query = song_query.order_by(column.desc() if descending else column.asc())
-    if field_name not in {"artist", "title"}:
-        song_query = song_query.order_by(Song.artist.asc(), Song.title.asc())
+    terms = _normalized_search_terms(query, title, artist, genre, *normalized_tags)
+    facet_candidates = (
+        song_query
+        .order_by(Song.artist.asc(), Song.title.asc(), Song.id.asc())
+        .limit(SEARCH_RELEVANCE_CANDIDATE_LIMIT)
+        .all()
+    )
 
-    songs = song_query.offset(offset).limit(limit).all()
-    return {
+    if field_name == "relevance":
+        candidates = facet_candidates
+        candidates.sort(
+            key=lambda song: (
+                -_song_relevance(song, terms)[0],
+                song.used_count or 0,
+                (song.artist or "").casefold(),
+                (song.title or "").casefold(),
+            ),
+        )
+        songs = candidates[offset:offset + limit]
+    else:
+        assert column is not None
+        song_query = song_query.order_by(column.desc() if descending else column.asc())
+        if field_name not in {"artist", "title"}:
+            song_query = song_query.order_by(Song.artist.asc(), Song.title.asc())
+        songs = song_query.offset(offset).limit(limit).all()
+
+    elapsed_ms = (monotonic() - started_at) * 1000
+    result = {
         "count": len(songs),
         "total": total,
         "limit": limit,
@@ -1228,18 +1490,37 @@ def find_songs(
             "title": title,
             "artist": artist,
             "genre": genre,
+            "tags": normalized_tags,
             "year": year,
             "year_min": year_min,
             "year_max": year_max,
+            "tempo_min": tempo_min,
+            "tempo_max": tempo_max,
             "has_preview": has_preview,
             "unused_only": unused_only,
             "spotify_id": spotify_id,
             "deezer_id": deezer_id,
             "isrc": isrc,
             "order_by": order_by,
+            "effective_order_by": "relevance" if field_name == "relevance" else order_by,
         },
-        "songs": [_song_summary(song) for song in songs],
+        "facets": _facet_counts(facet_candidates),
+        "suggestions": _autocomplete_suggestions(facet_candidates, query),
+        "analytics": {
+            "ranking": "relevance" if field_name == "relevance" else "field",
+            "candidate_count": len(facet_candidates),
+            "facet_sample_limit": SEARCH_RELEVANCE_CANDIDATE_LIMIT,
+            "duration_ms": round(elapsed_ms, 3),
+        },
+        "cache": {
+            "hit": False,
+            "ttl_seconds": SEARCH_CACHE_TTL_SECONDS,
+            "scope": "process",
+        },
+        "songs": [_song_summary_with_search(song, terms) for song in songs],
     }
+    _cache_set(cache_key, result)
+    return result
 
 
 def import_catalog_item(

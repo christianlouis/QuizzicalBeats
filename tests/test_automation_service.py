@@ -141,6 +141,66 @@ class TestSongAutomation:
             assert result["filters"]["unused_only"] is True
             assert result["songs"][0]["title"] == "Filtered Rock 1999"
 
+    def test_find_songs_returns_ranked_explainable_faceted_results(self, app):
+        """Test ranked search results include explanations, facets, suggestions, and cache data."""
+        with app.app_context():
+            automation._FIND_SONGS_CACHE.clear()
+            exact = _create_song(
+                title="Road Trip",
+                artist="The Drivers",
+                genre="Rock",
+                year=1998,
+                tempo=122.0,
+                preview_url="https://example.test/road.mp3",
+                used_count=0,
+            )
+            tag = Tag(name="summer")
+            exact.tags.append(tag)
+            db.session.add(tag)
+            _create_song(
+                title="Long Road Home",
+                artist="Road Band",
+                genre="Country",
+                year=2001,
+                tempo=96.0,
+                preview_url="https://example.test/home.mp3",
+                used_count=5,
+            )
+            _create_song(title="Unrelated", artist="Other", genre="Pop", tempo=140.0)
+            db.session.commit()
+
+            result = automation.find_songs(
+                query="road",
+                tag="summer",
+                tempo_min=100,
+                tempo_max=130,
+                has_preview=True,
+            )
+
+            assert result["count"] == 1
+            assert result["filters"]["effective_order_by"] == "relevance"
+            assert result["songs"][0]["id"] == exact.id
+            assert result["songs"][0]["search_score"] > 0
+            assert any(
+                reason.startswith("title")
+                for reason in result["songs"][0]["match_reasons"]
+            )
+            assert result["facets"]["genres"] == [{"value": "Rock", "count": 1}]
+            assert result["facets"]["tags"] == [{"value": "summer", "count": 1}]
+            assert result["suggestions"][0] == {"type": "title", "value": "Road Trip", "count": 1}
+            assert result["analytics"]["ranking"] == "relevance"
+            assert result["cache"]["hit"] is False
+
+            cached = automation.find_songs(
+                query="road",
+                tag="summer",
+                tempo_min=100,
+                tempo_max=130,
+                has_preview=True,
+            )
+            assert cached["cache"]["hit"] is True
+            assert cached["songs"][0]["id"] == exact.id
+
     def test_find_songs_rejects_invalid_pagination_and_sort(self, app):
         with app.app_context():
             with pytest.raises(automation.AutomationError, match="offset"):
@@ -148,6 +208,9 @@ class TestSongAutomation:
 
             with pytest.raises(automation.AutomationError, match="order_by"):
                 automation.find_songs(order_by="popularity")
+
+            with pytest.raises(automation.AutomationError, match="tempo_min"):
+                automation.find_songs(tempo_min=150, tempo_max=120)
 
     def test_add_song_reuses_existing_by_isrc_and_adds_tags(self, app):
         with app.app_context():

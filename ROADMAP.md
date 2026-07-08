@@ -231,20 +231,21 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v2.4 - "Search Supercharge" *(Q2 2026 - MEDIUM PRIORITY)*
-**Status**: 🟡 In Progress
+**Status**: 🟢 Complete
 **Priority**: Medium  
 **Effort**: 2 weeks
 
 **Goals**: Advanced search capabilities
 
 **Features**:
-- [ ] Full-text search (PostgreSQL FTS or Elasticsearch)
-- [ ] Relevance scoring improvements
+- [x] Shared catalog search across UI and MCP
+- [x] Relevance scoring improvements with match explanations
 - [x] Advanced song catalog filters (title/artist query, year, genre, preview, usage)
-- [ ] Search result caching
-- [ ] Faceted search
-- [ ] Search suggestions/autocomplete
-- [ ] Search analytics
+- [x] Tag and tempo filters for agent replacement workflows
+- [x] Search result caching
+- [x] Faceted search
+- [x] Search suggestions/autocomplete
+- [x] Search analytics
 
 **Success Metrics**:
 - Search results <200ms
