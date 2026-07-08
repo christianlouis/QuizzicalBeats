@@ -21,7 +21,7 @@ issue after verification or continue with the remaining follow-up.
 
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
-| #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile, and warnings when `SQLALCHEMY_DATABASE_URI` masks complete split PG* secrets | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
+| #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, credential-safe cutover plan CLI, MCP config diagnostics, runbook, Compose managed-db profile, and warnings when `SQLALCHEMY_DATABASE_URI` masks complete split PG* secrets | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #31 Server Stability production hardening | Partial | Gunicorn entrypoint, ProxyFix/HTTPS handling, secure cookie defaults, configurable app-level security headers with HSTS on HTTPS, safe gzip compression for text-like responses, and bounded cache headers for Flask-served static assets | Reverse proxy/SSL termination validation and live production smoke remain. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |

@@ -78,6 +78,16 @@ def main():
         dest='json_output',
         help='Print machine-readable credential-safe diagnostics',
     )
+    cutover_plan_parser = database_subparsers.add_parser(
+        'cutover-plan',
+        help='Print a credential-safe managed database cutover checklist',
+    )
+    cutover_plan_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable credential-safe cutover steps',
+    )
     migrate_parser = database_subparsers.add_parser(
         'migrate-sqlite',
         help='Dry-run or execute a SQLite-to-configured-database row copy',
@@ -217,6 +227,7 @@ def main():
 
         from musicround.helpers.database_config import (
             database_summary,
+            database_cutover_plan,
             database_uri_overrides_postgres_env,
             is_legacy_data_sqlite_uri,
             postgres_env_readiness,
@@ -231,12 +242,17 @@ def main():
         configured_managed_required = bool(app.config.get('DATABASE_REQUIRE_MANAGED'))
         preflight_requires_managed = args.database_action == 'preflight' and not allow_sqlite
         diagnostic_managed_required = preflight_requires_managed or configured_managed_required
-        if json_output:
+        config_error = None
+        if json_output or args.database_action == 'cutover-plan':
             try:
                 db_uri = _configured_database_uri_without_fallback(app)
             except ValueError as exc:
-                print(f"Database configuration error: {exc}", file=sys.stderr)
-                return 78
+                if args.database_action == 'cutover-plan':
+                    db_uri = None
+                    config_error = str(exc)
+                else:
+                    print(f"Database configuration error: {exc}", file=sys.stderr)
+                    return 78
             if db_uri:
                 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
         else:
@@ -251,6 +267,15 @@ def main():
         summary = database_summary(db_uri)
         readiness = postgres_env_readiness(os.environ)
         issues = []
+        if config_error:
+            issues.append(
+                {
+                    "code": "postgres_env_incomplete",
+                    "severity": "error",
+                    "message": config_error,
+                    "hint": "complete the missing PG* secret keys before cutover",
+                }
+            )
         if diagnostic_managed_required and summary["backend"] == "unconfigured":
             issues.append(
                 {
@@ -314,6 +339,18 @@ def main():
             "postgres_env": readiness,
             "issues": issues,
         }
+        if args.database_action == 'cutover-plan':
+            plan = database_cutover_plan(diagnostics)
+            if json_output:
+                print(json.dumps(plan, indent=2, sort_keys=True))
+            else:
+                print(f"Database cutover status: {plan['status']}")
+                print(f"Database backend: {summary['backend']}")
+                print(f"Cutover ready: {plan['ok']}")
+                for item in plan["steps"]:
+                    print(f"- [{item['status']}] {item['title']}: {item['hint']}")
+                print(f"Next action: {plan['next_action']}")
+            return 0
         if json_output:
             print(json.dumps(diagnostics, indent=2, sort_keys=True))
             if any(issue["severity"] == "error" for issue in issues):

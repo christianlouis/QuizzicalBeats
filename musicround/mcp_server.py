@@ -116,6 +116,12 @@ def database_configuration_summary() -> dict[str, Any]:
 
 
 @mcp.tool()
+def database_cutover_plan() -> dict[str, Any]:
+    """Return credential-safe managed database cutover steps for agents."""
+    return _with_app_context(automation.database_cutover_plan_summary)
+
+
+@mcp.tool()
 def list_datastore_objects(
     object_type: str,
     filters: dict[str, Any] | None = None,

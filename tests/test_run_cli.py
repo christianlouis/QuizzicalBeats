@@ -415,6 +415,92 @@ def test_database_preflight_reports_missing_pg_keys_safely(monkeypatch, capsys):
     assert "Traceback" not in captured.err
 
 
+def test_database_cutover_plan_json_blocks_unconfigured_without_fallback(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    """Cutover planning should not create the local SQLite fallback."""
+    import run
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.delenv("DATABASE_REQUIRE_MANAGED", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "cutover-plan", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["database"]["backend"] == "unconfigured"
+    assert "configure_managed_database" in payload["blocked_steps"]
+    assert str(data_dir) not in captured.out
+    assert str(data_dir) not in captured.err
+    assert not data_dir.exists()
+
+
+def test_database_cutover_plan_json_accepts_complete_pg_env(monkeypatch, capsys):
+    """A complete PG* setup should produce a ready credential-safe plan."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.setenv("PGHOST", "postgres.example")
+    monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
+    monkeypatch.setenv("PGUSER", "qb_user")
+    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setenv("PGSSLMODE", "require")
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "cutover-plan", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["status"] == "ready"
+    assert payload["database"]["backend"] == "postgresql"
+    assert payload["blocked_steps"] == []
+    assert "dry_run_sqlite_migration" in payload["ready_steps"]
+    assert "super-secret-password" not in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_database_cutover_plan_reports_incomplete_pg_env_safely(monkeypatch, capsys):
+    """The cutover plan should keep going and report missing PG* key names."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.setenv("PGHOST", "postgres.example")
+    monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "cutover-plan", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["issues"][0]["code"] == "postgres_env_incomplete"
+    assert "PGPASSWORD" in payload["issues"][0]["message"]
+    assert "PGUSER" in payload["issues"][0]["message"]
+    assert "configure_managed_database" in payload["blocked_steps"]
+    assert "postgres.example" not in captured.out
+    assert "Traceback" not in captured.err
+
+
 def test_database_migrate_sqlite_refuses_sqlite_target_by_default(
     monkeypatch,
     capsys,

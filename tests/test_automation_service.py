@@ -579,10 +579,11 @@ class TestRoundAutomation:
             result = automation.database_configuration_summary()
 
         assert result["ok"] is True
-        assert result["status"] == "ok"
+        assert result["status"] == "warning"
         assert result["managed_required"] is True
         assert result["database"]["backend"] == "postgresql"
         assert result["postgres_env"]["complete"] is True
+        assert result["issues"][0]["code"] == "database_uri_overrides_postgres_env"
         assert result["postgres_env"]["present_required"] == [
             "PGHOST",
             "PGDATABASE",
@@ -592,6 +593,22 @@ class TestRoundAutomation:
         serialized = repr(result)
         assert "super-secret-password" not in serialized
         assert "postgresql://qb_user:***@postgres.internal/quizzicalbeats" in serialized
+
+    def test_database_cutover_plan_summary_blocks_legacy_sqlite(self, app):
+        """MCP agents should get next safe cutover steps without raw paths."""
+        with app.app_context():
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:////data/song_data.db"
+            app.config["DATABASE_BACKEND"] = "sqlite"
+            app.config["DATABASE_REQUIRE_MANAGED"] = False
+
+            result = automation.database_cutover_plan_summary()
+
+        assert result["ok"] is False
+        assert result["status"] == "blocked"
+        assert result["database"]["backend"] == "sqlite"
+        assert "configure_managed_database" in result["blocked_steps"]
+        assert "backup_legacy_sqlite" in result["ready_steps"]
+        assert "/data/song_data.db" not in repr(result)
 
     def test_list_round_access_events_requires_owner_or_admin_requester(self, app):
         with app.app_context():

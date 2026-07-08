@@ -35,6 +35,15 @@ database to a managed SQL database without exposing credentials in logs or Git.
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database status --json
    ```
 
+   To let an agent or operator decide the next cutover action, print the
+   credential-safe checklist. It never prints database passwords or raw SQLite
+   file paths, and in `--json` mode it is intended for MCP/automation
+   hand-offs:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database cutover-plan --json
+   ```
+
    Before the managed database cutover, run the stricter preflight. It fails
    with exit code `78` while legacy SQLite is still active or the PG*
    configuration is incomplete:

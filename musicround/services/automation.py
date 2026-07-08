@@ -22,7 +22,9 @@ from sqlalchemy import or_
 from musicround import db
 from musicround.helpers.database_config import (
     bool_from_config,
+    database_cutover_plan,
     database_summary,
+    database_uri_overrides_postgres_env,
     is_legacy_data_sqlite_uri,
     managed_database_requirement_error,
     postgres_env_readiness,
@@ -353,6 +355,21 @@ def database_configuration_summary() -> dict[str, Any]:
                 ),
             }
         )
+    if database_uri_overrides_postgres_env(os.environ):
+        issues.append(
+            {
+                "code": "database_uri_overrides_postgres_env",
+                "message": (
+                    "SQLALCHEMY_DATABASE_URI is overriding complete split "
+                    "PostgreSQL configuration."
+                ),
+                "severity": "warning",
+                "hint": (
+                    "Remove or blank SQLALCHEMY_DATABASE_URI before relying on "
+                    "PG* managed database secrets during cutover."
+                ),
+            }
+        )
 
     status = "ok"
     if any(issue["severity"] == "error" for issue in issues):
@@ -368,6 +385,11 @@ def database_configuration_summary() -> dict[str, Any]:
         "postgres_env": postgres_readiness,
         "issues": issues,
     }
+
+
+def database_cutover_plan_summary() -> dict[str, Any]:
+    """Return a credential-safe managed database cutover plan for agents."""
+    return database_cutover_plan(database_configuration_summary())
 
 
 def _record_round_access_event(

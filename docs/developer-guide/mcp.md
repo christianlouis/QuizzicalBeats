@@ -39,6 +39,7 @@ The MCP server exposes these tools:
 | `add_song` | Add or update a catalog song, including platform IDs and tags. |
 | `datastore_schema` | Describe all mapped datastore object types, columns, and primary keys. |
 | `database_configuration_summary` | Report credential-safe database backend, managed-DB guard, and PG* readiness for cutover checks. |
+| `database_cutover_plan` | Return credential-safe managed database cutover steps and the next blocked or ready action. |
 | `list_datastore_objects` | List persisted objects with optional exact-match filters, ordering, limit, and offset. |
 | `get_datastore_object` | Fetch one persisted object by primary key. |
 | `create_datastore_object` | Create one persisted object from scalar column fields. |
