@@ -168,15 +168,15 @@ explicitly set.
 When `inspect_round_package`, `round_repair_report`, or `send_round_email`
 returns `needs_substitution`, read the failed `preview_checks` position or the
 report's `failed_positions`, call `suggest_replacement_songs`, then call
-`replace_round_song`. The replacement tool accepts a `round_id` plus 1-based
-`position`, a standalone `song_id`, free-text `theme`, `artist`/`title`, and
-preference hints such as `preferred_genre`, `preferred_decade`,
-`preferred_mood`, `preferred_artist`, `prefer_same_genre`,
-`prefer_same_decade`, and structured `constraints`. Candidates include
-`platform_ids`, `preview`, `usage_history`, `constraint_matches`, and
-human-readable `explanation` fields so an agent can pick a playable, fresh
-replacement and explain the choice. Regenerate assets after any replacement
-because the generated MP3/PDF flags are invalidated.
+`replace_round_song`. A position-based replacement search must include both
+`round_id` and the 1-based `position`; otherwise use a standalone `song_id`,
+`artist`/`title`, free-text `theme`, or preference hints such as
+`preferred_genre`, `preferred_decade`, `preferred_mood`, `preferred_artist`,
+`prefer_same_genre`, `prefer_same_decade`, and structured `constraints`.
+Candidates include `platform_ids`, `preview`, `usage_history`,
+`constraint_matches`, and human-readable `explanation` fields so an agent can
+pick a playable, fresh replacement and explain the choice. Regenerate assets
+after any replacement because the generated MP3/PDF flags are invalidated.
 
 `inspect_round_package` distinguishes hard blockers from review warnings. The
 `ok` field is false only when blocking issues exist, while `warnings` and
