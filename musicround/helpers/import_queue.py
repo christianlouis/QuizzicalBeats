@@ -13,6 +13,8 @@ from sqlalchemy import update
 from sqlalchemy.exc import SQLAlchemyError
 
 from musicround.models import ImportJobRecord, User, db
+from musicround.helpers.database_config import bool_from_config
+from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.spotify_helper import get_spotify_token
 
@@ -27,6 +29,33 @@ def _safe_result_error_summary(errors: list[Any]) -> str | None:
     count = len(errors)
     suffix = "error" if count == 1 else "errors"
     return f"Import completed with {count} {suffix}. Check the server logs."
+
+
+def _import_job_email_notifications_enabled() -> bool:
+    return bool_from_config(current_app.config.get("IMPORT_JOB_EMAIL_NOTIFICATIONS", False))
+
+
+def _import_job_notification_body(record: ImportJobRecord) -> str:
+    status_label = "completed" if record.status == "completed" else "needs manual review"
+    lines = [
+        f"Import job #{record.id} {status_label}.",
+        "",
+        f"Source: {record.service_name} {record.item_type}",
+        f"Item: {record.item_id}",
+        f"Status: {record.status}",
+        f"Imported: {record.imported_count or 0}",
+        f"Skipped: {record.skipped_count or 0}",
+        f"Attempts: {record.attempt_count or 0}/{record.max_attempts or 1}",
+    ]
+    if record.item_url:
+        lines.append(f"Source URL: {record.item_url}")
+    if record.error_message:
+        lines.extend(["", f"Message: {record.error_message}"])
+    lines.extend([
+        "",
+        "Open the import queue in Quizzical Beats for repair or retry actions.",
+    ])
+    return "\n".join(lines)
 
 
 @dataclass(order=True)
@@ -275,10 +304,12 @@ class ImportWorker(threading.Thread):
                 imported_count, skipped_count, error_message = self._summarize_result(result)
                 self._mark_completed(record, imported_count, skipped_count, error_message)
                 db.session.commit()
+                self._notify_terminal_job(record)
             except Exception as exc:  # pylint: disable=broad-except
                 current_app.logger.error("Import job failed: %s", exc, exc_info=True)
                 db.session.rollback()
                 self._mark_failed(record, IMPORT_JOB_FAILURE_MESSAGE)
+                self._notify_terminal_job(record)
             finally:
                 if logged_in:
                     logout_user()
@@ -359,6 +390,48 @@ class ImportWorker(threading.Thread):
         record.completed_at = datetime.utcnow()
         db.session.add(record)
         db.session.commit()
+
+    def _notify_terminal_job(self, record: Optional[ImportJobRecord]) -> None:
+        if (
+            not record
+            or record.status not in {"completed", "dead_letter"}
+            or not _import_job_email_notifications_enabled()
+        ):
+            return
+
+        user = db.session.get(User, record.user_id)
+        recipient = getattr(user, "email", None)
+        if not recipient:
+            current_app.logger.info(
+                "Import job %s reached %s but user %s has no email address",
+                record.id,
+                record.status,
+                record.user_id,
+            )
+            return
+
+        subject_status = "completed" if record.status == "completed" else "needs review"
+        subject = f"Quizzical Beats import job #{record.id} {subject_status}"
+        try:
+            success, message = send_email(
+                recipient=recipient,
+                subject=subject,
+                body_text=_import_job_notification_body(record),
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            current_app.logger.warning(
+                "Import job %s notification failed before delivery: %s",
+                record.id,
+                exc,
+                exc_info=True,
+            )
+            return
+        if not success:
+            current_app.logger.warning(
+                "Import job %s notification was not delivered: %s",
+                record.id,
+                message,
+            )
 
     @staticmethod
     def _summarize_result(result: Any) -> tuple[int, int, Optional[str]]:

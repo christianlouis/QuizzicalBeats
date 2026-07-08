@@ -382,6 +382,75 @@ class TestImportWorker:
             assert updated.imported_count == 3
             assert updated.skipped_count == 1
 
+    def test_process_job_sends_completion_notification_when_enabled(self, app):
+        """Completed imports should notify the owning user when configured."""
+        with app.app_context():
+            app.config['IMPORT_JOB_EMAIL_NOTIFICATIONS'] = True
+            user = User(username='notifyworker', email='notifyworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='deezer',
+                item_type='playlist',
+                item_id='notify-playlist',
+                user_id=user.id,
+                priority=1,
+            )
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with (
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+                patch('musicround.helpers.import_queue.send_email') as mock_send,
+            ):
+                mock_import.return_value = {'imported_count': 4, 'skipped_count': 2}
+                mock_send.return_value = (True, 'sent')
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record.id)
+            assert updated.status == 'completed'
+            mock_send.assert_called_once()
+            kwargs = mock_send.call_args.kwargs
+            assert kwargs['recipient'] == 'notifyworker@example.com'
+            assert f'import job #{record.id} completed' in kwargs['subject']
+            assert 'Imported: 4' in kwargs['body_text']
+            assert 'Skipped: 2' in kwargs['body_text']
+
+    def test_process_job_does_not_send_completion_notification_by_default(self, app):
+        """Import completion emails remain opt-in for deployments."""
+        with app.app_context():
+            user = User(username='silentworker', email='silentworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='deezer',
+                item_type='playlist',
+                item_id='silent-playlist',
+                user_id=user.id,
+                priority=1,
+            )
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with (
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+                patch('musicround.helpers.import_queue.send_email') as mock_send,
+            ):
+                mock_import.return_value = {'imported_count': 1, 'skipped_count': 0}
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record.id)
+            assert updated.status == 'completed'
+            mock_send.assert_not_called()
+
     def test_process_job_summarizes_import_result_errors_safely(self, app):
         """Completed imports should not persist raw provider result errors."""
         with app.app_context():
@@ -486,6 +555,45 @@ class TestImportWorker:
             assert 'manual review required' in updated.error_message
             assert 'Import job failed. Check the server logs.' in updated.error_message
             assert 'Spotify exploded' not in updated.error_message
+
+    def test_process_job_sends_dead_letter_notification_when_enabled(self, app):
+        """Exhausted imports should notify the owner for manual repair."""
+        with app.app_context():
+            app.config['IMPORT_JOB_EMAIL_NOTIFICATIONS'] = True
+            user = User(username='deadnotify', email='deadnotify@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='bad-notify',
+                user_id=user.id,
+                priority=1,
+                max_attempts=1,
+            )
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with (
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+                patch('musicround.helpers.import_queue.send_email') as mock_send,
+            ):
+                mock_import.side_effect = RuntimeError('provider secret exploded')
+                mock_send.return_value = (True, 'sent')
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record.id)
+            assert updated.status == 'dead_letter'
+            mock_send.assert_called_once()
+            kwargs = mock_send.call_args.kwargs
+            assert kwargs['recipient'] == 'deadnotify@example.com'
+            assert f'import job #{record.id} needs review' in kwargs['subject']
+            assert 'manual review required' in kwargs['body_text']
+            assert 'provider secret exploded' not in kwargs['body_text']
 
     def test_process_job_unknown_user_does_not_import(self, app):
         """Test that jobs for missing users are ignored."""

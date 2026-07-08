@@ -270,6 +270,7 @@ For larger deployments, use PostgreSQL:
    MAIL_PASSWORD=your-password
    MAIL_SENDER=quizzical-beats@example.com
    MAIL_RECIPIENT=admin@example.com
+   IMPORT_JOB_EMAIL_NOTIFICATIONS=False
    ```
 
 ## Troubleshooting Installation Issues

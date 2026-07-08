@@ -163,7 +163,11 @@ MAIL_USERNAME=your-email-username
 MAIL_PASSWORD=your-email-password
 MAIL_SENDER=quizzical-beats@example.com
 MAIL_RECIPIENT=admin@example.com
+IMPORT_JOB_EMAIL_NOTIFICATIONS=False
 ```
+
+Set `IMPORT_JOB_EMAIL_NOTIFICATIONS=True` to notify the owning user when an
+import job completes or exhausts automatic retries and needs manual review.
 
 ### Automation Settings
 
