@@ -9,8 +9,9 @@ import json
 import math
 import secrets
 import tempfile
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any
 
 import requests
 from flask import current_app
@@ -2075,12 +2076,27 @@ def suggest_replacement_songs(
     verify_previews: bool = False,
     min_preview_seconds: float = 20.0,
 ) -> dict[str, Any]:
-    """Suggest catalog songs that can replace a failed or overused song."""
+    """Suggest catalog songs that can replace a failed, unplayable, or overused song.
+
+    Callers may anchor the search to a round position, an existing catalog song,
+    artist/title text, or free-form planning hints. The function is read-only:
+    it ranks candidates and explains risks, but never mutates the round.
+    """
     if limit < 1 or limit > 50:
         raise AutomationError("limit must be between 1 and 50.")
+    if not math.isfinite(min_preview_seconds) or min_preview_seconds < 1 or min_preview_seconds > 60:
+        raise AutomationError("min_preview_seconds must be between 1 and 60.")
+    if position is not None and round_id is None:
+        raise AutomationError("position can only be used together with round_id.")
 
-    if constraints is not None and not isinstance(constraints, dict):
-        raise AutomationError("constraints must be an object when provided.")
+    query = _normalize_optional_text(query)
+    artist = _normalize_optional_text(artist)
+    title = _normalize_optional_text(title)
+    theme = _normalize_optional_text(theme)
+    preferred_genre = _normalize_optional_text(preferred_genre)
+    preferred_mood = _normalize_optional_text(preferred_mood)
+    preferred_artist = _normalize_optional_text(preferred_artist)
+    constraints = _normalize_replacement_constraints(constraints)
 
     round_obj = None
     song_ids: list[int] = []
@@ -2103,9 +2119,9 @@ def suggest_replacement_songs(
     if original_song is None and (artist or title):
         lookup = Song.query
         if artist:
-            lookup = lookup.filter(Song.artist.ilike(artist.strip()))
+            lookup = lookup.filter(Song.artist.ilike(artist))
         if title:
-            lookup = lookup.filter(Song.title.ilike(title.strip()))
+            lookup = lookup.filter(Song.title.ilike(title))
         original_song = lookup.order_by(Song.used_count.asc(), Song.id.asc()).first()
 
     if round_obj is None and original_song is None and not any([query, theme, artist, title, preferred_genre, preferred_mood]):
@@ -2123,7 +2139,7 @@ def suggest_replacement_songs(
     if require_deezer_id:
         song_query = song_query.filter(Song.deezer_id.isnot(None))
     if query:
-        pattern = f"%{query.strip()}%"
+        pattern = f"%{query}%"
         song_query = song_query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
 
     candidates = song_query.limit(500).all()
@@ -2136,9 +2152,7 @@ def suggest_replacement_songs(
         target_artist = str(constraints.get("artist_relation") or constraints.get("preferred_artist") or "").strip()
     target_mood = (preferred_mood or "").strip()
     theme_terms = [part.casefold() for part in re.findall(r"[\w-]+", theme or "") if len(part) > 2]
-    raw_avoid_terms = (constraints or {}).get("avoid", [])
-    if isinstance(raw_avoid_terms, str):
-        raw_avoid_terms = [raw_avoid_terms]
+    raw_avoid_terms = constraints.get("avoid", [])
     explicit_avoid_terms = [
         str(part).casefold()
         for part in raw_avoid_terms
@@ -2295,7 +2309,7 @@ def suggest_replacement_songs(
             "preferred_artist": preferred_artist,
             "prefer_same_genre": prefer_same_genre,
             "prefer_same_decade": prefer_same_decade,
-            "constraints": constraints or {},
+            "constraints": constraints,
             "require_deezer_id": require_deezer_id,
             "verify_previews": verify_previews,
             "excluded_song_ids": sorted(excluded_ids),
@@ -4502,37 +4516,156 @@ def _normalize_brief_list(value: Iterable[Any] | str | None) -> list[str]:
     return normalized
 
 
+def _normalize_optional_text(value: str | None) -> str | None:
+    """Normalize optional free-text input.
+
+    Args:
+        value: Raw text value supplied by an MCP or service caller.
+
+    Returns:
+        Collapsed text with surrounding whitespace removed, or ``None`` when
+        the input is empty.
+    """
+    if value is None:
+        return None
+    return " ".join(str(value).strip().split()) or None
+
+
+def _normalize_replacement_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate and normalize replacement-suggestion constraints.
+
+    Args:
+        value: Optional structured constraint payload. The ``avoid`` field may
+            be a string, a sequence of strings, or ``None``.
+
+    Returns:
+        A shallow copy of the constraints with ``avoid`` normalized to a list
+        when provided.
+
+    Raises:
+        AutomationError: If the payload or the ``avoid`` field has an invalid
+            shape for MCP callers.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise AutomationError("constraints must be an object when provided.")
+
+    normalized = dict(value)
+    avoid = normalized.get("avoid")
+    if avoid is not None:
+        if isinstance(avoid, str):
+            normalized["avoid"] = [avoid]
+        elif isinstance(avoid, Mapping):
+            raise AutomationError("constraints.avoid must be a string or list of strings.")
+        elif isinstance(avoid, Sequence):
+            normalized["avoid"] = [str(item) for item in avoid if str(item).strip()]
+        else:
+            raise AutomationError("constraints.avoid must be a string or list of strings.")
+    elif "avoid" in normalized:
+        normalized["avoid"] = []
+    return normalized
+
+
+def _round_planning_constraints(
+    *,
+    desired_song_count: int,
+    language: str | None,
+    audience: str | None,
+    difficulty: str | None,
+    mood: str | None,
+    must_include: list[str],
+    avoid: list[str],
+) -> list[str]:
+    """Build the constraint strings exposed in a round-planning brief.
+
+    Args:
+        desired_song_count: Required number of songs for the finished round.
+        language: Optional language preference for copy and hints.
+        audience: Optional audience context for style and difficulty.
+        difficulty: Optional target difficulty.
+        mood: Optional mood or tone for the round.
+        must_include: Preferred anchor songs or artists.
+        avoid: Explicit exclusions supplied by the caller.
+
+    Returns:
+        Ordered human-readable constraints for agent planning.
+    """
+    constraints = [
+        f"Build exactly {desired_song_count} songs.",
+        "Every selected song needs a playable preview before email delivery.",
+        "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
+        "Prefer mainstream recognizability unless the theme explicitly asks for deeper cuts.",
+    ]
+    if language:
+        constraints.append(f"Use {language} for round copy, hints, and review notes.")
+    if audience:
+        constraints.append(f"Fit song choices and humor to this audience: {audience}.")
+    if difficulty:
+        constraints.append(f"Target difficulty: {difficulty}.")
+    if mood:
+        constraints.append(f"Target mood: {mood}.")
+    if must_include:
+        constraints.append(
+            "Try to include these anchors when they pass preview and duplicate checks: "
+            + "; ".join(must_include)
+            + "."
+        )
+    if avoid:
+        constraints.append("Avoid these explicit exclusions: " + "; ".join(avoid) + ".")
+    return constraints
+
+
 def _round_planning_constraint_explanations(
-    constraints: list[str],
+    desired_song_count: int,
     must_include: list[str],
     avoid: list[str],
 ) -> list[dict[str, str]]:
+    """Explain how agents should apply round-planning constraints.
+
+    Args:
+        desired_song_count: Required song count used by the primary constraint.
+        must_include: Preferred anchor songs or artists.
+        avoid: Explicit exclusions supplied by the caller.
+
+    Returns:
+        Structured selection and rejection guidance keyed by constraint type.
+    """
     explanations = [
         {
-            "constraint": constraints[0],
+            "key": "song_count",
+            "constraint": f"Build exactly {desired_song_count} songs.",
             "selection_guidance": "Select and verify the full target count before creating assets.",
             "rejection_guidance": "Reject drafts with too few playable songs or unresolved placeholders.",
         },
         {
-            "constraint": constraints[1],
+            "key": "preview_quality",
+            "constraint": "Every selected song needs a playable preview before email delivery.",
             "selection_guidance": "Prefer songs with known preview URLs and inspect previews before scheduling.",
             "rejection_guidance": "Reject songs without previews unless a replacement can be found immediately.",
         },
         {
-            "constraint": constraints[2],
+            "key": "recent_usage",
+            "constraint": "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
             "selection_guidance": "Use recent usage and quizmaster history to keep the round fresh.",
             "rejection_guidance": "Reject or justify recently used songs, especially for the same quizmaster.",
         },
     ]
     if must_include:
         explanations.append({
-            "constraint": "Honor must_include unless a track is unavailable or fails preview checks.",
+            "key": "must_include",
+            "constraint": (
+                "Try to include these anchors when they pass preview and duplicate checks: "
+                + "; ".join(must_include)
+                + "."
+            ),
             "selection_guidance": "Treat must_include entries as preferred anchors for search and candidate ranking.",
             "rejection_guidance": "Explain any skipped must_include item with availability, preview, or duplicate-risk evidence.",
         })
     if avoid:
         explanations.append({
-            "constraint": "Avoid excluded songs, artists, genres, eras, or moods listed in the brief.",
+            "key": "avoid",
+            "constraint": "Avoid these explicit exclusions: " + "; ".join(avoid) + ".",
             "selection_guidance": "Use avoid entries as negative filters before proposing candidates.",
             "rejection_guidance": "Reject candidates that match avoid entries unless the user explicitly overrides the brief.",
         })
@@ -4678,7 +4811,31 @@ def round_planning_brief(
     desired_song_count: int = 8,
     months: int = 3,
 ) -> dict[str, Any]:
-    """Build an agent-readable brief for planning a robust themed round."""
+    """Build an agent-readable planning packet for a robust themed round.
+
+    The returned payload is designed for MCP clients: it separates user-facing
+    brief fields from operational context, recent-usage signals, constraints,
+    and guidance an agent should use before creating or sending assets.
+
+    Args:
+        user_id: Quizmaster user ID used for personalization and recent usage.
+        quiz_date: Optional quiz date for seasonal and scheduling context.
+        theme: Optional round theme.
+        language: Optional language preference for copy and hints.
+        audience: Optional audience context for tone and song familiarity.
+        difficulty: Optional target difficulty.
+        mood: Optional desired mood or style.
+        must_include: Optional anchor songs, artists, genres, or ideas.
+        avoid: Optional exclusions for songs, artists, genres, eras, or moods.
+        notes: Optional free-text planning notes from the quizmaster.
+        desired_song_count: Required number of playable songs.
+        months: Recent-usage lookback window in months.
+
+    Returns:
+        A nested planning payload containing the normalized brief,
+        round-planning context, constraints, constraint explanations, recent
+        usage data, and an agent prompt.
+    """
     if desired_song_count < 1 or desired_song_count > 25:
         raise AutomationError("desired_song_count must be between 1 and 25.")
 
@@ -4701,28 +4858,15 @@ def round_planning_brief(
         elif parsed_date.month in {6, 7, 8}:
             date_notes.append("Seasonal angle available: summer, festivals, travel.")
 
-    constraints = [
-        f"Build exactly {desired_song_count} songs.",
-        "Every selected song needs a playable preview before email delivery.",
-        "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
-        "Prefer mainstream recognizability unless the theme explicitly asks for deeper cuts.",
-    ]
-    if normalized_language:
-        constraints.append(f"Use {normalized_language} for round copy, hints, and review notes.")
-    if normalized_audience:
-        constraints.append(f"Fit song choices and humor to this audience: {normalized_audience}.")
-    if normalized_difficulty:
-        constraints.append(f"Target difficulty: {normalized_difficulty}.")
-    if normalized_mood:
-        constraints.append(f"Target mood: {normalized_mood}.")
-    if normalized_must_include:
-        constraints.append(
-            "Try to include these anchors when they pass preview and duplicate checks: "
-            + "; ".join(normalized_must_include)
-            + "."
-        )
-    if normalized_avoid:
-        constraints.append("Avoid these explicit exclusions: " + "; ".join(normalized_avoid) + ".")
+    constraints = _round_planning_constraints(
+        desired_song_count=desired_song_count,
+        language=normalized_language,
+        audience=normalized_audience,
+        difficulty=normalized_difficulty,
+        mood=normalized_mood,
+        must_include=normalized_must_include,
+        avoid=normalized_avoid,
+    )
 
     brief = {
         "theme": normalized_theme,
@@ -4739,7 +4883,7 @@ def round_planning_brief(
         "notes": normalized_notes,
     }
     constraint_explanations = _round_planning_constraint_explanations(
-        constraints,
+        desired_song_count,
         must_include=normalized_must_include,
         avoid=normalized_avoid,
     )

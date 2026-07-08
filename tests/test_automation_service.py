@@ -573,6 +573,59 @@ class TestRoundAutomation:
             assert result["suggestions"][0]["constraint_matches"]["mood"] is True
             assert result["suggestions"][1]["constraint_matches"]["avoid"] is True
 
+    def test_suggest_replacement_songs_validates_position_and_preview_inputs(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="position"):
+                automation.suggest_replacement_songs(position=1)
+
+            with pytest.raises(automation.AutomationError, match="min_preview_seconds"):
+                automation.suggest_replacement_songs(query="anthem", min_preview_seconds=0)
+
+            with pytest.raises(automation.AutomationError, match="min_preview_seconds"):
+                automation.suggest_replacement_songs(query="anthem", min_preview_seconds=float("nan"))
+
+            with pytest.raises(automation.AutomationError, match=r"constraints\.avoid"):
+                automation.suggest_replacement_songs(
+                    query="anthem",
+                    constraints={"avoid": object()},
+                )
+
+            with pytest.raises(automation.AutomationError, match=r"constraints\.avoid"):
+                automation.suggest_replacement_songs(
+                    query="anthem",
+                    constraints={"avoid": {"artist": "A"}},
+                )
+
+    def test_suggest_replacement_songs_normalizes_text_inputs_and_filters(self, app):
+        with app.app_context():
+            _create_song(
+                title="Fresh Anthem",
+                artist="Catalog Band",
+                genre="Rock",
+                year=2001,
+                deezer_id=130,
+                preview_url="https://example.test/fresh.mp3",
+            )
+
+            result = automation.suggest_replacement_songs(
+                query="  Fresh   Anthem  ",
+                theme="  big   chorus  ",
+                constraints={"avoid": "skip this"},
+            )
+
+            assert result["filters"]["query"] == "Fresh Anthem"
+            assert result["filters"]["theme"] == "big chorus"
+            assert result["filters"]["constraints"] == {"avoid": ["skip this"]}
+            assert result["count"] == 1
+
+            none_result = automation.suggest_replacement_songs(
+                query="  Fresh   Anthem  ",
+                constraints={"avoid": None},
+            )
+
+            assert none_result["filters"]["constraints"] == {"avoid": []}
+            assert none_result["count"] == 1
+
     def test_suggest_additional_songs_excludes_current_round(self, app):
         with app.app_context():
             in_round = _create_song(title="Already In Round", artist="A", deezer_id=200)
@@ -3215,6 +3268,9 @@ class TestAgentPlanningAutomation:
                 "rejection_guidance" in item
                 for item in result["constraint_explanations"]
             )
+            assert {"song_count", "preview_quality", "recent_usage"}.issubset(
+                {item["key"] for item in result["constraint_explanations"]}
+            )
             assert "agent_prompt" in result
 
     def test_round_planning_brief_normalizes_single_item_constraints(self, app):
@@ -3235,7 +3291,7 @@ class TestAgentPlanningAutomation:
             assert result["brief"]["desired_song_count"] == 10
             assert result["round_planning_context"]["quizmaster_context"]["quizmaster"]["username"] == "agent"
             assert any(
-                explanation["selection_guidance"].startswith("Treat must_include")
+                explanation["key"] == "must_include"
                 for explanation in result["round_planning_context"]["constraint_explanations"]
             )
 

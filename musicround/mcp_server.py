@@ -523,7 +523,7 @@ def suggest_replacement_songs(
     verify_previews: bool = False,
     min_preview_seconds: float = 20.0,
 ) -> dict[str, Any]:
-    """Suggest replacement songs for a failed, unplayable, or overused song."""
+    """Suggest read-only replacement candidates for a failed, unplayable, or overused song."""
     return _with_app_context(
         automation.suggest_replacement_songs,
         round_id=round_id,
@@ -648,7 +648,7 @@ def round_planning_brief(
     desired_song_count: int = 8,
     months: int = 3,
 ) -> dict[str, Any]:
-    """Build an agent-readable brief for planning a robust themed music round."""
+    """Build structured planning context before an agent creates a themed music round."""
     return _with_app_context(
         automation.round_planning_brief,
         user_id=user_id,
