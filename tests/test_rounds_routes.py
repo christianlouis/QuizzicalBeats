@@ -62,9 +62,32 @@ def _passing_round_quality():
     }
 
 
+class _PreviewResponse:
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=8192):
+        yield b'ID3 preview'
+
+
+class _DeezerPreviewStub:
+    def __init__(self, preview_url='https://example.test/preview.mp3'):
+        self.preview_url = preview_url
+
+    def get_track(self, deezer_id):
+        return {'id': deezer_id, 'preview': self.preview_url}
+
+
 def _user_id(app, username):
     with app.app_context():
         return User.query.filter_by(username=username).one().id
+
+
+def _set_song_deezer_id(app, song_id, deezer_id='123'):
+    with app.app_context():
+        song = db.session.get(Song, song_id)
+        song.deezer_id = deezer_id
+        db.session.commit()
 
 
 class TestRoundsListRoute:
@@ -1420,6 +1443,7 @@ class TestLegacyEmptyRoundRoutes:
         """First-time MP3 generation should report the generated machine status."""
         _login(app, client)
         song_id = _create_song(app, title='Generated MP3 Song')
+        _set_song_deezer_id(app, song_id)
         round_id = _create_round(app, [song_id], name='Generated MP3 Round')
         mp3_path = os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3')
 
@@ -1428,10 +1452,14 @@ class TestLegacyEmptyRoundRoutes:
                 handle.write(b'NEW')
             return None
 
+        app.config['deezer'] = _DeezerPreviewStub()
         with patch(
             'musicround.routes.rounds.AudioSegment.from_mp3',
             return_value=AudioSegment.silent(duration=100),
-        ) as mock_from_mp3, patch('pydub.audio_segment.AudioSegment.export', fake_export):
+        ) as mock_from_mp3, patch(
+            'musicround.routes.rounds.requests.get',
+            return_value=_PreviewResponse(),
+        ), patch('pydub.audio_segment.AudioSegment.export', fake_export):
             response = client.post(
                 f'/rounds/round/{round_id}/mp3',
                 headers={'X-Requested-With': 'XMLHttpRequest'},
@@ -1449,6 +1477,7 @@ class TestLegacyEmptyRoundRoutes:
         """force=true should bypass the existing-file shortcut and render again."""
         _login(app, client)
         song_id = _create_song(app, title='Force MP3 Song')
+        _set_song_deezer_id(app, song_id)
         round_id = _create_round(app, [song_id], name='Force MP3 Round')
         mp3_path = os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3')
         with open(mp3_path, 'wb') as handle:
@@ -1464,10 +1493,14 @@ class TestLegacyEmptyRoundRoutes:
                 handle.write(b'NEW')
             return None
 
+        app.config['deezer'] = _DeezerPreviewStub()
         with patch(
             'musicround.routes.rounds.AudioSegment.from_mp3',
             return_value=AudioSegment.silent(duration=100),
-        ) as mock_from_mp3, patch('pydub.audio_segment.AudioSegment.export', fake_export):
+        ) as mock_from_mp3, patch(
+            'musicround.routes.rounds.requests.get',
+            return_value=_PreviewResponse(),
+        ), patch('pydub.audio_segment.AudioSegment.export', fake_export):
             response = client.post(
                 f'/rounds/round/{round_id}/mp3',
                 data={'force': 'true'},
@@ -1481,6 +1514,66 @@ class TestLegacyEmptyRoundRoutes:
         assert mock_from_mp3.called
         with open(mp3_path, 'rb') as handle:
             assert handle.read() == b'NEW'
+
+    def test_round_mp3_fails_when_song_has_no_deezer_preview_identity(self, app, client):
+        """MP3 generation must not silently export rounds with skipped songs."""
+        _login(app, client)
+        song_id = _create_song(app, title='No Deezer ID Song')
+        round_id = _create_round(app, [song_id], name='No Deezer ID Round')
+        mp3_path = os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3')
+
+        with (
+            patch(
+                'musicround.routes.rounds.AudioSegment.from_mp3',
+                return_value=AudioSegment.silent(duration=100),
+            ),
+            patch('pydub.audio_segment.AudioSegment.export') as mock_export,
+        ):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        payload = response.get_json()
+        assert response.status_code == 422
+        assert payload['success'] is False
+        assert payload['error'] == 'Song preview audio is missing. Replace the song and try again.'
+        assert not os.path.exists(mp3_path)
+        mock_export.assert_not_called()
+        with app.app_context():
+            assert db.session.get(Round, round_id).mp3_generated is False
+
+    def test_round_mp3_fails_when_deezer_track_has_no_preview(self, app, client):
+        """Provider tracks without preview URLs should force replacement before export."""
+        _login(app, client)
+        song_id = _create_song(app, title='No Preview Song')
+        _set_song_deezer_id(app, song_id)
+        round_id = _create_round(app, [song_id], name='No Preview Round')
+        mp3_path = os.path.join(app.config['ROUND_MP3_DIR'], f'round_{round_id}.mp3')
+        app.config['deezer'] = _DeezerPreviewStub(preview_url=None)
+
+        with (
+            patch(
+                'musicround.routes.rounds.AudioSegment.from_mp3',
+                return_value=AudioSegment.silent(duration=100),
+            ),
+            patch('musicround.routes.rounds.requests.get') as mock_get,
+            patch('pydub.audio_segment.AudioSegment.export') as mock_export,
+        ):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        payload = response.get_json()
+        assert response.status_code == 422
+        assert payload['success'] is False
+        assert payload['error'] == 'Song preview audio is missing. Replace the song and try again.'
+        assert not os.path.exists(mp3_path)
+        mock_get.assert_not_called()
+        mock_export.assert_not_called()
+        with app.app_context():
+            assert db.session.get(Round, round_id).mp3_generated is False
 
     def test_round_pdf_hides_generation_exception_details(self, app, client):
         """PDF generation failures should return a stable safe message."""

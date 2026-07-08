@@ -78,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Blocked MP3 generation when a round song has no Deezer preview identity or
+  provider preview URL, preventing successful partial 5/6/7-song renders.
 - Relaxed the round package duration gate so small MP3 length differences are
   reported as review warnings while full missing-song-scale mismatches still
   block delivery.

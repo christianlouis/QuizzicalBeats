@@ -35,6 +35,7 @@ rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
 
 ROUND_MP3_BASE_AUDIO_ERROR = "Required round audio could not be loaded. Check the server logs."
 ROUND_MP3_NUMBER_AUDIO_ERROR = "Round number audio could not be loaded. Check the server logs."
+ROUND_MP3_PREVIEW_MISSING_ERROR = "Song preview audio is missing. Replace the song and try again."
 ROUND_MP3_PREVIEW_DOWNLOAD_ERROR = "Song preview audio could not be downloaded. Check the server logs."
 ROUND_MP3_PREVIEW_PROCESSING_ERROR = "Song preview audio could not be processed. Check the server logs."
 ROUND_MP3_EXPORT_ERROR = "MP3 generation failed. Check the server logs."
@@ -1102,6 +1103,10 @@ def round_mp3(round_id):
             # Traditional form submission, send file
             return send_file(mp3_file_path, as_attachment=True)
 
+    if force_regenerate and round.mp3_generated:
+        round.mp3_generated = False
+        db.session.commit()
+
     # Load intro, outro, and replay audio segments - using user's custom ones if available
     try:
         # Use get_mp3_path helper to get the appropriate path for each MP3 type
@@ -1153,9 +1158,12 @@ def round_mp3(round_id):
                     current_app.logger.info(f"Deezer track info: {track}")  # Log the track info
                     preview_url = track.get('preview')
                     if not preview_url:
-                        current_app.logger.warning(f"No preview available for {song.title} (Deezer ID: {song.deezer_id})")
-                        song_segments.append(None)
-                        continue
+                        return _round_generation_failure_response(
+                            round_id,
+                            f"No preview available for {song.title} (Deezer ID: {song.deezer_id})",
+                            ROUND_MP3_PREVIEW_MISSING_ERROR,
+                            status_code=422,
+                        )
 
                     # Download the song preview to a temporary file
                     response = requests.get(preview_url, stream=True)
@@ -1187,8 +1195,12 @@ def round_mp3(round_id):
                         ROUND_MP3_PREVIEW_PROCESSING_ERROR,
                     )
             else:
-                current_app.logger.warning(f"No Deezer ID available for {song.title}")
-                song_segments.append(None)
+                return _round_generation_failure_response(
+                    round_id,
+                    f"No Deezer ID available for {song.title}",
+                    ROUND_MP3_PREVIEW_MISSING_ERROR,
+                    status_code=422,
+                )
 
         # Add the replay announcement
         combined_audio += replay
