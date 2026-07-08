@@ -117,6 +117,53 @@ def main():
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
     health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
 
+    deployment_parser = subparsers.add_parser('deployment', help='Deployment smoke checks')
+    deployment_subparsers = deployment_parser.add_subparsers(
+        dest='deployment_action',
+        help='Deployment action to perform',
+    )
+    deployment_smoke_parser = deployment_subparsers.add_parser(
+        'smoke',
+        help='Run public deployment smoke checks against a QB base URL',
+    )
+    deployment_smoke_parser.add_argument(
+        '--base-url',
+        default=os.environ.get('QB_SMOKE_BASE_URL', 'https://qb.kaufdeinquiz.com'),
+        help='Public QB base URL to smoke-test. Defaults to QB_SMOKE_BASE_URL or production.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--timeout',
+        type=float,
+        default=10.0,
+        help='Per-request timeout in seconds.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--static-path',
+        default='/static/favicon.ico',
+        help='Static asset path that should expose cache headers.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--compression-path',
+        default='/users/login',
+        help='Public text-like path that should gzip when requested.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--require-hsts',
+        action='store_true',
+        help='Require Strict-Transport-Security even for non-HTTPS smoke targets.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--no-require-hsts',
+        action='store_true',
+        help='Do not require Strict-Transport-Security, useful for local HTTP smoke targets.',
+    )
+    deployment_smoke_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable smoke results.',
+    )
+
     performance_parser = subparsers.add_parser('performance', help='Performance smoke checks')
     performance_subparsers = performance_parser.add_subparsers(
         dest='performance_action',
@@ -453,6 +500,35 @@ def main():
             payload = application_health_payload()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
+    elif args.command == 'deployment':
+        if args.deployment_action == 'smoke':
+            from musicround.helpers.deployment_smoke import run_deployment_smoke
+
+            require_hsts = None
+            if args.require_hsts:
+                require_hsts = True
+            if args.no_require_hsts:
+                require_hsts = False
+            try:
+                result = run_deployment_smoke(
+                    args.base_url,
+                    timeout=args.timeout,
+                    require_hsts=require_hsts,
+                    static_path=args.static_path,
+                    compression_path=args.compression_path,
+                )
+            except ValueError as exc:
+                print(f"Deployment smoke error: {exc}", file=sys.stderr)
+                return 78
+            if args.json_output:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                status = "passed" if result["ok"] else "failed"
+                print(f"Deployment smoke {status} for {result['base_url']}:")
+                for check in result["checks"]:
+                    check_status = "ok" if check["ok"] else "failed"
+                    print(f"- {check['name']}: {check['message']} [{check_status}]")
+            return 0 if result["ok"] else 1
     elif args.command == 'performance':
         with contextlib.redirect_stdout(sys.stderr):
             app = create_app()

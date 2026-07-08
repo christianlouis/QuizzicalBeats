@@ -137,6 +137,17 @@ python run.py health check
 
 This command performs basic health checks and outputs the results to the console, which is useful for automated monitoring scripts.
 
+For a public post-deploy smoke that also verifies reverse-proxy/security
+headers, static asset caching, and gzip behavior, use:
+
+```bash
+python run.py deployment smoke --base-url https://your-qb-host.example --json
+```
+
+The default smoke target is `https://qb.kaufdeinquiz.com` or the
+`QB_SMOKE_BASE_URL` environment variable. Use `--no-require-hsts` only for local
+HTTP smoke targets where TLS is intentionally absent.
+
 ## Best Practices for System Health
 
 1. **Regular Monitoring**: Check the health dashboard at least weekly

@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added persisted round-audio script drafts, review status, and MCP helpers to approve script text before TTS audio generation.
 - Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
 - Added a local performance smoke CLI for catalog search, playlist parsing, round-review payloads, and MCP-like analytics summaries.
+- Added a deployment smoke CLI for public health, security headers, server header, static cache, and gzip checks.
 - Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
 - Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.
