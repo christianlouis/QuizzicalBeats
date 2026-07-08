@@ -29,6 +29,7 @@ issue after verification or continue with the remaining follow-up.
 
 ## Recently Closed From This Crosswalk
 
+- #36 Performance Pulse
 - #29 Search Supercharge
 - #25 Asset preview and approval page before email delivery
 - #21 Draft review and approval state for generated rounds

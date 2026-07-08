@@ -117,6 +117,57 @@ def main():
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
     health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
 
+    performance_parser = subparsers.add_parser('performance', help='Performance smoke checks')
+    performance_subparsers = performance_parser.add_subparsers(
+        dest='performance_action',
+        help='Performance action to perform',
+    )
+    smoke_parser = performance_subparsers.add_parser(
+        'smoke',
+        help='Run bounded local performance checks for search, imports, rounds, and MCP-like calls',
+    )
+    smoke_parser.add_argument(
+        '--sample-size',
+        type=int,
+        default=250,
+        help='Synthetic playlist/song sample size, between 8 and 5000.',
+    )
+    smoke_parser.add_argument(
+        '--synthetic',
+        action='store_true',
+        help='Create and clean up a temporary synthetic dataset for round-review checks.',
+    )
+    smoke_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable smoke results.',
+    )
+    smoke_parser.add_argument(
+        '--search-threshold-ms',
+        type=float,
+        default=250.0,
+        help='Maximum acceptable catalog search duration.',
+    )
+    smoke_parser.add_argument(
+        '--import-threshold-ms',
+        type=float,
+        default=250.0,
+        help='Maximum acceptable playlist parsing duration.',
+    )
+    smoke_parser.add_argument(
+        '--analytics-threshold-ms',
+        type=float,
+        default=500.0,
+        help='Maximum acceptable analytics/MCP summary duration.',
+    )
+    smoke_parser.add_argument(
+        '--round-review-threshold-ms',
+        type=float,
+        default=750.0,
+        help='Maximum acceptable round-review payload duration when --synthetic is used.',
+    )
+
     notifications_parser = subparsers.add_parser('notifications', help='Notification jobs')
     notifications_subparsers = notifications_parser.add_subparsers(
         dest='notifications_action',
@@ -402,6 +453,37 @@ def main():
             payload = application_health_payload()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
+    elif args.command == 'performance':
+        with contextlib.redirect_stdout(sys.stderr):
+            app = create_app()
+        with app.app_context():
+            if args.performance_action == 'smoke':
+                from musicround.helpers.performance_smoke import run_performance_smoke
+
+                try:
+                    result = run_performance_smoke(
+                        sample_size=args.sample_size,
+                        include_synthetic=args.synthetic,
+                        search_threshold_ms=args.search_threshold_ms,
+                        import_threshold_ms=args.import_threshold_ms,
+                        analytics_threshold_ms=args.analytics_threshold_ms,
+                        round_review_threshold_ms=args.round_review_threshold_ms,
+                    )
+                except ValueError as exc:
+                    print(f"Performance smoke error: {exc}", file=sys.stderr)
+                    return 78
+                if args.json_output:
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                else:
+                    status = "passed" if result["ok"] else "failed"
+                    print(f"Performance smoke {status}:")
+                    for check in result["checks"]:
+                        check_status = "ok" if check["ok"] else "slow"
+                        print(
+                            f"- {check['name']}: {check['duration_ms']}ms "
+                            f"/ {check['threshold_ms']}ms [{check_status}]"
+                        )
+                return 0 if result["ok"] else 1
     elif args.command == 'notifications':
         with contextlib.redirect_stdout(sys.stderr):
             app = create_app()
