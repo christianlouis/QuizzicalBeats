@@ -299,7 +299,7 @@ class Round(db.Model):
 
     @validates('review_status')
     def _validate_review_status(self, key, value):
-        allowed_statuses = {'draft', 'reviewed', 'approved', 'rejected'}
+        allowed_statuses = {'draft', 'reviewed', 'approved', 'blocked', 'rejected', 'sent'}
         if value not in allowed_statuses:
             raise ValueError(f"Invalid review_status: {value!r}")
         return value

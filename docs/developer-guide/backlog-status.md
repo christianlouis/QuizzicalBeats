@@ -30,6 +30,7 @@ issue after verification or continue with the remaining follow-up.
 ## Recently Closed From This Crosswalk
 
 - #25 Asset preview and approval page before email delivery
+- #21 Draft review and approval state for generated rounds
 - #56 Readiness and schedule status columns on the rounds list
 - #57 Normalized, curated round-builder tags
 - #58 Lazy-loaded song previews and paginated song library browsing

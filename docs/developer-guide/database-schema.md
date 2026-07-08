@@ -212,12 +212,17 @@ The `Round` table stores music quiz rounds.
 | mp3_generated         | Boolean      | Flag indicating if MP3 has been generated        |
 | pdf_generated         | Boolean      | Flag indicating if PDF has been generated        |
 | last_generated_at     | DateTime     | When files were last generated                   |
+| review_status         | String(20)   | draft, reviewed, approved, blocked, rejected, or sent |
+| review_notes          | Text         | Human review notes or latest blocking reason     |
+| approved_at           | DateTime     | When the round was approved for delivery         |
+| approved_by_id        | Integer      | User who approved the round, if known            |
 
 **Query indexes:**
 - `idx_round_created_at` supports recent-round lists.
 - `idx_round_generation_status` supports readiness and repair views.
 - `idx_round_owner_created` supports per-quizmaster round history.
 - `idx_round_public_token` supports token-based public round lookup.
+- `idx_round_review_status` supports review queues and approval filters.
 
 ### RoundShare
 

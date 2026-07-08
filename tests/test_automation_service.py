@@ -66,6 +66,15 @@ def _future_schedule_pair(days=7):
     return f"{scheduled_at.isoformat()}Z", f"{due_at.isoformat()}Z", scheduled_at
 
 
+def _approve_round(round_id, reviewer=None):
+    round_obj = db.session.get(Round, round_id)
+    round_obj.review_status = "approved"
+    round_obj.approved_at = datetime.utcnow()
+    round_obj.approved_by_id = reviewer.id if reviewer else None
+    db.session.commit()
+    return round_obj
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -1858,6 +1867,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
 
             with (
                 patch(
@@ -1888,6 +1898,71 @@ class TestAssetInspection:
             assert exc_info.value.details["report"]["status"] == "needs_substitution"
             export = RoundExport.query.filter_by(round_id=round_id).one()
             assert export.status == "failed"
+            round_obj = db.session.get(Round, round_id)
+            assert round_obj.review_status == "blocked"
+
+    def test_email_round_blocks_draft_until_approved(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Draft", artist="Artist")
+            round_id = automation.create_round(
+                name="Draft Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError, match="approve") as exc_info:
+                    automation.email_round(round_id, user_id=user.id)
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "review_not_approved"
+            assert exc_info.value.details["review_status"] == "draft"
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
+    def test_email_round_admin_override_can_send_draft_and_marks_sent(self, app, tmp_path):
+        with app.app_context():
+            user = _create_user()
+            admin = _create_user(username="admin", email="admin@example.test")
+            admin.is_admin = True
+            song = _create_song(title="Override", artist="Artist")
+            round_id = automation.create_round(
+                name="Override Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            pdf_path = tmp_path / "round.pdf"
+            mp3_path = tmp_path / "round.mp3"
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            mp3_path.write_bytes(b"mp3")
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": str(pdf_path)}, "mp3": {"path": str(mp3_path)}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+                patch(
+                    "musicround.services.automation.send_email",
+                    return_value=(True, "sent"),
+                ),
+            ):
+                result = automation.email_round(
+                    round_id,
+                    user_id=user.id,
+                    admin_override_user_id=admin.id,
+                    review_override_reason="Smoke test",
+                )
+
+            assert result["success"] is True
+            assert result["review_gate"]["override"] is True
+            round_obj = db.session.get(Round, round_id)
+            assert round_obj.review_status == "sent"
+            export = RoundExport.query.filter_by(round_id=round_id).one()
+            assert export.status == "success"
 
     def test_schedule_round_email_stores_pending_export(self, app):
         with app.app_context():
@@ -1899,6 +1974,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, _, scheduled_at = _future_schedule_pair()
 
             with (
@@ -1925,6 +2001,72 @@ class TestAssetInspection:
             assert export.destination == user.email
             assert export.subject == "Scheduled subject"
             assert result["export"]["scheduled_for"] == f"{scheduled_at.isoformat()}Z"
+
+    def test_schedule_round_email_blocks_draft_before_generation(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            song = _create_song(title="Draft Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Draft Scheduled Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            scheduled_for, _, _ = _future_schedule_pair()
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError, match="approve") as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for=scheduled_for,
+                        user_id=user.id,
+                    )
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "review_not_approved"
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
+    def test_round_review_payload_includes_review_inputs_and_repair_hints(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(
+                title="Payload Song",
+                artist="Payload Artist",
+                preview_url="https://example.test/payload.mp3",
+                used_count=2,
+                last_used=datetime.utcnow(),
+            )
+            round_id = automation.create_round(
+                name="Payload Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            script = RoundAudioScript(
+                round_id=round_id,
+                user_id=user.id,
+                script_type="intro",
+                text="Welcome to the payload round.",
+                status="approved",
+                selected=True,
+            )
+            db.session.add(script)
+            db.session.commit()
+
+            with patch(
+                "musicround.services.automation.round_repair_report",
+                return_value={"ok": False, "status": "needs_substitution", "hints": ["replace position 1"]},
+            ):
+                result = automation.round_review_payload(round_id, user_id=user.id)
+
+            assert result["round"]["review_status"] == "draft"
+            assert result["review_gate"]["requires_approval"] is True
+            assert result["songs"][0]["position"] == 1
+            assert result["songs"][0]["preview_status"]["has_preview"] is True
+            assert result["songs"][0]["usage_warning"]["song"]["id"] == song.id
+            assert result["audio_scripts"][0]["script_type"] == "intro"
+            assert result["quality"]["status"] == "needs_substitution"
+            assert result["repair_hints"] == ["replace position 1"]
 
     def test_schedule_round_email_blocks_past_delivery_before_generation(self, app):
         with app.app_context():
@@ -1960,6 +2102,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             existing = RoundExport(
                 round_id=round_id,
                 user_id=user.id,
@@ -2039,6 +2182,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, _, _ = _future_schedule_pair()
 
             with (
@@ -2076,6 +2220,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             app.config["ROUND_MP3_DIR"] = os.path.join(app.instance_path, "missing-rounds")
             scheduled_for, _, _ = _future_schedule_pair()
 
@@ -2197,6 +2342,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, _, _ = _future_schedule_pair()
             with (
                 patch(
@@ -2289,6 +2435,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
@@ -2330,6 +2477,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
@@ -2375,6 +2523,7 @@ class TestAssetInspection:
                 round_type="manual",
                 song_ids=[song.id],
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             scheduled_for, due_at, _ = _future_schedule_pair()
             with (
                 patch(
