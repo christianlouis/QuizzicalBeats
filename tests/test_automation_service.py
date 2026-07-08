@@ -3036,13 +3036,59 @@ class TestAgentPlanningAutomation:
                 user_id=user.id,
                 quiz_date="2026-07-09T19:00:00+02:00",
                 theme="festival headliners",
+                language="German",
+                audience="pub quiz regulars",
+                difficulty="medium",
+                mood="summer rock night",
+                must_include=["Electric Callboy", "Def Leppard"],
+                avoid=["recent repeats"],
+                notes="Lean humorous, but keep answers fair.",
             )
 
             assert result["theme"] == "festival headliners"
+            assert result["brief"]["theme"] == "festival headliners"
+            assert result["brief"]["language"] == "German"
+            assert result["brief"]["audience"] == "pub quiz regulars"
+            assert result["brief"]["difficulty"] == "medium"
+            assert result["brief"]["mood"] == "summer rock night"
+            assert result["brief"]["must_include"] == ["Electric Callboy", "Def Leppard"]
+            assert result["brief"]["avoid"] == ["recent repeats"]
+            assert result["brief"]["notes"] == "Lean humorous, but keep answers fair."
             assert result["desired_song_count"] == 8
             assert any("exactly 8 songs" in item for item in result["constraints"])
+            assert any("German" in item for item in result["constraints"])
+            assert any("Electric Callboy" in item for item in result["constraints"])
             assert any("summer" in item for item in result["date_notes"])
+            assert result["round_planning_context"]["brief"] == result["brief"]
+            assert result["round_planning_context"]["recent_usage"]["window_months"] == 3
+            assert any("User notes" in item for item in result["planning_notes"])
+            assert any(
+                "rejection_guidance" in item
+                for item in result["constraint_explanations"]
+            )
             assert "agent_prompt" in result
+
+    def test_round_planning_brief_normalizes_single_item_constraints(self, app):
+        with app.app_context():
+            user = _create_user(username="agent", email="agent@example.test")
+
+            result = automation.round_planning_brief(
+                user_id=user.id,
+                theme="  one hit wonders  ",
+                must_include="  Nena - 99 Luftballons  ",
+                avoid="  no schlager repeats  ",
+                desired_song_count=10,
+            )
+
+            assert result["brief"]["theme"] == "one hit wonders"
+            assert result["brief"]["must_include"] == ["Nena - 99 Luftballons"]
+            assert result["brief"]["avoid"] == ["no schlager repeats"]
+            assert result["brief"]["desired_song_count"] == 10
+            assert result["round_planning_context"]["quizmaster_context"]["quizmaster"]["username"] == "agent"
+            assert any(
+                explanation["selection_guidance"].startswith("Treat must_include")
+                for explanation in result["round_planning_context"]["constraint_explanations"]
+            )
 
     def test_planned_quiz_round_lifecycle(self, app):
         with app.app_context():
