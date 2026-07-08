@@ -466,6 +466,104 @@ class TestRoundAutomation:
             assert in_round.id not in suggestion_ids
             assert result["suggestions"][0]["same_genre"] is True
 
+    def test_suggest_replacement_songs_accepts_song_id_and_returns_agent_fields(self, app):
+        with app.app_context():
+            original = _create_song(
+                title="Overplayed",
+                artist="Known Artist",
+                genre="Country",
+                year=1998,
+                deezer_id=110,
+                used_count=7,
+            )
+            best = _create_song(
+                title="Fresh Country Hook",
+                artist="New Artist",
+                genre="Country",
+                year=1999,
+                deezer_id=111,
+                spotify_id="spotify-best",
+                isrc="TESTISRC1",
+                preview_url="https://example.test/best.mp3",
+            )
+            weaker = _create_song(
+                title="Fresh Pop Hook",
+                artist="Pop Artist",
+                genre="Pop",
+                year=2010,
+                deezer_id=112,
+                preview_url="https://example.test/weaker.mp3",
+            )
+
+            result = automation.suggest_replacement_songs(
+                song_id=original.id,
+                theme="country hook",
+                preferred_decade="1990s",
+                prefer_same_decade=True,
+                limit=2,
+            )
+
+            assert result["round_id"] is None
+            assert result["original_song"]["id"] == original.id
+            assert [song["id"] for song in result["suggestions"]] == [best.id, weaker.id]
+            first = result["suggestions"][0]
+            assert first["platform_ids"] == {
+                "spotify": "spotify-best",
+                "deezer": best.deezer_id,
+                "isrc": "TESTISRC1",
+            }
+            assert first["preview"]["available"] is True
+            assert first["preview"]["duration_seconds"] is None
+            assert first["usage_history"]["used_count"] == 0
+            assert first["constraint_matches"]["same_decade"] is True
+            assert any("catalog preview" in reason for reason in first["explanation"])
+
+    def test_suggest_replacement_songs_accepts_artist_title_theme_and_constraints(self, app):
+        with app.app_context():
+            original = _create_song(
+                title="Broken Anthem",
+                artist="Reference Band",
+                genre="Rock",
+                year=2004,
+                deezer_id=120,
+            )
+            avoid = _create_song(
+                title="Avoid This Anthem",
+                artist="Reference Band",
+                genre="Rock",
+                year=2004,
+                deezer_id=121,
+                preview_url="https://example.test/avoid.mp3",
+            )
+            candidate = _create_song(
+                title="Festival Anthem",
+                artist="Other Band",
+                genre="Rock",
+                year=2005,
+                deezer_id=122,
+                preview_url="https://example.test/candidate.mp3",
+            )
+            tag = Tag(name="festival")
+            candidate.tags.append(tag)
+            db.session.add(tag)
+            db.session.commit()
+
+            result = automation.suggest_replacement_songs(
+                artist="Reference Band",
+                title="Broken Anthem",
+                theme="festival anthem",
+                preferred_mood="festival",
+                constraints={"avoid": ["Avoid This"]},
+                limit=2,
+            )
+
+            suggestion_ids = [song["id"] for song in result["suggestions"]]
+            assert original.id not in suggestion_ids
+            assert candidate.id == suggestion_ids[0]
+            assert avoid.id == suggestion_ids[1]
+            assert result["suggestions"][0]["constraint_matches"]["mood"] is True
+            assert result["suggestions"][1]["constraint_matches"]["avoid"] is True
+
     def test_suggest_additional_songs_excludes_current_round(self, app):
         with app.app_context():
             in_round = _create_song(title="Already In Round", artist="A", deezer_id=200)

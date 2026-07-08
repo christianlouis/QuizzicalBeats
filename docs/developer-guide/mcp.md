@@ -65,7 +65,7 @@ The MCP server exposes these tools:
 | `seed_default_seed_sources` | Create or update the default mainstream chart and rock/metal festival source registry. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
 | `fetch_seed_source_candidates` | Read a seed source URL or pasted text into reviewable candidates without importing songs. |
-| `suggest_replacement_songs` | Suggest catalog songs for one failed round position. |
+| `suggest_replacement_songs` | Suggest catalog songs for a failed, unplayable, or overused song. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |
 | `suggest_additional_songs` | Suggest catalog songs that can complete an incomplete round. |
 | `add_round_song` | Add one song to a round and invalidate generated assets. |
@@ -155,8 +155,15 @@ explicitly set.
 When `inspect_round_package`, `round_repair_report`, or `send_round_email`
 returns `needs_substitution`, read the failed `preview_checks` position or the
 report's `failed_positions`, call `suggest_replacement_songs`, then call
-`replace_round_song`. Regenerate assets after any replacement because the
-generated MP3/PDF flags are invalidated.
+`replace_round_song`. The replacement tool accepts a `round_id` plus 1-based
+`position`, a standalone `song_id`, free-text `theme`, `artist`/`title`, and
+preference hints such as `preferred_genre`, `preferred_decade`,
+`preferred_mood`, `preferred_artist`, `prefer_same_genre`,
+`prefer_same_decade`, and structured `constraints`. Candidates include
+`platform_ids`, `preview`, `usage_history`, `constraint_matches`, and
+human-readable `explanation` fields so an agent can pick a playable, fresh
+replacement and explain the choice. Regenerate assets after any replacement
+because the generated MP3/PDF flags are invalidated.
 
 `inspect_round_package` distinguishes hard blockers from review warnings. The
 `ok` field is false only when blocking issues exist, while `warnings` and
