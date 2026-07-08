@@ -5,6 +5,7 @@ from musicround.helpers.email_helper import (
     EMAIL_CONFIGURATION_ERROR,
     EMAIL_DELIVERY_ERROR,
     send_email,
+    verify_email_delivery,
 )
 
 
@@ -156,3 +157,45 @@ def test_send_email_returns_safe_message_for_unexpected_transport_errors(app, mo
     assert message == EMAIL_DELIVERY_ERROR
     assert 'transport-secret' not in message
     assert 'token' not in message
+
+
+def test_verify_email_delivery_dry_run_reports_safe_configuration(app):
+    """Email verification dry-run should not expose SMTP values."""
+    _configure_mail(app)
+    app.config['MAIL_RECIPIENT'] = 'admin@example.test'
+
+    result = verify_email_delivery()
+
+    assert result['ok'] is True
+    assert result['dry_run'] is True
+    assert result['recipient'] == 'admin@example.test'
+    assert result['sent'] is False
+    assert result['config']['password_configured'] is True
+    assert 'secret' not in str(result).lower()
+
+
+def test_verify_email_delivery_send_uses_configured_recipient(app, monkeypatch):
+    """Email verification can send a test message when explicitly requested."""
+    _configure_mail(app)
+    app.config['MAIL_RECIPIENT'] = 'admin@example.test'
+
+    monkeypatch.setattr('musicround.helpers.email_helper.smtplib.SMTP', FakeSmtpServer)
+
+    result = verify_email_delivery(send=True)
+
+    assert result['ok'] is True
+    assert result['sent'] is True
+    assert FakeSmtpServer.instances[-1].sendmail_args[1] == 'admin@example.test'
+
+
+def test_verify_email_delivery_requires_recipient_when_sending(app):
+    """Sending a verification email should fail safely without a target."""
+    _configure_mail(app)
+    app.config['MAIL_RECIPIENT'] = None
+
+    result = verify_email_delivery(send=True)
+
+    assert result['ok'] is False
+    assert result['sent'] is False
+    assert 'recipient' in result['missing']
+    assert 'secret' not in str(result).lower()

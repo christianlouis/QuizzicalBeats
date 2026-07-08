@@ -121,6 +121,44 @@ def main():
         action='store_true',
         help='Send emails. Omit for the default dry run.',
     )
+    verify_email_parser = notifications_subparsers.add_parser(
+        'verify-email',
+        help='Validate SMTP configuration and optionally send a test email',
+    )
+    verify_email_parser.add_argument(
+        '--recipient',
+        help='Recipient for the optional test email. Defaults to MAIL_RECIPIENT.',
+    )
+    verify_email_parser.add_argument(
+        '--send',
+        action='store_true',
+        help='Send a test email. Omit for the default configuration-only dry run.',
+    )
+    admin_summary_parser = notifications_subparsers.add_parser(
+        'admin-summary',
+        help='Summarize actionable notification and repair work for administrators',
+    )
+    admin_summary_parser.add_argument(
+        '--recipient',
+        help='Recipient for the optional admin summary email. Defaults to MAIL_RECIPIENT.',
+    )
+    admin_summary_parser.add_argument(
+        '--window-hours',
+        type=int,
+        default=24,
+        help='How many recent hours of failed round exports to include.',
+    )
+    admin_summary_parser.add_argument(
+        '--limit',
+        type=int,
+        default=10,
+        help='Maximum number of rows to include per summary section.',
+    )
+    admin_summary_parser.add_argument(
+        '--send',
+        action='store_true',
+        help='Send the admin summary email. Omit for the default dry run.',
+    )
     
     # Parse the arguments
     args = parser.parse_args()
@@ -315,6 +353,23 @@ def main():
                 result = send_oauth_token_notifications(dry_run=not args.send)
                 print(json.dumps(result, indent=2, sort_keys=True))
                 return 1 if result.get("failed_count") else 0
+            if args.notifications_action == 'verify-email':
+                from musicround.helpers.email_helper import verify_email_delivery
+
+                result = verify_email_delivery(recipient=args.recipient, send=args.send)
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return 0 if result.get("ok") else 1
+            if args.notifications_action == 'admin-summary':
+                from musicround.helpers.notification_summary import send_notification_admin_summary
+
+                result = send_notification_admin_summary(
+                    recipient=args.recipient,
+                    window_hours=args.window_hours,
+                    limit=args.limit,
+                    dry_run=not args.send,
+                )
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return 1 if result.get("failed") else 0
     else:
         # Default: Run the Flask app
         app = create_app()

@@ -42,6 +42,53 @@ def test_notifications_oauth_tokens_command_defaults_to_dry_run(app, monkeypatch
     assert "secret" not in output.lower()
 
 
+def test_notifications_verify_email_command_defaults_to_dry_run(app, monkeypatch, capsys):
+    """Email verification CLI should be safe by default."""
+    import run
+
+    app.config.update(
+        MAIL_HOST="smtp.example.test",
+        MAIL_PORT=587,
+        MAIL_USERNAME="mailer",
+        MAIL_PASSWORD="secret",
+        MAIL_SENDER="sender@example.test",
+        MAIL_RECIPIENT="admin@example.test",
+    )
+    monkeypatch.setattr(sys, "argv", ["run.py", "notifications", "verify-email"])
+    monkeypatch.setattr(run, "create_app", lambda: app)
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["configured"] is True
+    assert payload["sent"] is False
+    assert payload["recipient"] == "admin@example.test"
+    assert "secret" not in output.lower()
+
+
+def test_notifications_admin_summary_command_defaults_to_dry_run(app, monkeypatch, capsys):
+    """Admin notification summaries should preview as safe JSON by default."""
+    import run
+
+    app.config["MAIL_RECIPIENT"] = "admin@example.test"
+    monkeypatch.setattr(sys, "argv", ["run.py", "notifications", "admin-summary"])
+    monkeypatch.setattr(run, "create_app", lambda: app)
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["sent"] is False
+    assert payload["recipient"] == "admin@example.test"
+    assert payload["summary"]["actionable_count"] == 0
+    assert "secret" not in output.lower()
+
+
 def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     """The database runbook command should flag the legacy production SQLite file."""
     import run

@@ -12,6 +12,70 @@ EMAIL_CONFIGURATION_ERROR = "Email server configuration is incomplete. Check the
 EMAIL_DELIVERY_ERROR = "Email delivery failed. Check the server logs."
 
 
+def email_configuration_status(required=False):
+    """Return SMTP configuration status without exposing configured values."""
+    required_keys = ["MAIL_HOST", "MAIL_PORT", "MAIL_USERNAME", "MAIL_PASSWORD", "MAIL_SENDER"]
+    missing = [key for key in required_keys if not current_app.config.get(key)]
+    return {
+        "configured": not missing,
+        "missing": missing if required else [],
+        "host_configured": bool(current_app.config.get("MAIL_HOST")),
+        "port_configured": bool(current_app.config.get("MAIL_PORT")),
+        "username_configured": bool(current_app.config.get("MAIL_USERNAME")),
+        "password_configured": bool(current_app.config.get("MAIL_PASSWORD")),
+        "sender_configured": bool(current_app.config.get("MAIL_SENDER")),
+        "tls_enabled": bool(current_app.config.get("MAIL_USE_TLS", False)),
+        "ssl_enabled": bool(current_app.config.get("MAIL_USE_SSL", False)),
+    }
+
+
+def verify_email_delivery(recipient=None, send=False):
+    """Verify SMTP configuration and optionally send a test message."""
+    status = email_configuration_status(required=True)
+    result = {
+        "ok": status["configured"],
+        "dry_run": not send,
+        "configured": status["configured"],
+        "missing": status["missing"],
+        "recipient": recipient or current_app.config.get("MAIL_RECIPIENT"),
+        "sent": False,
+        "message": "Email configuration is complete." if status["configured"] else EMAIL_CONFIGURATION_ERROR,
+        "config": {
+            "host_configured": status["host_configured"],
+            "port_configured": status["port_configured"],
+            "username_configured": status["username_configured"],
+            "password_configured": status["password_configured"],
+            "sender_configured": status["sender_configured"],
+            "tls_enabled": status["tls_enabled"],
+            "ssl_enabled": status["ssl_enabled"],
+        },
+    }
+    if not status["configured"] or not send:
+        return result
+    if not result["recipient"]:
+        result.update(
+            {
+                "ok": False,
+                "message": "Email verification recipient is missing.",
+                "missing": sorted(set(result["missing"] + ["recipient"])),
+            }
+        )
+        return result
+
+    success, message = send_email(
+        recipient=result["recipient"],
+        subject="Quizzical Beats email verification",
+        body_text=(
+            "This is a Quizzical Beats email verification message. "
+            "If you received it, SMTP delivery is working."
+        ),
+    )
+    result["sent"] = success
+    result["ok"] = success
+    result["message"] = "Email verification sent." if success else message
+    return result
+
+
 def send_email(recipient, subject, body_text, attachments=None):
     """
     Sends an email with optional attachments.

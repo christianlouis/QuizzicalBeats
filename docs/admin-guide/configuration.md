@@ -185,6 +185,31 @@ python run.py notifications oauth-tokens --send
 The job respects each user's notification preferences and suppresses duplicate
 warnings for the same service issue for 24 hours.
 
+Preview SMTP configuration without sending a message:
+
+```bash
+python run.py notifications verify-email
+```
+
+Send a test email to `MAIL_RECIPIENT`, or override the target with
+`--recipient`:
+
+```bash
+python run.py notifications verify-email --send
+```
+
+Preview an administrator digest of pending notification work:
+
+```bash
+python run.py notifications admin-summary
+```
+
+Send the digest to `MAIL_RECIPIENT`, or override the target with `--recipient`:
+
+```bash
+python run.py notifications admin-summary --send
+```
+
 When a round fails the package quality gate during email delivery or scheduling,
 Quizzical Beats sends the owning quizmaster a repair email with the generated
 quality report and repair hints. Users can disable these blocked-round emails
