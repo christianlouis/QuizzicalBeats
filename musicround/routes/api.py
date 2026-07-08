@@ -890,20 +890,23 @@ def search_songs():
     
     current_app.logger.info(f"User {current_user.username} searching for songs with query: {query}")
 
-    result = automation.find_songs(
-        query=query,
-        genre=request.args.get('genre'),
-        tag=request.args.get('tag'),
-        tags=request.args.getlist('tags') or None,
-        year=_int_arg('year'),
-        year_min=_int_arg('year_min'),
-        year_max=_int_arg('year_max'),
-        tempo_min=_float_arg('tempo_min'),
-        tempo_max=_float_arg('tempo_max'),
-        has_preview=_bool_arg('has_preview'),
-        unused_only=_bool_arg('unused_only') is True,
-        limit=_int_arg('limit', default=20, minimum=1, maximum=100) or 20,
-    )
+    try:
+        result = automation.find_songs(
+            query=query,
+            genre=request.args.get('genre'),
+            tag=request.args.get('tag'),
+            tags=request.args.getlist('tags') or None,
+            year=_int_arg('year'),
+            year_min=_int_arg('year_min'),
+            year_max=_int_arg('year_max'),
+            tempo_min=_float_arg('tempo_min'),
+            tempo_max=_float_arg('tempo_max'),
+            has_preview=_bool_arg('has_preview'),
+            unused_only=_bool_arg('unused_only') is True,
+            limit=_int_arg('limit', default=20, minimum=1, maximum=100) or 20,
+        )
+    except automation.AutomationError as exc:
+        return jsonify({'error': str(exc)}), 400
     result_songs = result['songs']
     song_ids = [song['id'] for song in result_songs]
     metadata_by_id = {

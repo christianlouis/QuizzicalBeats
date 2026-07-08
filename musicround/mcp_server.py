@@ -53,7 +53,12 @@ def find_songs(
     isrc: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Search the local Quizzical Beats catalog before adding a song."""
+    """Search the local Quizzical Beats catalog before adding a song.
+
+    Supports text, tag, year, tempo, preview, usage, and external-ID filters.
+    Returns songs with search metadata, facets, suggestions, analytics, and
+    cache details for agent workflows.
+    """
     return _with_app_context(
         automation.find_songs,
         query=query,

@@ -1138,6 +1138,7 @@ def add_song(
 
 
 def _find_songs_cache_key(**kwargs: Any) -> tuple[Any, ...]:
+    """Build a stable cache key from normalized search arguments."""
     normalized = []
     for key in sorted(kwargs):
         value = kwargs[key]
@@ -1148,6 +1149,7 @@ def _find_songs_cache_key(**kwargs: Any) -> tuple[Any, ...]:
 
 
 def _cache_get(cache_key: tuple[Any, ...]) -> dict[str, Any] | None:
+    """Return a cached search payload when it exists and is still fresh."""
     with _FIND_SONGS_CACHE_LOCK:
         cached = _FIND_SONGS_CACHE.get(cache_key)
         if not cached:
@@ -1166,6 +1168,7 @@ def _cache_get(cache_key: tuple[Any, ...]) -> dict[str, Any] | None:
 
 
 def _cache_set(cache_key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    """Store a search payload while bounding the process-local cache size."""
     with _FIND_SONGS_CACHE_LOCK:
         if len(_FIND_SONGS_CACHE) >= SEARCH_CACHE_MAX_ENTRIES:
             oldest_key = min(_FIND_SONGS_CACHE, key=lambda key: _FIND_SONGS_CACHE[key][0])
@@ -1174,6 +1177,7 @@ def _cache_set(cache_key: tuple[Any, ...], payload: dict[str, Any]) -> None:
 
 
 def _normalized_search_terms(*values: str | None) -> list[str]:
+    """Split user-supplied search fields into lowercase relevance terms."""
     terms: list[str] = []
     for value in values:
         if value:
@@ -1182,6 +1186,7 @@ def _normalized_search_terms(*values: str | None) -> list[str]:
 
 
 def _preview_available(song: Song) -> bool:
+    """Return whether a song has any playable preview URL."""
     return bool(
         song.preview_url
         or song.spotify_preview_url
@@ -1192,6 +1197,7 @@ def _preview_available(song: Song) -> bool:
 
 
 def _song_relevance(song: Song, terms: list[str]) -> tuple[int, list[str]]:
+    """Score a song against search terms and describe matched fields."""
     if not terms:
         return 0, []
     title = (song.title or "").casefold()
@@ -1244,6 +1250,7 @@ def _song_relevance(song: Song, terms: list[str]) -> tuple[int, list[str]]:
 
 
 def _song_summary_with_search(song: Song, terms: list[str]) -> dict[str, Any]:
+    """Return a song summary enriched with relevance score and reasons."""
     score, reasons = _song_relevance(song, terms)
     summary = _song_summary(song)
     summary["search_score"] = score
@@ -1252,6 +1259,7 @@ def _song_summary_with_search(song: Song, terms: list[str]) -> dict[str, Any]:
 
 
 def _facet_counts(songs: Sequence[Song]) -> dict[str, list[dict[str, Any]]]:
+    """Aggregate genre, decade, tag, and preview facets for search results."""
     genres: dict[str, int] = {}
     decades: dict[str, int] = {}
     tags: dict[str, int] = {}
@@ -1281,6 +1289,7 @@ def _facet_counts(songs: Sequence[Song]) -> dict[str, list[dict[str, Any]]]:
 
 
 def _autocomplete_suggestions(songs: Sequence[Song], query: str | None) -> list[dict[str, Any]]:
+    """Build prefix suggestions from the candidate song set."""
     prefix = (query or "").strip().casefold()
     if len(prefix) < 2:
         return []
@@ -1324,7 +1333,12 @@ def find_songs(
     isrc: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Search the local catalog before adding or importing tracks."""
+    """Search the local catalog before adding or importing tracks.
+
+    Supports text, tag, year, tempo, preview, usage, and external-ID filters.
+    The response includes matching songs plus facets, suggestions, analytics,
+    and process-local cache metadata.
+    """
     if limit < 1 or limit > 100:
         raise AutomationError("limit must be between 1 and 100.")
     if offset < 0:
@@ -1440,7 +1454,12 @@ def find_songs(
             "order_by must be one of relevance, artist, title, genre, year, used_count, last_used, id."
         )
     terms = _normalized_search_terms(query, title, artist, genre, *normalized_tags)
-    facet_candidates = song_query.limit(SEARCH_RELEVANCE_CANDIDATE_LIMIT).all()
+    facet_candidates = (
+        song_query
+        .order_by(Song.artist.asc(), Song.title.asc(), Song.id.asc())
+        .limit(SEARCH_RELEVANCE_CANDIDATE_LIMIT)
+        .all()
+    )
 
     if field_name == "relevance":
         candidates = facet_candidates

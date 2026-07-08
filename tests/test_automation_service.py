@@ -142,6 +142,7 @@ class TestSongAutomation:
             assert result["songs"][0]["title"] == "Filtered Rock 1999"
 
     def test_find_songs_returns_ranked_explainable_faceted_results(self, app):
+        """Test ranked search results include explanations, facets, suggestions, and cache data."""
         with app.app_context():
             automation._FIND_SONGS_CACHE.clear()
             exact = _create_song(
