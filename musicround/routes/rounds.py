@@ -23,6 +23,7 @@ from reportlab.pdfgen import canvas
 from musicround.helpers.auth_helpers import oauth
 from musicround.helpers.email_helper import send_email as send_quiz_email
 from musicround.helpers.paths import app_data_path
+from musicround.helpers import round_notifications
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
     round_mp3_dir,
@@ -385,6 +386,11 @@ def _round_quality_failure_response(round_id, quality, recipient=None, subject=N
         )
     )
     db.session.commit()
+    round_notifications.send_round_blocked_notification(
+        user=current_user,
+        round_id=round_id,
+        quality=quality,
+    )
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return jsonify({
             'success': False,

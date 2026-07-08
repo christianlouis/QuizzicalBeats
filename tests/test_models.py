@@ -191,6 +191,7 @@ class TestUserPreferencesModel:
         assert fetched.theme == 'light'
         assert fetched.import_job_email_notifications is True
         assert fetched.oauth_token_email_notifications is True
+        assert fetched.round_blocked_email_notifications is True
 
     def test_preferences_relationship(self, app):
         """Test that User.preferences relationship works."""

@@ -185,6 +185,12 @@ python run.py notifications oauth-tokens --send
 The job respects each user's notification preferences and suppresses duplicate
 warnings for the same service issue for 24 hours.
 
+When a round fails the package quality gate during email delivery or scheduling,
+Quizzical Beats sends the owning quizmaster a repair email with the generated
+quality report and repair hints. Users can disable these blocked-round emails
+from their profile; duplicate notifications for the same round failure are
+suppressed for 24 hours.
+
 ### Automation Settings
 
 ```bash

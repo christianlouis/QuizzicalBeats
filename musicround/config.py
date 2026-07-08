@@ -1,5 +1,4 @@
 import os
-import openai
 from dotenv import load_dotenv
 from datetime import timedelta
 
@@ -7,9 +6,6 @@ from musicround.helpers.database_config import bool_from_config
 
 # Load environment variables from .env file
 load_dotenv()
-
-# Set up OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Get the base directory of the application
 basedir = os.path.abspath(os.path.dirname(__file__))

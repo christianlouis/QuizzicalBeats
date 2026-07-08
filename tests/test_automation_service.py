@@ -1485,12 +1485,18 @@ class TestAssetInspection:
                         "hints": ["missing preview"],
                     },
                 ),
+                patch(
+                    "musicround.services.automation.send_round_blocked_notification",
+                    return_value={"sent": True, "skipped": False, "reason": None},
+                ) as mock_notify,
                 patch("musicround.services.automation.send_email") as mock_send,
             ):
                 with pytest.raises(automation.AutomationError, match="quality gate") as exc_info:
                     automation.email_round(round_id, user_id=user.id)
 
             assert not mock_send.called
+            mock_notify.assert_called_once()
+            assert mock_notify.call_args.kwargs["round_id"] == round_id
             assert exc_info.value.details["status"] == "needs_substitution"
             assert exc_info.value.details["report"]["status"] == "needs_substitution"
             export = RoundExport.query.filter_by(round_id=round_id).one()

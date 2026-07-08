@@ -2,7 +2,6 @@ import requests
 import json
 import statistics
 import musicbrainzngs
-import openai
 from flask import current_app
 from collections import Counter
 import traceback  # Added for detailed error tracking
@@ -626,7 +625,9 @@ def get_openai_data(artist_name, track_title, app=None):
         
         if not openai_api_key or not openai_model:
             return result
-        
+
+        import openai
+
         # Configure OpenAI API key
         openai.api_key = openai_api_key
         

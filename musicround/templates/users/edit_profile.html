@@ -105,6 +105,19 @@
                     </span>
                 </span>
             </label>
+            <label class="mt-4 flex items-start gap-3 text-sm text-gray-700" for="round_blocked_email_notifications">
+                <input id="round_blocked_email_notifications"
+                       name="round_blocked_email_notifications"
+                       type="checkbox"
+                       class="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                       {% if preferences.round_blocked_email_notifications %}checked{% endif %}>
+                <span>
+                    <span class="block font-medium">Blocked round repair emails</span>
+                    <span class="block text-xs text-gray-500">
+                        Send me repair hints when a round fails the package quality gate.
+                    </span>
+                </span>
+            </label>
         </div>
         
         <div class="flex items-center justify-between">

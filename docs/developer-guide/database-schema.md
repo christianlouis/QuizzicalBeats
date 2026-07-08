@@ -96,6 +96,7 @@ The `UserPreferences` table stores user-specific settings.
 | theme                | String(16)   | UI theme preference (light, dark)                |
 | import_job_email_notifications | Boolean | Whether import completion/repair emails are enabled for the user |
 | oauth_token_email_notifications | Boolean | Whether Spotify/Dropbox token warning emails are enabled for the user |
+| round_blocked_email_notifications | Boolean | Whether quality-gate repair emails are enabled for the user |
 
 ### Role
 

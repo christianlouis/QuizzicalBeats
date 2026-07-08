@@ -3,7 +3,6 @@ from flask import render_template, request, current_app, jsonify
 from flask_wtf.csrf import CSRFError
 from flask_login import current_user
 import json
-import openai
 
 # Import the csrf instance from the package
 from musicround import csrf
@@ -93,7 +92,9 @@ def generate_friendly_error_message(error_info, app=None):
         if not openai_api_key or not openai_model:
             app.logger.warning("OpenAI credentials not configured for error messages")
             return None
-        
+
+        import openai
+
         # Configure OpenAI API
         openai.api_key = openai_api_key
         if openai_url:

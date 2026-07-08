@@ -1974,6 +1974,9 @@ class TestRoundEmailRoute:
                     'musicround.routes.rounds.automation.inspect_round_package',
                     return_value=quality,
                 ) as mock_quality, \
+                patch(
+                    'musicround.routes.rounds.round_notifications.send_round_blocked_notification',
+                ) as mock_notify, \
                 patch('musicround.routes.rounds.send_quiz_email') as mock_send:
             response = client.post(
                 f'/rounds/{round_id}/mail',
@@ -1988,6 +1991,9 @@ class TestRoundEmailRoute:
         assert payload['report'] == quality['report']
         assert 'Short Preview Song preview' in payload['hints'][0]
         mock_quality.assert_called_once_with(round_id=round_id, user_id=user_id)
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args.kwargs['round_id'] == round_id
+        assert mock_notify.call_args.kwargs['quality'] == quality
         mock_send.assert_not_called()
         opened.assert_not_called()
         with app.app_context():

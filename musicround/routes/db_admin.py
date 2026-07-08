@@ -194,6 +194,7 @@ class UserPreferencesModelView(AuthModelView):
         'enable_intro',
         'import_job_email_notifications',
         'oauth_token_email_notifications',
+        'round_blocked_email_notifications',
     ]
     
 # Enhanced SystemSetting ModelView

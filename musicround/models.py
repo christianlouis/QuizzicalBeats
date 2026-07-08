@@ -34,6 +34,7 @@ class UserPreferences(db.Model):
     theme = db.Column(db.String(16), default='light')
     import_job_email_notifications = db.Column(db.Boolean, default=True, nullable=False)
     oauth_token_email_notifications = db.Column(db.Boolean, default=True, nullable=False)
+    round_blocked_email_notifications = db.Column(db.Boolean, default=True, nullable=False)
     user = db.relationship('User', back_populates='preferences')
 
 

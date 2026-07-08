@@ -24,7 +24,7 @@ issue after verification or continue with the remaining follow-up.
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
-| #33 Alert Amplifier notifications | Partial | Global import-job email toggle, completed/dead-letter status emails, per-user profile opt-outs, and dry-run/send CLI for Spotify/Dropbox token warning emails | Email verification, round blocked notifications, admin summaries, and optional push channels remain. |
+| #33 Alert Amplifier notifications | Partial | Global import-job email toggle, completed/dead-letter status emails, per-user profile opt-outs, dry-run/send CLI for Spotify/Dropbox token warnings, and quality-gate repair emails for blocked rounds | Email verification, admin summaries, and optional push channels remain. |
 
 ## Recently Closed From This Crosswalk
 

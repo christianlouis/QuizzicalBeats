@@ -29,6 +29,7 @@ from musicround.helpers.database_config import (
 )
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
@@ -4239,6 +4240,7 @@ def schedule_round_email(
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
         report = quality.get("report") or _round_repair_report(quality)
+        send_round_blocked_notification(user=user, round_id=round_id, quality=quality)
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
         raise AutomationError(
             message,
@@ -4425,6 +4427,7 @@ def email_round(
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
         report = quality.get("report") or _round_repair_report(quality)
+        send_round_blocked_notification(user=user, round_id=round_id, quality=quality)
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
         if record_export:
             db.session.add(

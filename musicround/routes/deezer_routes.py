@@ -3,7 +3,6 @@ from musicround.models import Song, db
 import deezer
 import musicbrainzngs
 import requests
-import openai
 import os
 import json
 from musicround.helpers.metadata import get_song_metadata_by_isrc
