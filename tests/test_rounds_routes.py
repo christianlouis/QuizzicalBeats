@@ -53,6 +53,15 @@ def _create_round(app, songs_ids, name='Test Round'):
         return round_.id
 
 
+def _approve_round(app, round_id):
+    """Mark a round as approved so delivery-specific route tests reach delivery gates."""
+    with app.app_context():
+        round_ = db.session.get(Round, round_id)
+        round_.review_status = 'approved'
+        round_.approved_at = datetime.utcnow()
+        db.session.commit()
+
+
 def _passing_round_quality():
     return {
         'ok': True,
@@ -480,6 +489,7 @@ class TestRoundDetailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Scheduled Bundle Song')
         round_id = _create_round(app, [song_id], name='Scheduled Bundle Round')
+        _approve_round(app, round_id)
 
         scheduled = {
             'scheduled': True,
@@ -509,6 +519,8 @@ class TestRoundDetailRoute:
             subject='Thursday Round',
             body_text='Here comes the round.',
             replace_existing=True,
+            admin_override_user_id=None,
+            review_override_reason=None,
         )
 
     def test_round_bundle_review_rejects_invalid_schedule_time(self, app, client):
@@ -1404,6 +1416,7 @@ class TestLegacyEmptyRoundRoutes:
         """Test MP3 generation does not crash for empty legacy rounds."""
         _login(app, client)
         round_id = _create_round(app, [])
+        _approve_round(app, round_id)
 
         response = client.post(
             f'/rounds/round/{round_id}/mp3',
@@ -1810,6 +1823,7 @@ class TestRoundEmailRoute:
         """Test failed MP3 generation blocks email instead of crashing later."""
         _login(app, client)
         round_id = _create_round(app, [])
+        _approve_round(app, round_id)
 
         def failed_mp3(_round_id):
             return jsonify({'success': False, 'error': 'Audio boom'}), 400
@@ -1831,6 +1845,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Mailable Song')
         round_id = _create_round(app, [song_id], name='Mailable Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True
@@ -1877,6 +1892,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='PDF Error Song')
         round_id = _create_round(app, [song_id], name='PDF Error Round')
+        _approve_round(app, round_id)
 
         with patch(
             'musicround.routes.rounds.generate_pdf',
@@ -1896,6 +1912,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Storage Gate Song')
         round_id = _create_round(app, [song_id], name='Storage Gate Round')
+        _approve_round(app, round_id)
         app.config['ROUND_MP3_DIR'] = f"{app.instance_path}/missing-rounds-route-test"
 
         with patch('musicround.routes.rounds.generate_pdf') as mock_pdf, \
@@ -1920,6 +1937,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Stale MP3 Song')
         round_id = _create_round(app, [song_id], name='Stale MP3 Round')
+        _approve_round(app, round_id)
 
         def regenerate_mp3(_round_id):
             round_ = Round.query.get(round_id)
@@ -1957,6 +1975,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='SMTP Error Song')
         round_id = _create_round(app, [song_id], name='SMTP Error Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True
@@ -1989,6 +2008,7 @@ class TestRoundEmailRoute:
         user_id = _user_id(app, 'roundsuser')
         song_id = _create_song(app, title='Short Preview Song')
         round_id = _create_round(app, [song_id], name='Blocked Quality Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True
@@ -2046,6 +2066,7 @@ class TestRoundEmailRoute:
         user_id = _user_id(app, 'roundsuser')
         song_id = _create_song(app, title='Redirect Quality Song')
         round_id = _create_round(app, [song_id], name='Redirect Quality Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True
@@ -2081,6 +2102,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Large Redirect Quality Song')
         round_id = _create_round(app, [song_id], name='Large Redirect Quality Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True
@@ -2118,6 +2140,7 @@ class TestRoundEmailRoute:
         _login(app, client)
         song_id = _create_song(app, title='Unexpected Quality Error Song')
         round_id = _create_round(app, [song_id], name='Unexpected Quality Error Round')
+        _approve_round(app, round_id)
         with app.app_context():
             round_ = Round.query.get(round_id)
             round_.mp3_generated = True

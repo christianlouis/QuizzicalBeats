@@ -78,6 +78,9 @@ AUTOMATION_MP3_INSPECTION_ERROR = "MP3 inspection failed."
 AUTOMATION_MP3_GENERATION_ERROR = "MP3 generation failed. Check the server logs."
 AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the server logs."
 AUTOMATION_SEED_SOURCE_FETCH_ERROR = "Seed source fetch failed. Check the server logs."
+
+ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
+ROUND_DELIVERABLE_REVIEW_STATUSES = {"approved", "sent"}
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
@@ -544,6 +547,99 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "last_generated_at": (
             round_obj.last_generated_at.isoformat() if round_obj.last_generated_at else None
         ),
+        "review_status": round_obj.review_status,
+        "review_notes": round_obj.review_notes,
+        "approved_at": _datetime_payload(round_obj.approved_at),
+        "approved_by_id": round_obj.approved_by_id,
+        "approved_by": _user_summary(round_obj.approved_by),
+    }
+
+
+def _validate_round_review_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized not in ROUND_REVIEW_STATUSES:
+        raise AutomationError(
+            "review_status must be draft, reviewed, approved, blocked, rejected, or sent."
+        )
+    return normalized
+
+
+def _require_round_delivery_review(
+    round_obj: Round,
+    admin_override_user_id: int | None = None,
+    override_reason: str | None = None,
+) -> dict[str, Any]:
+    status = round_obj.review_status or "draft"
+    if status in ROUND_DELIVERABLE_REVIEW_STATUSES:
+        return {"allowed": True, "status": status, "override": False}
+
+    override_admin = None
+    if admin_override_user_id is not None:
+        override_admin = _find_user(admin_override_user_id)
+        if not override_admin.is_admin:
+            raise AutomationError(
+                "Only an admin can override round review status before delivery.",
+                details={
+                    "status": "review_override_forbidden",
+                    "round_id": round_obj.id,
+                    "review_status": status,
+                    "hints": ["Approve the round first or retry with an admin override."],
+                },
+            )
+        return {
+            "allowed": True,
+            "status": status,
+            "override": True,
+            "override_user_id": override_admin.id,
+            "override_reason": (override_reason or "").strip() or None,
+        }
+
+    raise AutomationError(
+        f"Round review status is {status}; approve it before email delivery.",
+        details={
+            "status": "review_not_approved",
+            "round_id": round_obj.id,
+            "review_status": status,
+            "hints": [
+                "Open the bundle review page and approve the round before scheduling or sending email.",
+                "Admin-level workflows may pass an explicit override for urgent delivery.",
+            ],
+        },
+    )
+
+
+def _mark_round_blocked(round_obj: Round, notes: str | None = None) -> None:
+    round_obj.review_status = "blocked"
+    if notes:
+        round_obj.review_notes = notes
+    round_obj.approved_at = None
+    round_obj.approved_by_id = None
+    round_obj.updated_at = datetime.utcnow()
+
+
+def _mark_round_sent(round_obj: Round) -> None:
+    round_obj.review_status = "sent"
+    round_obj.updated_at = datetime.utcnow()
+
+
+def _round_preview_status(song: Song) -> dict[str, Any]:
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
+    return {
+        "has_preview": bool(preview_url),
+        "preview_url": preview_url,
+        "sources": {
+            "primary": bool(song.preview_url),
+            "spotify": bool(song.spotify_preview_url),
+            "deezer": bool(song.deezer_preview_url),
+            "apple": bool(song.apple_preview_url),
+            "youtube": bool(song.youtube_preview_url),
+        },
     }
 
 
@@ -1253,6 +1349,119 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
     round_obj.name = name.strip() if name and name.strip() else None
     db.session.commit()
     return {"round": _round_summary(round_obj)}
+
+
+def round_review_payload(
+    round_id: int,
+    user_id: int | None = None,
+    months: int = 3,
+) -> dict[str, Any]:
+    """Return a complete review packet before a round is scheduled or sent."""
+    if months < 1 or months > 24:
+        raise AutomationError("months must be between 1 and 24.")
+
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id) if user_id is not None else None
+    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    songs = []
+    for position, song in enumerate(_ordered_round_songs(round_obj), start=1):
+        songs.append({
+            "position": position,
+            "song": _song_summary(song),
+            "preview_status": _round_preview_status(song),
+            "usage_warning": _song_usage_warning(song, window_start),
+        })
+
+    mp3_path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
+    pdf_path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
+    quality = None
+    quality_error = None
+    try:
+        quality = round_repair_report(round_id=round_id, user_id=user.id if user else None)
+    except AutomationError as exc:
+        quality_error = str(exc)
+
+    review_gate = {
+        "deliverable": (round_obj.review_status or "draft") in ROUND_DELIVERABLE_REVIEW_STATUSES,
+        "status": round_obj.review_status or "draft",
+        "requires_approval": (round_obj.review_status or "draft") not in ROUND_DELIVERABLE_REVIEW_STATUSES,
+        "allowed_delivery_statuses": sorted(ROUND_DELIVERABLE_REVIEW_STATUSES),
+    }
+    return {
+        "round": _round_summary(round_obj),
+        "review_gate": review_gate,
+        "songs": songs,
+        "audio_scripts": [
+            _audio_script_summary(script)
+            for script in RoundAudioScript.query.filter_by(round_id=round_id)
+            .order_by(RoundAudioScript.created_at.desc(), RoundAudioScript.id.desc())
+            .limit(25)
+            .all()
+        ],
+        "assets": {
+            "mp3": {
+                "generated": bool(round_obj.mp3_generated),
+                "exists": os.path.exists(mp3_path),
+            },
+            "pdf": {
+                "generated": bool(round_obj.pdf_generated),
+                "exists": os.path.exists(pdf_path),
+            },
+            "last_generated_at": _datetime_payload(round_obj.last_generated_at),
+        },
+        "quality": quality,
+        "quality_error": quality_error,
+        "repair_hints": [] if not quality else quality.get("hints", []),
+        "usage_window_months": months,
+    }
+
+
+def update_round_review_status(
+    round_id: int,
+    review_status: str,
+    notes: str | None = None,
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Approve, block, reject, or reset a round for review workflows."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    reviewer = _find_user(reviewer_user_id) if reviewer_user_id is not None else None
+    status = _validate_round_review_status(review_status)
+
+    round_obj.review_status = status
+    round_obj.review_notes = (notes or "").strip() or None
+    if status == "approved":
+        round_obj.approved_at = datetime.utcnow()
+        round_obj.approved_by_id = reviewer.id if reviewer else None
+    else:
+        round_obj.approved_at = None
+        round_obj.approved_by_id = None
+    round_obj.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "updated": True,
+        "round": _round_summary(round_obj),
+        "review_payload": round_review_payload(round_id, user_id=reviewer.id if reviewer else None),
+    }
+
+
+def assert_round_ready_for_delivery(
+    round_id: int,
+    admin_override_user_id: int | None = None,
+    review_override_reason: str | None = None,
+) -> dict[str, Any]:
+    """Validate that a round is approved or explicitly admin-overridden for delivery."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    return _require_round_delivery_review(
+        round_obj,
+        admin_override_user_id=admin_override_user_id,
+        override_reason=review_override_reason,
+    )
 
 
 def set_round_owner(
@@ -4991,6 +5200,8 @@ def schedule_round_email(
     subject: str | None = None,
     body_text: str | None = None,
     replace_existing: bool = False,
+    admin_override_user_id: int | None = None,
+    review_override_reason: str | None = None,
 ) -> dict[str, Any]:
     """Generate, inspect, and schedule a robust round email for a future worker run."""
     round_obj = db.session.get(Round, round_id)
@@ -5029,11 +5240,19 @@ def schedule_round_email(
             },
         )
 
+    review_gate = _require_round_delivery_review(
+        round_obj,
+        admin_override_user_id=admin_override_user_id,
+        override_reason=review_override_reason,
+    )
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
         report = quality.get("report") or _round_repair_report(quality)
+        _mark_round_blocked(round_obj, report.get("headline") if isinstance(report, dict) else None)
+        db.session.flush()
         send_round_blocked_notification(user=user, round_id=round_id, quality=quality)
+        db.session.commit()
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
         raise AutomationError(
             message,
@@ -5085,6 +5304,7 @@ def schedule_round_email(
         "replaced_exports": replaced_exports,
         "assets": assets,
         "quality": quality,
+        "review_gate": review_gate,
     }
 
 
@@ -5209,6 +5429,8 @@ def email_round(
     subject: str | None = None,
     body_text: str | None = None,
     record_export: bool = True,
+    admin_override_user_id: int | None = None,
+    review_override_reason: str | None = None,
 ) -> dict[str, Any]:
     """Generate assets and send a round as an email attachment bundle."""
     user = _find_user(user_id)
@@ -5216,10 +5438,20 @@ def email_round(
     if not target:
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    review_gate = _require_round_delivery_review(
+        round_obj,
+        admin_override_user_id=admin_override_user_id,
+        override_reason=review_override_reason,
+    )
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
         report = quality.get("report") or _round_repair_report(quality)
+        _mark_round_blocked(round_obj, report.get("headline") if isinstance(report, dict) else None)
+        db.session.flush()
         send_round_blocked_notification(user=user, round_id=round_id, quality=quality)
         message = "Round quality gate failed: " + "; ".join(quality["hints"])
         if record_export:
@@ -5249,7 +5481,6 @@ def email_round(
             },
         )
 
-    round_obj = db.session.get(Round, round_id)
     title = round_obj.name if round_obj and round_obj.name else f"Quizzical Beats Round {round_id}"
     email_subject = subject or title
     email_body = body_text or "Attached are the MP3 and PDF files for your quiz round."
@@ -5290,12 +5521,15 @@ def email_round(
         db.session.commit()
     if not success:
         raise AutomationError(message)
+    _mark_round_sent(round_obj)
+    db.session.commit()
     return {
         "success": True,
         "message": message,
         "recipient": target,
         "assets": assets,
         "quality": quality,
+        "review_gate": review_gate,
     }
 
 

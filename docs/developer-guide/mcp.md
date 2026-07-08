@@ -86,6 +86,8 @@ The MCP server exposes these tools:
 | `round_analytics_summary` | Summarize catalog health, usage frequency, and unused candidates. |
 | `generate_round_assets` | Generate the round PDF and/or MP3 and return the round review URL path. |
 | `generate_round_assets_batch` | Generate PDF and/or MP3 files for several rounds without aborting the whole batch. |
+| `round_review_payload` | Return songs, preview status, usage warnings, scripts, assets, quality, and repair hints for approval. |
+| `update_round_review_status` | Mark a round draft, reviewed, approved, blocked, rejected, or sent. |
 | `inspect_round_mp3` | Check round MP3 duration, loudness, silence, and clipping indicators. |
 | `inspect_round_pdf` | Check round PDF existence and basic structural validity. |
 | `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
@@ -143,10 +145,16 @@ explicitly set.
    `generate_round_assets_batch`; send the returned `review_url_path` to the
    quizmaster when a human should inspect the bundle preview page before
    scheduling or delivery.
-8. Inspect the generated files and previews with `inspect_round_package`.
-9. Send the completed bundle with `send_round_email`; it reruns the package
+8. Inspect the generated files and previews with `inspect_round_package`, then
+   call `round_review_payload` to review songs, preview status, usage warnings,
+   generated audio scripts, asset status, and repair hints.
+9. Mark the round `approved` with `update_round_review_status` before delivery.
+   `send_round_email` and `schedule_round_email` refuse draft, blocked,
+   rejected, or merely reviewed rounds unless an admin-level workflow passes an
+   explicit override.
+10. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
-10. For several blocked rounds, call `round_repair_plan_batch`, apply only the
+11. For several blocked rounds, call `round_repair_plan_batch`, apply only the
    explicit `replace_round_song` / `add_round_song` actions selected from each
    plan, regenerate assets with `generate_round_assets_batch`, then rerun
    `inspect_round_package_batch`.

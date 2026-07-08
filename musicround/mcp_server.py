@@ -292,6 +292,34 @@ def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
 
 
 @mcp.tool()
+def round_review_payload(round_id: int, user_id: int | None = None, months: int = 3) -> dict[str, Any]:
+    """Return songs, previews, scripts, assets, and repair hints for human review."""
+    return _with_app_context(
+        automation.round_review_payload,
+        round_id=round_id,
+        user_id=user_id,
+        months=months,
+    )
+
+
+@mcp.tool()
+def update_round_review_status(
+    round_id: int,
+    review_status: str,
+    notes: str | None = None,
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Approve, block, reject, or reset a generated round before delivery."""
+    return _with_app_context(
+        automation.update_round_review_status,
+        round_id=round_id,
+        review_status=review_status,
+        notes=notes,
+        reviewer_user_id=reviewer_user_id,
+    )
+
+
+@mcp.tool()
 def set_round_owner(
     round_id: int,
     user_id: int | None,
@@ -1089,6 +1117,8 @@ def schedule_round_email(
     subject: str | None = None,
     body_text: str | None = None,
     replace_existing: bool = False,
+    admin_override_user_id: int | None = None,
+    review_override_reason: str | None = None,
 ) -> dict[str, Any]:
     """Schedule a round email for a future worker run."""
     return _with_app_context(
@@ -1100,6 +1130,8 @@ def schedule_round_email(
         subject=subject,
         body_text=body_text,
         replace_existing=replace_existing,
+        admin_override_user_id=admin_override_user_id,
+        review_override_reason=review_override_reason,
     )
 
 
@@ -1153,6 +1185,8 @@ def send_round_email(
     user_id: int | None = None,
     subject: str | None = None,
     body_text: str | None = None,
+    admin_override_user_id: int | None = None,
+    review_override_reason: str | None = None,
 ) -> dict[str, Any]:
     """Generate assets and email the completed round bundle."""
     try:
@@ -1163,6 +1197,8 @@ def send_round_email(
             user_id=user_id,
             subject=subject,
             body_text=body_text,
+            admin_override_user_id=admin_override_user_id,
+            review_override_reason=review_override_reason,
         )
     except automation.AutomationError as exc:
         if exc.details:

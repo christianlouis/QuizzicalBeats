@@ -371,6 +371,13 @@ def _round_quality_failure_response(round_id, quality, recipient=None, subject=N
     """Persist and return repairable package-gate failures before email delivery."""
     report = quality.get('report') or {}
     error_msg = report.get('headline') or 'Round quality gate failed. Repair the round before sending.'
+    round_obj = db.session.get(Round, round_id)
+    if round_obj:
+        round_obj.review_status = 'blocked'
+        round_obj.review_notes = error_msg
+        round_obj.approved_at = None
+        round_obj.approved_by_id = None
+        round_obj.updated_at = datetime.utcnow()
     db.session.add(
         RoundExport(
             round_id=round_id,
@@ -707,24 +714,21 @@ def update_round_review(round_id):
     rnd = _get_editable_round_or_404(round_id)
     status = (request.form.get('review_status') or '').strip().lower()
     notes = (request.form.get('review_notes') or '').strip() or None
-    if status not in {'draft', 'reviewed', 'approved', 'rejected'}:
+    if status not in {'draft', 'reviewed', 'approved', 'blocked', 'rejected', 'sent'}:
         return _automation_error_response(AutomationError('Invalid review status.'), 400)
 
-    rnd.review_status = status
-    rnd.review_notes = notes
-    if status == 'approved':
-        rnd.approved_at = datetime.utcnow()
-        rnd.approved_by_id = current_user.id
-    else:
-        rnd.approved_at = None
-        rnd.approved_by_id = None
-    rnd.updated_at = datetime.utcnow()
-    db.session.commit()
+    result = automation.update_round_review_status(
+        round_id=round_id,
+        review_status=status,
+        notes=notes,
+        reviewer_user_id=current_user.id,
+    )
+    rnd = db.session.get(Round, round_id)
 
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return jsonify({
             'success': True,
-            'review_status': rnd.review_status,
+            'review_status': result['round']['review_status'],
             'approved_at': rnd.approved_at.isoformat() if rnd.approved_at else None,
         })
     flash('Round review status updated', 'success')
@@ -762,6 +766,12 @@ def schedule_round_email(round_id):
             subject=subject,
             body_text=body_text,
             replace_existing=True,
+            admin_override_user_id=(
+                current_user.id
+                if current_user.is_admin and _bool_form_value('review_override')
+                else None
+            ),
+            review_override_reason=(request.form.get('review_override_reason') or '').strip() or None,
         )
     except AutomationError as exc:
         details = exc.details if isinstance(exc.details, dict) else {}
@@ -1554,6 +1564,21 @@ def send_email(round_id):
     
     # Check if the round exists
     rnd = _get_producible_round_or_404(round_id)
+    try:
+        automation.assert_round_ready_for_delivery(
+            round_id=round_id,
+            admin_override_user_id=(
+                current_user.id
+                if current_user.is_admin and _bool_form_value('review_override')
+                else None
+            ),
+            review_override_reason=(request.form.get('review_override_reason') or '').strip() or None,
+        )
+    except AutomationError as exc:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return _automation_error_response(exc, 422)
+        flash(str(exc), 'error')
+        return redirect(url_for('rounds.round_bundle_review', round_id=round_id))
 
     storage = check_round_artifact_storage(include_mp3=True, include_pdf=True)
     if not storage['ok']:
@@ -1672,6 +1697,9 @@ def send_email(round_id):
         if not success:
             raise RuntimeError(message)
 
+        rnd.review_status = 'sent'
+        rnd.updated_at = datetime.utcnow()
+        db.session.commit()
         success_msg = message
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'success': True, 'message': success_msg})
