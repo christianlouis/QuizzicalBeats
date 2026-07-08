@@ -480,6 +480,10 @@ def rounds_calendar():
         .limit(100)
         .all()
     )
+    planned_deliverables = {
+        plan.id: automation.planned_quiz_deliverable_status(plan)
+        for plan in planned_rounds
+    }
     exports = (
         RoundExport.query.filter(
             RoundExport.round_id.in_(visible_round_ids),
@@ -490,7 +494,12 @@ def rounds_calendar():
         .limit(100)
         .all()
     )
-    return render_template('round_calendar.html', exports=exports, planned_rounds=planned_rounds)
+    return render_template(
+        'round_calendar.html',
+        exports=exports,
+        planned_rounds=planned_rounds,
+        planned_deliverables=planned_deliverables,
+    )
 
 
 @rounds_bp.route('/analytics')
@@ -499,15 +508,20 @@ def rounds_analytics():
     """Show catalog and music-round fatigue signals for planning."""
     months = _int_arg('months', default=6, minimum=1, maximum=36)
     limit = _int_arg('limit', default=20, minimum=1, maximum=100)
+    repeat_threshold = _int_arg('repeat_threshold', default=3, minimum=1, maximum=50)
     try:
-        summary = automation.round_analytics_summary(months=months, limit=limit)
+        summary = automation.round_analytics_summary(
+            months=months,
+            limit=limit,
+            repeat_threshold=repeat_threshold,
+        )
     except AutomationError as exc:
         flash(str(exc), 'error')
         summary = None
     return render_template(
         'round_analytics.html',
         summary=summary,
-        filters={'months': months, 'limit': limit},
+        filters={'months': months, 'limit': limit, 'repeat_threshold': repeat_threshold},
     )
 
 
@@ -714,7 +728,7 @@ def update_round_review(round_id):
     rnd = _get_editable_round_or_404(round_id)
     status = (request.form.get('review_status') or '').strip().lower()
     notes = (request.form.get('review_notes') or '').strip() or None
-    if status not in {'draft', 'reviewed', 'approved', 'blocked', 'rejected', 'sent'}:
+    if status not in {'draft', 'reviewed', 'approved', 'blocked', 'rejected'}:
         return _automation_error_response(AutomationError('Invalid review status.'), 400)
 
     result = automation.update_round_review_status(
@@ -766,12 +780,6 @@ def schedule_round_email(round_id):
             subject=subject,
             body_text=body_text,
             replace_existing=True,
-            admin_override_user_id=(
-                current_user.id
-                if current_user.is_admin and _bool_form_value('review_override')
-                else None
-            ),
-            review_override_reason=(request.form.get('review_override_reason') or '').strip() or None,
         )
     except AutomationError as exc:
         details = exc.details if isinstance(exc.details, dict) else {}

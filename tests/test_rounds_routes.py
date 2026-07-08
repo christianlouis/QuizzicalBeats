@@ -1,7 +1,7 @@
 """Tests for rounds blueprint routes."""
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
@@ -251,6 +251,7 @@ class TestRoundsListRoute:
                     quiz_date=datetime(2026, 7, 9, 17, 0),
                     quizmaster_id=planner_id,
                     theme='Festival repair night',
+                    due_at=datetime.utcnow() + timedelta(hours=12),
                     status='planned',
                 ),
                 PlannedQuizRound(
@@ -273,6 +274,9 @@ class TestRoundsListRoute:
         assert b'Planned Quiz Dates' in response.data
         assert b'Festival repair night' in response.data
         assert b'Unassigned Thursday' in response.data
+        assert b'Deliverables' in response.data
+        assert b'Approved round' in response.data
+        assert b'Due soon' in response.data
         assert b'Hidden other quizmaster' not in response.data
 
     def test_round_analytics_page_renders_summary(self, app, client):
@@ -280,11 +284,15 @@ class TestRoundsListRoute:
         _login(app, client)
         _create_song(app, title='Analytics Song')
 
-        response = client.get('/rounds/analytics?months=6&limit=5')
+        response = client.get('/rounds/analytics?months=6&limit=5&repeat_threshold=2')
 
         assert response.status_code == 200
         assert b'Round Analytics' in response.data
         assert b'Missing Previews' in response.data
+        assert b'Repeat Alert' in response.data
+        assert b'Artists' in response.data
+        assert b'Decades' in response.data
+        assert b'Themes' in response.data
         assert b'/view-songs?has_preview=false' in response.data
         assert b'/view-songs?genre=__missing__' in response.data
         assert b'Create planning brief' in response.data
@@ -519,8 +527,6 @@ class TestRoundDetailRoute:
             subject='Thursday Round',
             body_text='Here comes the round.',
             replace_existing=True,
-            admin_override_user_id=None,
-            review_override_reason=None,
         )
 
     def test_round_bundle_review_rejects_invalid_schedule_time(self, app, client):
@@ -1114,6 +1120,22 @@ class TestRoundDetailRoute:
             assert round_.review_notes == 'Needs another pass'
             assert round_.approved_at is None
             assert round_.approved_by_id is None
+
+    def test_update_round_review_rejects_manual_sent(self, app, client):
+        """Sent is system-managed and cannot be selected manually."""
+        _login(app, client)
+        song_id = _create_song(app, title='Manual Sent Route Song')
+        round_id = _create_round(app, [song_id], name='Manual Sent Route Round')
+
+        response = client.post(
+            f'/rounds/{round_id}/review',
+            data={'review_status': 'sent', 'review_notes': 'Nope'},
+        )
+
+        assert response.status_code == 400
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            assert round_.review_status == 'draft'
 
     def test_round_quality_endpoint_returns_repair_report(self, app, client):
         """Quality endpoint should expose automation repair feedback."""

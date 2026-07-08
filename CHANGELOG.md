@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added planned-round deliverable status and due-soon warnings to MCP payloads
+  and the browser calendar so agents can see missing rounds, approvals, and
+  scheduled email exports before quiz deadlines.
+- Added configurable music-round fatigue analytics for repeated songs, artists,
+  decades, genres, and themes, including affected-round links and quizmaster
+  context for repeated songs.
 - Added an agentic backlog-status crosswalk that maps open GitHub issues to
   implemented, partial, open, or live-operational follow-up slices.
 - Added a browser text-playlist review workflow that blocks round creation
@@ -80,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Kept `sent` as a system-managed review state, made simple review updates avoid
+  full package inspection unless explicitly requested, and blocked scheduled
+  email review overrides so only approved rounds can be scheduled.
 - Blocked MP3 generation when a round song has no Deezer preview identity or
   provider preview URL, preventing successful partial 5/6/7-song renders.
 - Relaxed the round package duration gate so small MP3 length differences are

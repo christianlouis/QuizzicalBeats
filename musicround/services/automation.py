@@ -81,6 +81,7 @@ AUTOMATION_SCHEDULED_EMAIL_ERROR = "Scheduled round email failed. Check the serv
 AUTOMATION_SEED_SOURCE_FETCH_ERROR = "Seed source fetch failed. Check the server logs."
 
 ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
+ROUND_MANUAL_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected"}
 ROUND_DELIVERABLE_REVIEW_STATUSES = {"approved", "sent"}
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
@@ -556,11 +557,13 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
     }
 
 
-def _validate_round_review_status(status: str) -> str:
+def _validate_round_review_status(status: str, *, allow_system_status: bool = True) -> str:
     normalized = (status or "").strip().lower()
-    if normalized not in ROUND_REVIEW_STATUSES:
+    allowed_statuses = ROUND_REVIEW_STATUSES if allow_system_status else ROUND_MANUAL_REVIEW_STATUSES
+    if normalized not in allowed_statuses:
+        allowed_label = ", ".join(sorted(allowed_statuses))
         raise AutomationError(
-            "review_status must be draft, reviewed, approved, blocked, rejected, or sent."
+            f"review_status must be one of: {allowed_label}."
         )
     return normalized
 
@@ -658,6 +661,7 @@ def _public_round_summary(round_obj: Round) -> dict[str, Any]:
 
 
 def _planned_quiz_round_summary(plan: PlannedQuizRound) -> dict[str, Any]:
+    deliverable_status = _planned_quiz_deliverable_status(plan)
     return {
         "id": plan.id,
         "quiz_date": _datetime_payload(plan.quiz_date),
@@ -672,6 +676,10 @@ def _planned_quiz_round_summary(plan: PlannedQuizRound) -> dict[str, Any]:
         "round": _round_summary(plan.round) if plan.round else None,
         "export_id": plan.export_id,
         "export": _round_export_summary(plan.export) if plan.export else None,
+        "deliverable_status": deliverable_status,
+        "missing_deliverables": deliverable_status["missing"],
+        "due_warning": deliverable_status["due_warning"],
+        "blocked_close_to_due": deliverable_status["blocked_close_to_due"],
         "created_at": _datetime_payload(plan.created_at),
         "updated_at": _datetime_payload(plan.updated_at),
     }
@@ -1424,13 +1432,14 @@ def update_round_review_status(
     review_status: str,
     notes: str | None = None,
     reviewer_user_id: int | None = None,
+    include_review_payload: bool = False,
 ) -> dict[str, Any]:
     """Approve, block, reject, or reset a round for review workflows."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
     reviewer = _find_user(reviewer_user_id) if reviewer_user_id is not None else None
-    status = _validate_round_review_status(review_status)
+    status = _validate_round_review_status(review_status, allow_system_status=False)
 
     round_obj.review_status = status
     round_obj.review_notes = (notes or "").strip() or None
@@ -1442,11 +1451,13 @@ def update_round_review_status(
         round_obj.approved_by_id = None
     round_obj.updated_at = datetime.utcnow()
     db.session.commit()
-    return {
+    result = {
         "updated": True,
         "round": _round_summary(round_obj),
-        "review_payload": round_review_payload(round_id, user_id=reviewer.id if reviewer else None),
     }
+    if include_review_payload:
+        result["review_payload"] = round_review_payload(round_id, user_id=reviewer.id if reviewer else None)
+    return result
 
 
 def assert_round_ready_for_delivery(
@@ -4401,15 +4412,25 @@ def recent_usage_summary(
     }
 
 
-def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+def round_analytics_summary(
+    months: int = 6,
+    limit: int = 20,
+    repeat_threshold: int = 3,
+) -> dict[str, Any]:
     """Return catalog and round analytics useful for planning and backlog decisions."""
     if months < 1 or months > 36:
         raise AutomationError("months must be between 1 and 36.")
     if limit < 1 or limit > 100:
         raise AutomationError("limit must be between 1 and 100.")
+    if repeat_threshold < 1 or repeat_threshold > 50:
+        raise AutomationError("repeat_threshold must be between 1 and 50.")
 
     window_start = datetime.utcnow() - timedelta(days=months * 31)
-    recent_rounds = Round.query.filter(Round.created_at >= window_start).count()
+    recent_round_objs = (
+        Round.query.filter(Round.created_at >= window_start)
+        .order_by(Round.created_at.desc(), Round.id.desc())
+        .all()
+    )
     most_used = (
         Song.query.order_by(Song.used_count.desc(), Song.artist.asc(), Song.title.asc())
         .limit(limit)
@@ -4429,19 +4450,46 @@ def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
         Song.youtube_preview_url.is_(None),
     ).count()
 
-    genre_rows = db.session.query(Song.genre).order_by(Song.id.asc()).yield_per(1000)
+    all_songs = Song.query.order_by(Song.artist.asc(), Song.title.asc()).all()
     unknown_genre_count = 0
     genre_counts_by_key: dict[str, int] = {}
     genre_labels_by_key: dict[str, str] = {}
-    for (raw_genre,) in genre_rows:
-        genre_label = " ".join((raw_genre or "").strip().split())
+    artist_counts: dict[str, int] = {}
+    decade_counts: dict[str, int] = {}
+    for song in all_songs:
+        genre_label = " ".join((song.genre or "").strip().split())
         if not genre_label or genre_label.casefold() == "unknown":
             unknown_genre_count += 1
-            continue
+        else:
+            genre_key = genre_label.casefold()
+            genre_labels_by_key.setdefault(genre_key, genre_label)
+            genre_counts_by_key[genre_key] = genre_counts_by_key.get(genre_key, 0) + 1
 
-        genre_key = genre_label.casefold()
-        genre_labels_by_key.setdefault(genre_key, genre_label)
-        genre_counts_by_key[genre_key] = genre_counts_by_key.get(genre_key, 0) + 1
+        artist = " ".join((song.artist or "Unknown Artist").strip().split()) or "Unknown Artist"
+        artist_counts[artist] = artist_counts.get(artist, 0) + (song.used_count or 0)
+        if song.year:
+            decade = f"{int(song.year) // 10 * 10}s"
+        else:
+            decade = "Unknown"
+        decade_counts[decade] = decade_counts.get(decade, 0) + (song.used_count or 0)
+
+    affected_rounds_by_song_id: dict[int, list[dict[str, Any]]] = {}
+    theme_counts: dict[str, int] = {}
+    for round_obj in recent_round_objs:
+        theme = (
+            " ".join((round_obj.round_criteria_used or "").strip().split())
+            or " ".join((round_obj.round_type or "").strip().split())
+            or "Unthemed"
+        )
+        theme_counts[theme] = theme_counts.get(theme, 0) + 1
+        round_link = {
+            "id": round_obj.id,
+            "name": round_obj.name,
+            "created_at": _datetime_payload(round_obj.created_at),
+            "quizmaster": _user_summary(round_obj.owner),
+        }
+        for song_id in _round_song_ids(round_obj):
+            affected_rounds_by_song_id.setdefault(song_id, []).append(round_link)
 
     genre_counts = {
         genre_labels_by_key[genre_key]: count
@@ -4451,20 +4499,50 @@ def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
         )
     }
 
+    def _song_fatigue_summary(song: Song) -> dict[str, Any]:
+        summary = _song_summary(song)
+        affected_rounds = affected_rounds_by_song_id.get(song.id, [])[:limit]
+        summary.update({
+            "affected_rounds": affected_rounds,
+            "affected_round_count": len(affected_rounds_by_song_id.get(song.id, [])),
+            "last_used_quizmaster": affected_rounds[0]["quizmaster"] if affected_rounds else None,
+            "above_repeat_threshold": (song.used_count or 0) >= repeat_threshold,
+        })
+        return summary
+
+    def _sorted_count_rows(values: dict[str, int], value_key: str) -> list[dict[str, Any]]:
+        return [
+            {value_key: key, "used_count": count, "above_repeat_threshold": count >= repeat_threshold}
+            for key, count in sorted(values.items(), key=lambda item: (-item[1], item[0].casefold()))
+            if count > 0
+        ][:limit]
+
+    most_used_songs = [_song_fatigue_summary(song) for song in most_used]
+    fatigue_alerts = [
+        song for song in most_used_songs
+        if song["above_repeat_threshold"]
+    ]
+
     return {
         "window_months": months,
         "window_start": _datetime_payload(window_start),
+        "repeat_threshold": repeat_threshold,
         "song_count": Song.query.count(),
         "round_count": Round.query.count(),
-        "recent_round_count": recent_rounds,
+        "recent_round_count": len(recent_round_objs),
         "missing_preview_count": missing_preview_count,
         "unknown_genre_count": unknown_genre_count,
         "genre_counts": genre_counts,
-        "most_used_songs": [_song_summary(song) for song in most_used],
+        "most_used_songs": most_used_songs,
+        "most_used_artists": _sorted_count_rows(artist_counts, "artist"),
+        "decade_counts": _sorted_count_rows(decade_counts, "decade"),
+        "theme_counts": _sorted_count_rows(theme_counts, "theme"),
+        "fatigue_alerts": fatigue_alerts[:limit],
         "unused_candidates": [_song_summary(song) for song in stale_candidates],
         "guidance": [
             "Prefer unused_candidates when they fit the theme and have usable previews.",
             "Treat missing_preview_count as replacement pressure before scheduling email delivery.",
+            "Avoid fatigue_alerts unless the quizmaster explicitly accepts recent repetition.",
         ],
     }
 
@@ -4724,9 +4802,12 @@ def list_planned_quiz_rounds(
         .limit(limit)
         .all()
     )
+    summaries = [_planned_quiz_round_summary(plan) for plan in plans]
     return {
         "count": len(plans),
-        "plans": [_planned_quiz_round_summary(plan) for plan in plans],
+        "plans": summaries,
+        "missing_deliverable_count": sum(1 for plan in summaries if plan["missing_deliverables"]),
+        "due_warning_count": sum(1 for plan in summaries if plan["due_warning"]),
         "filters": {
             "quizmaster_id": quizmaster_id,
             "status": status,
@@ -5317,6 +5398,43 @@ def _round_export_summary(export: RoundExport) -> dict[str, Any]:
     }
 
 
+def _plan_missing_deliverables(plan: PlannedQuizRound) -> list[str]:
+    missing = []
+    if not plan.round_id:
+        missing.append("round")
+        missing.append("approved_round")
+    elif not plan.round or (plan.round.review_status or "draft") not in ROUND_DELIVERABLE_REVIEW_STATUSES:
+        missing.append("approved_round")
+
+    if not plan.export_id:
+        missing.append("scheduled_email")
+    elif not plan.export or plan.export.status not in {"scheduled", "success"}:
+        missing.append("scheduled_email")
+    return missing
+
+
+def _planned_quiz_deliverable_status(plan: PlannedQuizRound) -> dict[str, Any]:
+    now = datetime.utcnow()
+    due_at = plan.due_at or plan.quiz_date
+    missing = _plan_missing_deliverables(plan)
+    due_warning = bool(missing and due_at and due_at <= now + timedelta(days=2))
+    return {
+        "complete": not missing,
+        "missing": missing,
+        "needs_round": "round" in missing,
+        "needs_approval": "approved_round" in missing,
+        "needs_scheduled_email": "scheduled_email" in missing,
+        "due_at": _datetime_payload(due_at),
+        "due_warning": due_warning,
+        "blocked_close_to_due": plan.status == "blocked" and due_warning,
+    }
+
+
+def planned_quiz_deliverable_status(plan: PlannedQuizRound) -> dict[str, Any]:
+    """Return missing deliverables and deadline warnings for a planned quiz round."""
+    return _planned_quiz_deliverable_status(plan)
+
+
 def _scheduled_email_error_message(exc: Exception) -> str:
     """Return a persisted, credential-safe scheduled email failure summary."""
     details = getattr(exc, "details", None)
@@ -5351,6 +5469,19 @@ def schedule_round_email(
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
+    if admin_override_user_id is not None or (review_override_reason or "").strip():
+        raise AutomationError(
+            "Scheduled delivery does not support review overrides; approve the round before scheduling.",
+            details={
+                "scheduled": False,
+                "status": "scheduled_review_override_forbidden",
+                "round_id": round_id,
+                "hints": [
+                    "Set the round review status to approved before scheduling.",
+                    "Use immediate send for explicit admin override workflows.",
+                ],
+            },
+        )
 
     user = _find_user(user_id)
     target = recipient or user.email
@@ -5384,11 +5515,7 @@ def schedule_round_email(
             },
         )
 
-    review_gate = _require_round_delivery_review(
-        round_obj,
-        admin_override_user_id=admin_override_user_id,
-        override_reason=review_override_reason,
-    )
+    review_gate = _require_round_delivery_review(round_obj)
     assets = generate_round_assets(round_id, user_id=user.id)
     quality = inspect_round_package(round_id, user_id=user.id)
     if not quality["ok"]:
