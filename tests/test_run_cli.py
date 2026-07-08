@@ -89,6 +89,58 @@ def test_notifications_admin_summary_command_defaults_to_dry_run(app, monkeypatc
     assert "secret" not in output.lower()
 
 
+def test_performance_smoke_command_outputs_json(app, monkeypatch, capsys):
+    """The performance smoke CLI should provide agent-readable JSON output."""
+    import run
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "performance",
+            "smoke",
+            "--json",
+            "--synthetic",
+            "--sample-size",
+            "12",
+            "--search-threshold-ms",
+            "10000",
+            "--import-threshold-ms",
+            "10000",
+            "--analytics-threshold-ms",
+            "10000",
+            "--round-review-threshold-ms",
+            "10000",
+        ],
+    )
+    monkeypatch.setattr(run, "create_app", lambda: app)
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["synthetic"] is True
+    assert "secret" not in output.lower()
+
+
+def test_performance_smoke_command_rejects_invalid_sample_size(app, monkeypatch, capsys):
+    """The CLI should fail fast with a clear message for invalid sample sizes."""
+    import run
+
+    monkeypatch.setattr(sys, "argv", ["run.py", "performance", "smoke", "--sample-size", "2"])
+    monkeypatch.setattr(run, "create_app", lambda: app)
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 78
+    assert "sample_size" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_database_status_warns_for_legacy_data_sqlite(monkeypatch, capsys):
     """The database runbook command should flag the legacy production SQLite file."""
     import run
