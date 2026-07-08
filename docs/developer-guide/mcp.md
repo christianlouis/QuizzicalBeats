@@ -90,6 +90,7 @@ The MCP server exposes these tools:
 | `inspect_round_package` | Check preview availability and length, expected generated MP3 length, MP3 quality, and PDF integrity. |
 | `round_repair_report` | Return package quality plus a human-readable blocked/repair report. |
 | `inspect_round_package_batch` | Audit several rounds at once and split sendable round IDs from repair-needed IDs. |
+| `round_repair_plan` | Return a read-only repair plan with replacement and add-song candidates for a blocked round. |
 | `send_round_email` | Generate assets, block on failed package checks, and email only robust round bundles. |
 | `schedule_round_email` | Generate and inspect a robust round bundle, then schedule later email delivery; use `replace_existing=true` when rescheduling the same quiz round. |
 | `list_scheduled_round_emails` | List pending or historical scheduled email exports. |

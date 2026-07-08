@@ -974,6 +974,33 @@ def inspect_round_package_batch(
 
 
 @mcp.tool()
+def round_repair_plan(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    replacement_limit: int = 5,
+    additional_limit: int = 10,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Return a read-only repair plan with replacement and add-song candidates."""
+    return _with_app_context(
+        automation.round_repair_plan,
+        round_id=round_id,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        replacement_limit=replacement_limit,
+        additional_limit=additional_limit,
+        verify_previews=verify_previews,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+
+
+@mcp.tool()
 def schedule_round_email(
     round_id: int,
     scheduled_for: str,

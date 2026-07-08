@@ -2945,6 +2945,128 @@ def inspect_round_package_batch(
     }
 
 
+def round_repair_plan(
+    round_id: int,
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    replacement_limit: int = 5,
+    additional_limit: int = 10,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Return a non-mutating repair plan with candidate songs for a blocked round."""
+    if replacement_limit < 1 or replacement_limit > 50:
+        raise AutomationError("replacement_limit must be between 1 and 50.")
+    if additional_limit < 1 or additional_limit > 50:
+        raise AutomationError("additional_limit must be between 1 and 50.")
+
+    repair = round_repair_report(
+        round_id=round_id,
+        user_id=user_id,
+        expected_song_count=expected_song_count,
+        min_preview_seconds=min_preview_seconds,
+        max_preview_seconds=max_preview_seconds,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+    )
+    quality = repair["quality"]
+    report = repair["report"]
+
+    failed_by_position: dict[int, dict[str, Any]] = {}
+    for item in report.get("failed_positions") or []:
+        try:
+            position = int(item.get("position"))
+        except (TypeError, ValueError):
+            continue
+        failed_by_position[position] = item
+
+    for action in report.get("actions") or []:
+        details = action.get("details") or {}
+        if details.get("action") != "replace_unresolved_positions":
+            continue
+        for raw_position in details.get("positions") or []:
+            try:
+                position = int(raw_position)
+            except (TypeError, ValueError):
+                continue
+            failed_by_position.setdefault(
+                position,
+                {
+                    "position": position,
+                    "issue_code": "unresolved_song",
+                    "message": f"Position {position}: unresolved stored song ID.",
+                },
+            )
+
+    replacement_positions: list[dict[str, Any]] = []
+    for position in sorted(failed_by_position):
+        failed_song = failed_by_position[position]
+        try:
+            suggestions = suggest_replacement_songs(
+                round_id=round_id,
+                position=position,
+                limit=replacement_limit,
+                verify_previews=verify_previews,
+                min_preview_seconds=min_preview_seconds,
+            )
+            replacement_positions.append(
+                {
+                    "position": position,
+                    "failed_song": failed_song,
+                    "count": suggestions["count"],
+                    "suggestions": suggestions["suggestions"],
+                }
+            )
+        except AutomationError as exc:
+            replacement_positions.append(
+                {
+                    "position": position,
+                    "failed_song": failed_song,
+                    "count": 0,
+                    "suggestions": [],
+                    "error": str(exc),
+                }
+            )
+
+    actual_song_count = int(quality.get("actual_song_count") or 0)
+    missing_song_count = max(0, expected_song_count - actual_song_count)
+    additional_songs = None
+    if missing_song_count:
+        additional_songs = suggest_additional_songs(
+            round_id=round_id,
+            limit=max(additional_limit, missing_song_count),
+            verify_previews=verify_previews,
+            min_preview_seconds=min_preview_seconds,
+        )
+
+    next_actions = []
+    if replacement_positions:
+        next_actions.append("replace_failed_positions")
+    if missing_song_count:
+        next_actions.append("add_missing_songs")
+    if next_actions:
+        next_actions.append("regenerate_assets")
+        next_actions.append("inspect_round_package")
+
+    return {
+        "round_id": round_id,
+        "round_name": quality.get("round_name"),
+        "ok": bool(quality.get("ok")),
+        "status": quality.get("status"),
+        "quality": quality,
+        "report": report,
+        "replacement_positions": replacement_positions,
+        "missing_song_count": missing_song_count,
+        "additional_songs": additional_songs,
+        "next_actions": next_actions or ["send_round_email"],
+        "hints": [
+            "This plan is read-only; apply replacements/additions explicitly.",
+            "After changes, regenerate assets and rerun inspect_round_package before sending.",
+        ],
+    }
+
+
 def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
     return {
         "id": record.id,

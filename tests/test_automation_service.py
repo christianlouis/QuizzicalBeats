@@ -1495,6 +1495,150 @@ class TestAssetInspection:
             with pytest.raises(automation.AutomationError, match="at most 50"):
                 automation.inspect_round_package_batch(range(1, 52))
 
+    def test_round_repair_plan_suggests_replacements_and_missing_songs(self, app):
+        with app.app_context():
+            repair_payload = {
+                "quality": {
+                    "round_id": 42,
+                    "round_name": "Broken Round",
+                    "ok": False,
+                    "status": "needs_more_songs",
+                    "actual_song_count": 7,
+                    "resolved_song_count": 7,
+                },
+                "report": {
+                    "failed_positions": [
+                        {
+                            "position": 2,
+                            "song_id": 12,
+                            "artist": "Broken Artist",
+                            "title": "Broken Song",
+                            "issue_code": "missing_preview_url",
+                        }
+                    ],
+                    "actions": [
+                        {
+                            "action": "add_missing_track",
+                            "message": "Add 1 missing song.",
+                            "details": {
+                                "action": "add_missing_track",
+                                "expected_song_count": 8,
+                                "actual_song_count": 7,
+                            },
+                        }
+                    ],
+                },
+            }
+            replacement = {
+                "count": 1,
+                "suggestions": [{"id": 99, "title": "Replacement", "artist": "Candidate"}],
+            }
+            additional = {
+                "count": 1,
+                "suggestions": [{"id": 100, "title": "Additional", "artist": "Candidate"}],
+            }
+
+            with (
+                patch("musicround.services.automation.round_repair_report", return_value=repair_payload) as mock_report,
+                patch("musicround.services.automation.suggest_replacement_songs", return_value=replacement) as mock_replace,
+                patch("musicround.services.automation.suggest_additional_songs", return_value=additional) as mock_add,
+            ):
+                result = automation.round_repair_plan(
+                    round_id=42,
+                    user_id=7,
+                    replacement_limit=3,
+                    additional_limit=4,
+                    verify_previews=True,
+                    min_preview_seconds=21.5,
+                )
+
+            assert result["ok"] is False
+            assert result["status"] == "needs_more_songs"
+            assert result["missing_song_count"] == 1
+            assert result["replacement_positions"][0]["position"] == 2
+            assert result["replacement_positions"][0]["suggestions"] == replacement["suggestions"]
+            assert result["additional_songs"] == additional
+            assert result["next_actions"] == [
+                "replace_failed_positions",
+                "add_missing_songs",
+                "regenerate_assets",
+                "inspect_round_package",
+            ]
+            mock_report.assert_called_once()
+            mock_replace.assert_called_once_with(
+                round_id=42,
+                position=2,
+                limit=3,
+                verify_previews=True,
+                min_preview_seconds=21.5,
+            )
+            mock_add.assert_called_once_with(
+                round_id=42,
+                limit=4,
+                verify_previews=True,
+                min_preview_seconds=21.5,
+            )
+
+    def test_round_repair_plan_uses_unresolved_action_positions_without_adding_songs(self, app):
+        with app.app_context():
+            repair_payload = {
+                "quality": {
+                    "round_id": 43,
+                    "round_name": "Unresolved Round",
+                    "ok": False,
+                    "status": "needs_more_songs",
+                    "actual_song_count": 8,
+                    "resolved_song_count": 7,
+                },
+                "report": {
+                    "failed_positions": [],
+                    "actions": [
+                        {
+                            "action": "replace_unresolved_positions",
+                            "message": "Replace unresolved position 4.",
+                            "details": {
+                                "action": "replace_unresolved_positions",
+                                "positions": [4],
+                            },
+                        }
+                    ],
+                },
+            }
+
+            with (
+                patch("musicround.services.automation.round_repair_report", return_value=repair_payload),
+                patch(
+                    "musicround.services.automation.suggest_replacement_songs",
+                    return_value={"count": 0, "suggestions": []},
+                ) as mock_replace,
+                patch("musicround.services.automation.suggest_additional_songs") as mock_add,
+            ):
+                result = automation.round_repair_plan(round_id=43)
+
+            assert result["missing_song_count"] == 0
+            assert result["additional_songs"] is None
+            assert result["replacement_positions"] == [
+                {
+                    "position": 4,
+                    "failed_song": {
+                        "position": 4,
+                        "issue_code": "unresolved_song",
+                        "message": "Position 4: unresolved stored song ID.",
+                    },
+                    "count": 0,
+                    "suggestions": [],
+                }
+            ]
+            mock_replace.assert_called_once()
+            mock_add.assert_not_called()
+
+    def test_round_repair_plan_validates_limits(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="replacement_limit"):
+                automation.round_repair_plan(round_id=1, replacement_limit=0)
+            with pytest.raises(automation.AutomationError, match="additional_limit"):
+                automation.round_repair_plan(round_id=1, additional_limit=51)
+
     def test_round_audio_component_failures_hide_exception_details(self, app):
         with app.app_context():
             user = _create_user()
