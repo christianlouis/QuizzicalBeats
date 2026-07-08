@@ -2109,6 +2109,34 @@ class TestAgentPlanningAutomation:
             assert result["active_jobs"][0]["id"] == record.id
             assert result["queue_snapshot"][0]["record_id"] == record.id
 
+    def test_import_progress_events_includes_repair_metadata(self, app):
+        with app.app_context():
+            user = _create_user(username="repairmeta", email="repairmeta@example.test")
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist-needs-retry",
+                priority=5,
+                user_id=user.id,
+                status="dead_letter",
+                attempt_count=3,
+                max_attempts=3,
+                imported_count=2,
+                error_message="manual review required",
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            result = automation.import_progress_events(user_id=user.id)
+            job = result["recent_jobs"][0]
+
+            assert job["retryable"] is True
+            assert job["terminal"] is True
+            assert job["progress_percent"] == 100
+            assert job["progress_label"] == "Manual review required"
+            assert any("Reset attempts" in hint for hint in job["repair_hints"])
+            assert job["failed_position_hints"] == []
+
     def test_parse_text_playlist_marks_rows_that_need_review(self, app):
         with app.app_context():
             result = automation.parse_text_playlist(

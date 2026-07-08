@@ -37,6 +37,7 @@ issue after verification or continue with the remaining follow-up.
 - #68 Text and CSV playlist parser service
 - #69 Low-confidence text-import review workflow
 - #30 Textual Transport text/CSV paste, upload, review, and MCP path
+- #28 Import progress retryability and repair-hint payloads
 - #70 Quizmaster preferences and MCP summary
 - #71 Planned quiz date model and MCP planning tools
 - #72 Recent usage and fatigue summary for agents

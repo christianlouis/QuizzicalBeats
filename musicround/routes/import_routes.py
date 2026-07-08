@@ -844,6 +844,7 @@ def _import_job_payload(job):
         'attempt_count': job.attempt_count or 0,
         'max_attempts': job.max_attempts or 3,
         'item_url': job.item_url,
+        **automation.import_job_status_metadata(job),
     }
 
 
@@ -968,6 +969,7 @@ def queue_status():
         recent_jobs=data['recent_jobs'],
         queue_snapshot=data['queue_snapshot'],
         queue=queue,
+        import_job_status_metadata=automation.import_job_status_metadata,
         now=now
     )
 

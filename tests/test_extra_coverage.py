@@ -434,7 +434,11 @@ class TestImportQueueStatusRoute:
         assert response.status_code == 200
         assert data['stats']['queue_size'] >= 1
         assert any(job['item_id'] == 'json-pending-playlist' for job in data['queue'])
-        assert any(job['item_id'] == 'json-pending-playlist' for job in data['recent_jobs'])
+        recent_job = next(job for job in data['recent_jobs'] if job['item_id'] == 'json-pending-playlist')
+        assert recent_job['retryable'] is False
+        assert recent_job['progress_percent'] == 5
+        assert recent_job['progress_label'] == 'Waiting in queue'
+        assert recent_job['repair_hints']
 
     def test_retry_import_job_requires_admin(self, app, client):
         """Test retrying an import job requires admin access."""

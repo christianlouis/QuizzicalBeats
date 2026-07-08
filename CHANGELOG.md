@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mappings for repair workflows.
 - Added TXT/CSV upload support and reusable browser templates for text-playlist
   imports.
+- Added retryability, progress labels, and repair hints to import job status
+  payloads for MCP, JSON polling, and the admin import queue view.
 - Added browser round sharing controls for owners/admins to grant and revoke
   viewer/editor/producer access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration

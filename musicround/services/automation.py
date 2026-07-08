@@ -2816,6 +2816,61 @@ def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
         "attempt_count": record.attempt_count or 0,
         "max_attempts": record.max_attempts or 1,
         "error_message": record.error_message,
+        **import_job_status_metadata(record),
+    }
+
+
+def import_job_status_metadata(record: ImportJobRecord) -> dict[str, Any]:
+    """Return repair-oriented metadata for import progress views and MCP clients."""
+    status = record.status or "pending"
+    attempts = record.attempt_count or 0
+    max_attempts = record.max_attempts or 1
+    imported_count = record.imported_count or 0
+    skipped_count = record.skipped_count or 0
+    retryable = status in {"failed", "dead_letter"}
+    terminal = status in {"completed", "failed", "dead_letter"}
+    progress_percent_by_status = {
+        "pending": 5,
+        "processing": 50,
+        "completed": 100,
+        "failed": 100,
+        "dead_letter": 100,
+    }
+    progress_label_by_status = {
+        "pending": "Waiting in queue",
+        "processing": "Import running",
+        "completed": "Import completed",
+        "failed": "Retryable failure",
+        "dead_letter": "Manual review required",
+    }
+    hints: list[str] = []
+    if status == "pending":
+        hints.append("This import is queued and will start when earlier jobs finish.")
+    elif status == "processing":
+        hints.append("Poll this job until it completes or becomes retryable.")
+    elif status == "completed":
+        if skipped_count:
+            hints.append(f"Review {skipped_count} skipped item(s) before using the imported catalog blindly.")
+        else:
+            hints.append("No repair action is needed for this completed import.")
+    elif status == "failed":
+        hints.append("Retry this job after checking the source URL and provider token health.")
+    elif status == "dead_letter":
+        hints.append("This job exhausted automatic retries and needs manual review before retrying.")
+    if retryable and attempts >= max_attempts:
+        hints.append("Reset attempts when retrying if the underlying provider issue has been fixed.")
+    if retryable and not record.error_message:
+        hints.append("No detailed failure message was recorded; inspect worker logs if retry fails again.")
+    if imported_count:
+        hints.append(f"{imported_count} item(s) imported before this status was recorded.")
+
+    return {
+        "retryable": retryable,
+        "terminal": terminal,
+        "progress_percent": progress_percent_by_status.get(status, 0),
+        "progress_label": progress_label_by_status.get(status, status.replace("_", " ").title()),
+        "repair_hints": hints,
+        "failed_position_hints": [],
     }
 
 
