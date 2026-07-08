@@ -217,6 +217,7 @@ def main():
 
         from musicround.helpers.database_config import (
             database_summary,
+            database_uri_overrides_postgres_env,
             is_legacy_data_sqlite_uri,
             postgres_env_readiness,
         )
@@ -286,6 +287,21 @@ def main():
                     ),
                 }
             )
+        if database_uri_overrides_postgres_env(os.environ):
+            issues.append(
+                {
+                    "code": "database_uri_overrides_postgres_env",
+                    "severity": "warning",
+                    "message": (
+                        "SQLALCHEMY_DATABASE_URI overrides complete split "
+                        "PostgreSQL configuration"
+                    ),
+                    "hint": (
+                        "remove or blank SQLALCHEMY_DATABASE_URI before relying "
+                        "on PG* managed database secrets during cutover"
+                    ),
+                }
+            )
         diagnostics = {
             "ok": not any(issue["severity"] == "error" for issue in issues),
             "status": (
@@ -318,6 +334,12 @@ def main():
                     "PostgreSQL env missing: "
                     + ", ".join(readiness["missing_required"])
                 )
+        if database_uri_overrides_postgres_env(os.environ):
+            print(
+                "Warning: SQLALCHEMY_DATABASE_URI overrides complete split "
+                "PostgreSQL configuration; remove or blank it before relying "
+                "on PG* managed database secrets during cutover."
+            )
         if is_legacy_data_sqlite_uri(db_uri):
             print(
                 "Warning: legacy /data SQLite database is configured; "

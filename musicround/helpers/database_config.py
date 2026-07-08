@@ -121,6 +121,14 @@ def postgres_env_readiness(environ) -> dict[str, list[str] | bool]:
     }
 
 
+def database_uri_overrides_postgres_env(environ) -> bool:
+    """Return whether a full SQLAlchemy URI masks complete split PG* config."""
+    if not environ.get("SQLALCHEMY_DATABASE_URI"):
+        return False
+    readiness = postgres_env_readiness(environ)
+    return bool(readiness["configured"] and readiness["complete"])
+
+
 def redact_database_uri(uri: str | None) -> str:
     """Redact credentials from a database URI without hiding the backend."""
     if not uri:

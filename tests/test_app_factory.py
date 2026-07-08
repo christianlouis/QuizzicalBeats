@@ -19,6 +19,7 @@ from musicround import (
 from musicround.helpers.database_config import (
     database_uri_from_postgres_env,
     database_summary,
+    database_uri_overrides_postgres_env,
     is_legacy_data_sqlite_uri,
     managed_database_requirement_error,
     postgres_env_readiness,
@@ -113,6 +114,21 @@ def test_postgres_env_readiness_reports_only_key_names():
     assert readiness['missing_required'] == ['PGUSER', 'PGPASSWORD']
     assert readiness['present_optional'] == ['PGSSLMODE']
     assert 'postgres.example' not in repr(readiness)
+
+
+def test_database_uri_override_detects_complete_postgres_env():
+    """Operators should see when SQLALCHEMY_DATABASE_URI masks split PG* config."""
+    env = {
+        'SQLALCHEMY_DATABASE_URI': 'sqlite:////data/song_data.db',
+        'PGHOST': 'postgres.example',
+        'PGDATABASE': 'quizzicalbeats',
+        'PGUSER': 'qb_user',
+        'PGPASSWORD': 'super-secret-password',
+    }
+
+    assert database_uri_overrides_postgres_env(env) is True
+    assert database_uri_overrides_postgres_env({'PGHOST': 'postgres.example'}) is False
+    assert database_uri_overrides_postgres_env({**env, 'PGPASSWORD': ''}) is False
 
 
 def test_configure_database_uri_uses_sqlite_fallback(monkeypatch):

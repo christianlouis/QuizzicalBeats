@@ -336,6 +336,61 @@ def test_database_preflight_accepts_complete_pg_env(monkeypatch, capsys):
     assert "super-secret-password" not in captured.err
 
 
+def test_database_status_json_warns_when_full_uri_masks_pg_env(monkeypatch, capsys):
+    """Status should flag the cutover trap where a full URI hides PG* secrets."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.delenv("DATABASE_REQUIRE_MANAGED", raising=False)
+    monkeypatch.setenv("PGHOST", "postgres.example")
+    monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
+    monkeypatch.setenv("PGUSER", "qb_user")
+    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "status", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["status"] == "warning"
+    assert [issue["code"] for issue in payload["issues"]] == [
+        "legacy_sqlite_data_store",
+        "database_uri_overrides_postgres_env",
+    ]
+    assert payload["postgres_env"]["complete"] is True
+    assert "super-secret-password" not in captured.out
+    assert "postgres.example" not in captured.out
+    assert "/data/song_data.db" not in captured.out
+
+
+def test_database_status_prints_uri_override_warning(monkeypatch, capsys):
+    """Text diagnostics should tell operators why PG* is not taking effect."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.delenv("DATABASE_REQUIRE_MANAGED", raising=False)
+    monkeypatch.setenv("PGHOST", "postgres.example")
+    monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
+    monkeypatch.setenv("PGUSER", "qb_user")
+    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setattr(sys, "argv", ["run.py", "database", "status"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "SQLALCHEMY_DATABASE_URI overrides complete split PostgreSQL" in captured.out
+    assert "legacy /data SQLite database is configured" in captured.out
+    assert "super-secret-password" not in captured.out
+    assert "postgres.example" not in captured.out
+    assert "/data/song_data.db" not in captured.out
+
+
 def test_database_preflight_reports_missing_pg_keys_safely(monkeypatch, capsys):
     """Incomplete PG* setup should fail with key names, not secret values."""
     import run

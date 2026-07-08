@@ -117,7 +117,10 @@ When `SQLALCHEMY_DATABASE_URI` is omitted, the local SQLite fallback is created
 as `song_data.db` inside `DATA_DIR`. Production deployments should configure
 PostgreSQL instead and enable `DATABASE_REQUIRE_MANAGED=true`. If both
 `SQLALCHEMY_DATABASE_URI` and `PG*` variables are set, the full URI wins; remove
-or blank it before relying on split PostgreSQL variables.
+or blank it before relying on split PostgreSQL variables. The database status,
+preflight, and health diagnostics warn when a full URI is masking complete
+split PostgreSQL configuration so the managed-database cutover does not silently
+keep using the old `/data` SQLite target.
 
 ### OAuth Provider Configuration
 

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from flask import current_app
 from sqlalchemy import func, text
 
-from musicround.helpers.database_config import database_summary, is_legacy_data_sqlite_uri
+from musicround.helpers.database_config import (
+    database_summary,
+    database_uri_overrides_postgres_env,
+    is_legacy_data_sqlite_uri,
+)
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status
 from musicround.helpers.storage_health import check_round_artifact_storage
 from musicround.version import VERSION_INFO
@@ -80,6 +85,18 @@ def database_service_health() -> dict[str, Any]:
                     "Configure SQLALCHEMY_DATABASE_URI or complete PG* managed "
                     "database credentials via secrets and enable "
                     "DATABASE_REQUIRE_MANAGED=True for production."
+                ),
+            )
+        )
+    if database_uri_overrides_postgres_env(os.environ):
+        issues.append(
+            _issue(
+                "database_uri_overrides_postgres_env",
+                "SQLALCHEMY_DATABASE_URI is overriding complete split PostgreSQL configuration.",
+                severity="warning",
+                hint=(
+                    "Remove or blank SQLALCHEMY_DATABASE_URI before relying on "
+                    "PG* managed database secrets during cutover."
                 ),
             )
         )

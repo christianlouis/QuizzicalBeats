@@ -226,6 +226,29 @@ class TestSystemHealthRoute:
         assert health['issues'][0]['code'] == 'legacy_sqlite_data_store'
         assert 'complete PG* managed database credentials' in health['issues'][0]['details']['hint']
 
+    def test_database_health_warns_when_uri_masks_postgres_env(self, app, monkeypatch):
+        """Health diagnostics should catch split PG* secrets hidden behind a full URI."""
+        from musicround.helpers.service_health import database_service_health
+
+        monkeypatch.setenv('SQLALCHEMY_DATABASE_URI', 'sqlite:////data/song_data.db')
+        monkeypatch.setenv('PGHOST', 'postgres.example')
+        monkeypatch.setenv('PGDATABASE', 'quizzicalbeats')
+        monkeypatch.setenv('PGUSER', 'qb_user')
+        monkeypatch.setenv('PGPASSWORD', 'super-secret-password')
+
+        with app.app_context():
+            app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/song_data.db'
+            app.config['DATABASE_BACKEND'] = 'sqlite'
+
+            health = database_service_health()
+
+        codes = [issue['code'] for issue in health['issues']]
+        assert health['ok'] is True
+        assert health['status'] == 'warning'
+        assert 'legacy_sqlite_data_store' in codes
+        assert 'database_uri_overrides_postgres_env' in codes
+        assert 'super-secret-password' not in json.dumps(health)
+
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""
         _create_user(app, 'health_nonadmin', 'healthna@example.com')
