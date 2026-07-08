@@ -279,6 +279,80 @@ def _song_summary(song: Song) -> dict[str, Any]:
     }
 
 
+def _song_tag_names(song: Song) -> list[str]:
+    return [tag.name for tag in song.tags if tag.name]
+
+
+def _song_search_text(song: Song) -> str:
+    parts = [
+        song.title,
+        song.artist,
+        song.genre,
+        song.album_name,
+        *(_song_tag_names(song)),
+    ]
+    return " ".join(part for part in parts if part).casefold()
+
+
+def _song_decade(year: int | None) -> int | None:
+    if not year:
+        return None
+    return int(year // 10 * 10)
+
+
+def _parse_decade(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return _song_decade(value)
+    match = re.search(r"(\d{2,4})", value)
+    if not match:
+        return None
+    raw = int(match.group(1))
+    if raw < 100:
+        raw += 1900 if raw >= 30 else 2000
+    return _song_decade(raw)
+
+
+def _candidate_preview_payload(
+    song: Song,
+    *,
+    min_preview_seconds: float,
+    verified_duration_seconds: float | None = None,
+    issue_code: str | None = None,
+) -> dict[str, Any]:
+    preview_url = (
+        song.preview_url
+        or song.spotify_preview_url
+        or song.deezer_preview_url
+        or song.apple_preview_url
+        or song.youtube_preview_url
+    )
+    return {
+        "available": bool(preview_url),
+        "url": preview_url,
+        "duration_seconds": verified_duration_seconds,
+        "min_required_seconds": min_preview_seconds,
+        "issue_code": issue_code,
+    }
+
+
+def _candidate_platform_ids(song: Song) -> dict[str, Any]:
+    return {
+        "spotify": song.spotify_id,
+        "deezer": song.deezer_id,
+        "isrc": song.isrc,
+    }
+
+
+def _candidate_usage_history(song: Song) -> dict[str, Any]:
+    return {
+        "used_count": song.used_count or 0,
+        "usage_frequency": song.used_count or 0,
+        "last_used": _datetime_payload(song.last_used),
+    }
+
+
 def _user_summary(user: User | None) -> dict[str, Any] | None:
     if not user:
         return None
@@ -1773,47 +1847,182 @@ def add_round_song(
 
 
 def suggest_replacement_songs(
-    round_id: int,
-    position: int,
+    round_id: int | None = None,
+    position: int | None = None,
     limit: int = 10,
     query: str | None = None,
+    song_id: int | None = None,
+    artist: str | None = None,
+    title: str | None = None,
+    theme: str | None = None,
+    preferred_genre: str | None = None,
+    preferred_decade: int | str | None = None,
+    preferred_mood: str | None = None,
+    preferred_artist: str | None = None,
+    prefer_same_genre: bool = True,
+    prefer_same_decade: bool = False,
+    constraints: dict[str, Any] | None = None,
     require_deezer_id: bool = True,
     verify_previews: bool = False,
     min_preview_seconds: float = 20.0,
 ) -> dict[str, Any]:
-    """Suggest catalog songs that can replace a failed round position."""
+    """Suggest catalog songs that can replace a failed or overused song."""
     if limit < 1 or limit > 50:
         raise AutomationError("limit must be between 1 and 50.")
 
-    round_obj = db.session.get(Round, round_id)
-    if not round_obj:
-        raise AutomationError(f"Round {round_id} was not found.")
+    if constraints is not None and not isinstance(constraints, dict):
+        raise AutomationError("constraints must be an object when provided.")
 
-    song_ids, index = _song_position(round_obj, position)
-    original_song = db.session.get(Song, song_ids[index])
+    round_obj = None
+    song_ids: list[int] = []
+    index: int | None = None
+    original_song: Song | None = None
+    if round_id is not None:
+        round_obj = db.session.get(Round, round_id)
+        if not round_obj:
+            raise AutomationError(f"Round {round_id} was not found.")
+        song_ids = _round_song_ids(round_obj)
+        if position is not None:
+            song_ids, index = _song_position(round_obj, position)
+            original_song = db.session.get(Song, song_ids[index])
+
+    if original_song is None and song_id is not None:
+        original_song = db.session.get(Song, song_id)
+        if not original_song:
+            raise AutomationError(f"Song {song_id} was not found.")
+
+    if original_song is None and (artist or title):
+        lookup = Song.query
+        if artist:
+            lookup = lookup.filter(Song.artist.ilike(artist.strip()))
+        if title:
+            lookup = lookup.filter(Song.title.ilike(title.strip()))
+        original_song = lookup.order_by(Song.used_count.asc(), Song.id.asc()).first()
+
+    if round_obj is None and original_song is None and not any([query, theme, artist, title, preferred_genre, preferred_mood]):
+        raise AutomationError(
+            "Provide round_id and position, song_id, artist/title, query, theme, or preference filters."
+        )
+
     excluded_ids = set(song_ids)
+    if original_song:
+        excluded_ids.add(original_song.id)
 
-    song_query = Song.query.filter(~Song.id.in_(excluded_ids))
+    song_query = Song.query
+    if excluded_ids:
+        song_query = song_query.filter(~Song.id.in_(excluded_ids))
     if require_deezer_id:
         song_query = song_query.filter(Song.deezer_id.isnot(None))
     if query:
         pattern = f"%{query.strip()}%"
         song_query = song_query.filter(or_(Song.title.ilike(pattern), Song.artist.ilike(pattern)))
 
-    candidates = song_query.limit(250).all()
+    candidates = song_query.limit(500).all()
+    requested_decade = _parse_decade(preferred_decade)
+    original_decade = _song_decade(original_song.year) if original_song else None
+    target_decade = requested_decade or (original_decade if prefer_same_decade else None)
+    target_genre = (preferred_genre or (original_song.genre if prefer_same_genre and original_song else None) or "").strip()
+    target_artist = (preferred_artist or "").strip()
+    if not target_artist and constraints:
+        target_artist = str(constraints.get("artist_relation") or constraints.get("preferred_artist") or "").strip()
+    target_mood = (preferred_mood or "").strip()
+    theme_terms = [part.casefold() for part in re.findall(r"[\w-]+", theme or "") if len(part) > 2]
+    raw_avoid_terms = (constraints or {}).get("avoid", [])
+    if isinstance(raw_avoid_terms, str):
+        raw_avoid_terms = [raw_avoid_terms]
+    explicit_avoid_terms = [
+        str(part).casefold()
+        for part in raw_avoid_terms
+        if str(part).strip()
+    ]
 
-    def _candidate_score(song: Song) -> tuple[int, int, int, int, str, str]:
-        genre_match = 1 if original_song and song.genre and song.genre == original_song.genre else 0
+    def _candidate_matches(song: Song) -> dict[str, Any]:
+        text = _song_search_text(song)
+        genre_match = bool(target_genre and song.genre and song.genre.casefold() == target_genre.casefold())
+        same_genre = bool(original_song and song.genre and original_song.genre and song.genre.casefold() == original_song.genre.casefold())
+        same_decade = bool(target_decade and _song_decade(song.year) == target_decade)
+        artist_relation = bool(
+            target_artist
+            and (
+                song.artist.casefold() == target_artist.casefold()
+                or target_artist.casefold() in song.artist.casefold()
+                or song.artist.casefold() in target_artist.casefold()
+            )
+        )
+        if not artist_relation and original_song:
+            artist_relation = song.artist.casefold() == original_song.artist.casefold()
+        mood_match = bool(target_mood and target_mood.casefold() in text)
+        theme_match_count = sum(1 for term in theme_terms if term in text)
+        avoid_match = any(term in text for term in explicit_avoid_terms)
+        return {
+            "same_genre": same_genre,
+            "preferred_genre": genre_match,
+            "same_decade": same_decade,
+            "artist_relation": artist_relation,
+            "mood": mood_match,
+            "theme_terms": theme_match_count,
+            "avoid": avoid_match,
+        }
+
+    def _candidate_score(song: Song) -> tuple[int, int, int, int, int, int, int, int, int, str, str]:
+        matches = _candidate_matches(song)
         original_year = original_song.year if original_song and original_song.year else None
-        year_distance = abs(song.year - original_year) if song.year and original_year else 9999
+        target_year = original_year or (target_decade + 5 if target_decade else None)
+        year_distance = abs(song.year - target_year) if song.year and target_year else 9999
         preview_signal = 1 if song.preview_url or song.deezer_preview_url or song.spotify_preview_url else 0
         used_count = song.used_count or 0
-        return (-genre_match, year_distance, -preview_signal, used_count, song.artist or "", song.title or "")
+        return (
+            int(matches["avoid"]),
+            -int(matches["preferred_genre"] or matches["same_genre"]),
+            -int(matches["same_decade"]),
+            -int(matches["artist_relation"]),
+            -int(matches["mood"]),
+            -int(matches["theme_terms"]),
+            year_distance,
+            -preview_signal,
+            used_count,
+            song.artist or "",
+            song.title or "",
+        )
+
+    def _candidate_explanation(song: Song, matches: dict[str, Any], preview_available: bool) -> list[str]:
+        reasons = []
+        if matches["preferred_genre"]:
+            reasons.append(f"matches preferred genre {target_genre}")
+        elif matches["same_genre"]:
+            reasons.append(f"matches original genre {original_song.genre}")
+        if matches["same_decade"] and target_decade:
+            reasons.append(f"fits the {target_decade}s decade preference")
+        if matches["artist_relation"]:
+            reasons.append("matches the requested or original artist relation")
+        if matches["mood"]:
+            reasons.append(f"matches mood cue {target_mood}")
+        if matches["theme_terms"]:
+            reasons.append(f"matches {matches['theme_terms']} theme term(s)")
+        if preview_available:
+            reasons.append("has a catalog preview URL")
+        else:
+            reasons.append("preview URL still needs provider lookup or verification")
+        if song.used_count:
+            reasons.append(f"used {song.used_count} time(s); check freshness before finalizing")
+        else:
+            reasons.append("not marked as used before")
+        if matches["avoid"]:
+            reasons.append("matches an avoid constraint; review before choosing")
+        return reasons
 
     suggestions = []
     for song in sorted(candidates, key=_candidate_score):
+        matches = _candidate_matches(song)
         suggestion = _song_summary(song)
-        suggestion["same_genre"] = bool(original_song and song.genre and song.genre == original_song.genre)
+        preview = _candidate_preview_payload(song, min_preview_seconds=min_preview_seconds)
+        suggestion["platform_ids"] = _candidate_platform_ids(song)
+        suggestion["preview"] = preview
+        suggestion["usage_history"] = _candidate_usage_history(song)
+        suggestion["constraint_matches"] = matches
+        suggestion["explanation"] = _candidate_explanation(song, matches, preview["available"])
+        suggestion["same_genre"] = matches["same_genre"]
+        suggestion["same_decade"] = matches["same_decade"]
         suggestion["year_distance"] = (
             abs(song.year - original_song.year)
             if original_song and song.year and original_song.year
@@ -1837,12 +2046,17 @@ def suggest_replacement_songs(
                 if issue:
                     suggestion["preview_check"]["ok"] = False
                     suggestion["preview_check"]["issue_code"] = issue["code"]
+                    suggestion["preview"]["issue_code"] = issue["code"]
+                    suggestion["preview"]["available"] = False
                     continue
                 duration_seconds = len(audio) / 1000 if audio else 0
                 suggestion["preview_check"]["duration_seconds"] = round(duration_seconds, 3)
                 suggestion["preview_check"]["ok"] = duration_seconds >= min_preview_seconds
+                suggestion["preview"]["duration_seconds"] = round(duration_seconds, 3)
+                suggestion["preview"]["available"] = duration_seconds >= min_preview_seconds
                 if duration_seconds < min_preview_seconds:
                     suggestion["preview_check"]["issue_code"] = "preview_too_short"
+                    suggestion["preview"]["issue_code"] = "preview_too_short"
                     continue
                 verified.append(suggestion)
                 if len(verified) >= limit:
@@ -1851,17 +2065,37 @@ def suggest_replacement_songs(
 
     return {
         "round_id": round_id,
-        "round_name": round_obj.name,
+        "round_name": round_obj.name if round_obj else None,
         "position": position,
-        "original_song": _song_summary(original_song) if original_song else {"id": song_ids[index]},
+        "original_song": (
+            _song_summary(original_song)
+            if original_song
+            else {"id": song_ids[index]} if index is not None else None
+        ),
         "count": min(len(suggestions), limit),
         "suggestions": suggestions[:limit],
         "filters": {
             "query": query,
+            "song_id": song_id,
+            "artist": artist,
+            "title": title,
+            "theme": theme,
+            "preferred_genre": preferred_genre,
+            "preferred_decade": preferred_decade,
+            "preferred_mood": preferred_mood,
+            "preferred_artist": preferred_artist,
+            "prefer_same_genre": prefer_same_genre,
+            "prefer_same_decade": prefer_same_decade,
+            "constraints": constraints or {},
             "require_deezer_id": require_deezer_id,
             "verify_previews": verify_previews,
             "excluded_song_ids": sorted(excluded_ids),
         },
+        "agent_notes": [
+            "Candidates are read-only; use replace_round_song to apply one.",
+            "Prefer candidates with preview.available=true and low usage_history.used_count.",
+            "If verify_previews=false, preview.duration_seconds is unknown until the package gate checks audio.",
+        ],
     }
 
 
