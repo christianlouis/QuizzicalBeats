@@ -76,6 +76,23 @@
                 </div>
             </div>
         </div>
+
+        <div class="mb-6 border-t border-gray-200 pt-4">
+            <h3 class="text-md font-semibold mb-3 text-navy-700">Email Notifications</h3>
+            <label class="flex items-start gap-3 text-sm text-gray-700" for="import_job_email_notifications">
+                <input id="import_job_email_notifications"
+                       name="import_job_email_notifications"
+                       type="checkbox"
+                       class="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                       {% if preferences.import_job_email_notifications %}checked{% endif %}>
+                <span>
+                    <span class="block font-medium">Import job status emails</span>
+                    <span class="block text-xs text-gray-500">
+                        Send me an email when playlist imports complete or need manual repair.
+                    </span>
+                </span>
+            </label>
+        </div>
         
         <div class="flex items-center justify-between">
             <button class="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">

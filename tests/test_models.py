@@ -189,6 +189,7 @@ class TestUserPreferencesModel:
         assert fetched.default_tts_service == 'polly'
         assert fetched.enable_intro is True
         assert fetched.theme == 'light'
+        assert fetched.import_job_email_notifications is True
 
     def test_preferences_relationship(self, app):
         """Test that User.preferences relationship works."""

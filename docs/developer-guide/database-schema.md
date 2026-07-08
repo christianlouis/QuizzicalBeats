@@ -94,6 +94,7 @@ The `UserPreferences` table stores user-specific settings.
 | default_tts_service  | String(32)   | Default text-to-speech service (polly, etc.)     |
 | enable_intro         | Boolean      | Whether to enable intro sound                    |
 | theme                | String(16)   | UI theme preference (light, dark)                |
+| import_job_email_notifications | Boolean | Whether import completion/repair emails are enabled for the user |
 
 ### Role
 

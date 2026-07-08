@@ -36,6 +36,13 @@ def _import_job_email_notifications_enabled() -> bool:
     return bool_from_config(current_app.config.get("IMPORT_JOB_EMAIL_NOTIFICATIONS", False))
 
 
+def _user_import_job_email_notifications_enabled(user: User | None) -> bool:
+    preferences = getattr(user, "preferences", None)
+    if preferences is None:
+        return True
+    return bool(preferences.import_job_email_notifications)
+
+
 def _import_job_notification_body(record: ImportJobRecord) -> str:
     status_label = "completed" if record.status == "completed" else "needs manual review"
     lines = [
@@ -439,6 +446,15 @@ class ImportWorker(threading.Thread):
             return
 
         user = db.session.get(User, record.user_id)
+        if not _user_import_job_email_notifications_enabled(user):
+            current_app.logger.info(
+                "Import job %s reached %s but user %s disabled import job emails",
+                record.id,
+                record.status,
+                record.user_id,
+            )
+            return
+
         recipient = getattr(user, "email", None)
         if not recipient:
             current_app.logger.info(

@@ -1,6 +1,6 @@
 """Additional coverage tests for generate helpers, routes, and import queue."""
 import pytest
-from musicround.models import db, ImportJobRecord, User, Song, Round, Tag
+from musicround.models import db, ImportJobRecord, User, UserPreferences, Song, Round, Tag
 
 
 def _login(app, client, username='extra_user', email='extra@example.com'):
@@ -529,6 +529,25 @@ class TestUserRoutesExtended:
         _login(app, client)
         response = client.get('/users/edit-profile')
         assert response.status_code == 200
+        assert b'Import job status emails' in response.data
+
+    def test_edit_profile_updates_import_notification_preference(self, app, client):
+        """Editing the profile persists import job notification opt-out."""
+        _login(app, client, username='notify_pref_user', email='notify_pref@example.com')
+
+        response = client.post('/users/edit-profile', data={
+            'username': 'notify_pref_user',
+            'email': 'notify_pref@example.com',
+            'first_name': 'Notify',
+            'last_name': 'Pref',
+            'dropbox_export_path': '/QuizzicalBeats',
+        })
+
+        assert response.status_code == 302
+        with app.app_context():
+            user = User.query.filter_by(username='notify_pref_user').one()
+            preferences = UserPreferences.query.filter_by(user_id=user.id).one()
+            assert preferences.import_job_email_notifications is False
 
     def test_edit_profile_error_ui_does_not_render_raw_provider_fields(self, app, client):
         """The Dropbox folder-picker UI must not surface raw provider payloads."""

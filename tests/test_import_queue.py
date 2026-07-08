@@ -14,7 +14,7 @@ from musicround.helpers.import_queue import (
     ImportWorker,
     enqueue_import_job,
 )
-from musicround.models import ImportJobRecord, User, db
+from musicround.models import ImportJobRecord, User, UserPreferences, db
 
 
 class TestImportJob:
@@ -483,6 +483,45 @@ class TestImportWorker:
             assert f'import job #{record.id} completed' in kwargs['subject']
             assert 'Imported: 4' in kwargs['body_text']
             assert 'Skipped: 2' in kwargs['body_text']
+
+    def test_process_job_respects_user_import_notification_preference(self, app):
+        """Users can opt out of import job status emails."""
+        with app.app_context():
+            app.config['IMPORT_JOB_EMAIL_NOTIFICATIONS'] = True
+            user = User(username='optoutworker', email='optoutworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.flush()
+            db.session.add(
+                UserPreferences(
+                    user_id=user.id,
+                    import_job_email_notifications=False,
+                )
+            )
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='deezer',
+                item_type='playlist',
+                item_id='optout-playlist',
+                user_id=user.id,
+                priority=1,
+            )
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with (
+                patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import,
+                patch('musicround.helpers.import_queue.send_email') as mock_send,
+            ):
+                mock_import.return_value = {'imported_count': 4, 'skipped_count': 0}
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record.id)
+            assert updated.status == 'completed'
+            mock_send.assert_not_called()
 
     def test_process_job_does_not_send_completion_notification_by_default(self, app):
         """Import completion emails remain opt-in for deployments."""

@@ -32,6 +32,7 @@ class UserPreferences(db.Model):
     default_tts_service = db.Column(db.String(32), default='polly')
     enable_intro = db.Column(db.Boolean, default=True)
     theme = db.Column(db.String(16), default='light')
+    import_job_email_notifications = db.Column(db.Boolean, default=True, nullable=False)
     user = db.relationship('User', back_populates='preferences')
 
 

@@ -1,6 +1,6 @@
 # Agentic Backlog Status
 
-Last updated: July 7, 2026
+Last updated: July 8, 2026
 
 This page keeps the GitHub issue backlog aligned with what is actually present
 in the codebase. It is meant for coding agents before they pick the next local
@@ -24,7 +24,7 @@ issue after verification or continue with the remaining follow-up.
 | #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, MCP config diagnostics, runbook, Compose managed-db profile | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational | Quality gate and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
-| #28 Progress Pulse import status tracking | Partial | Queue status page, JSON polling endpoint, MCP import progress events, retry flow, retryability metadata, repair hints, and live stat polling | Completion email notification and richer per-row failed-position records remain. |
+| #33 Alert Amplifier notifications | Partial | Global import-job email toggle, completed/dead-letter status emails, and per-user profile opt-out | Email verification, round blocked notifications, OAuth expiry warnings, admin summaries, and optional push channels remain. |
 
 ## Recently Closed From This Crosswalk
 
@@ -38,6 +38,7 @@ issue after verification or continue with the remaining follow-up.
 - #68 Text and CSV playlist parser service
 - #69 Low-confidence text-import review workflow
 - #30 Textual Transport text/CSV paste, upload, review, and MCP path
+- #28 Progress Pulse import status tracking
 - #70 Quizmaster preferences and MCP summary
 - #71 Planned quiz date model and MCP planning tools
 - #72 Recent usage and fatigue summary for agents

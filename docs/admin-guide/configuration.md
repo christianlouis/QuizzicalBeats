@@ -168,6 +168,7 @@ IMPORT_JOB_EMAIL_NOTIFICATIONS=False
 
 Set `IMPORT_JOB_EMAIL_NOTIFICATIONS=True` to notify the owning user when an
 import job completes or exhausts automatic retries and needs manual review.
+Users can still opt out of these status emails from their profile.
 
 ### Automation Settings
 

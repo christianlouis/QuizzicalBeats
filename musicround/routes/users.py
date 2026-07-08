@@ -11,7 +11,7 @@ from flask_login import login_user, current_user, logout_user, login_required  #
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
 
-from musicround.models import db, User, Role, SystemSetting
+from musicround.models import db, User, Role, SystemSetting, UserPreferences
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
@@ -25,6 +25,14 @@ from musicround.helpers.spotify_helper import (
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 _LOGIN_FAILURES = {}
 _AUTOMATION_FAILURES = {}
+
+
+def _get_or_create_user_preferences(user: User) -> UserPreferences:
+    preferences = user.preferences
+    if preferences is None:
+        preferences = UserPreferences(user_id=user.id)
+        db.session.add(preferences)
+    return preferences
 
 
 def _client_rate_limit_id():
@@ -718,21 +726,25 @@ def profile():
 @login_required
 def edit_profile():
     """Edit user profile"""
+    preferences = _get_or_create_user_preferences(current_user)
     if request.method == 'POST':
         username = request.form.get('username')
         email = request.form.get('email')
         first_name = request.form.get('first_name')
         last_name = request.form.get('last_name')
         dropbox_export_path = request.form.get('dropbox_export_path', '/QuizzicalBeats').strip()
+        preferences.import_job_email_notifications = (
+            request.form.get('import_job_email_notifications') == 'on'
+        )
         
         # Check if username or email already exists and belongs to another user
         if username != current_user.username and User.query.filter_by(username=username).first():
             flash('That username is already taken', 'danger')
-            return render_template('users/edit_profile.html')
+            return render_template('users/edit_profile.html', preferences=preferences)
         
         if email != current_user.email and User.query.filter_by(email=email).first():
             flash('That email is already registered', 'danger')
-            return render_template('users/edit_profile.html')
+            return render_template('users/edit_profile.html', preferences=preferences)
         
         # Update user profile
         current_user.username = username
@@ -750,7 +762,7 @@ def edit_profile():
             current_app.logger.error(f"Error updating profile: {e}")
             flash('An error occurred while updating your profile', 'danger')
     
-    return render_template('users/edit_profile.html')
+    return render_template('users/edit_profile.html', preferences=preferences)
 
 @users_bp.route('/change-password', methods=['GET', 'POST'])
 @login_required
