@@ -2133,6 +2133,71 @@ def generate_round_assets(
     return assets
 
 
+def generate_round_assets_batch(
+    round_ids: Iterable[int],
+    user_id: int | None = None,
+    include_pdf: bool = True,
+    include_mp3: bool = True,
+) -> dict[str, Any]:
+    """Generate requested assets for several rounds without aborting the whole batch."""
+    normalized_round_ids = _normalize_round_ids(round_ids)
+    results: list[dict[str, Any]] = []
+    success_count = 0
+    error_count = 0
+
+    for round_id in normalized_round_ids:
+        try:
+            assets = generate_round_assets(
+                round_id=round_id,
+                user_id=user_id,
+                include_pdf=include_pdf,
+                include_mp3=include_mp3,
+            )
+        except AutomationError as exc:
+            error_count += 1
+            results.append(
+                {
+                    "round_id": round_id,
+                    "ok": False,
+                    "status": "error",
+                    "error": str(exc),
+                    "details": exc.details,
+                }
+            )
+            continue
+
+        success_count += 1
+        results.append(
+            {
+                "round_id": round_id,
+                "ok": True,
+                "status": "generated",
+                "assets": assets,
+                "review_url_path": assets.get("review_url_path"),
+            }
+        )
+
+    return {
+        "ok": error_count == 0,
+        "status": "ok" if error_count == 0 else "error",
+        "round_ids": normalized_round_ids,
+        "count": len(normalized_round_ids),
+        "success_count": success_count,
+        "error_count": error_count,
+        "results": results,
+        "generated_round_ids": [
+            item["round_id"] for item in results if item.get("ok")
+        ],
+        "failed_round_ids": [
+            item["round_id"] for item in results if not item.get("ok")
+        ],
+        "hints": [
+            "Rerun inspect_round_package_batch before scheduling or sending generated rounds.",
+            "Repair failed_round_ids, then rerun this asset generation batch.",
+        ],
+    }
+
+
 def _quality_issue(
     code: str,
     message: str,

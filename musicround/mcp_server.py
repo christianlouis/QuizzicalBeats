@@ -899,6 +899,23 @@ def generate_round_assets(
 
 
 @mcp.tool()
+def generate_round_assets_batch(
+    round_ids: list[int],
+    user_id: int | None = None,
+    include_pdf: bool = True,
+    include_mp3: bool = True,
+) -> dict[str, Any]:
+    """Generate PDF and/or MP3 files for several rounds."""
+    return _with_app_context(
+        automation.generate_round_assets_batch,
+        round_ids=round_ids,
+        user_id=user_id,
+        include_pdf=include_pdf,
+        include_mp3=include_mp3,
+    )
+
+
+@mcp.tool()
 def inspect_round_mp3(path: str | None = None, round_id: int | None = None) -> dict[str, Any]:
     """Check a round MP3 for duration, loudness, clipping, and silence issues."""
     return _with_app_context(automation.inspect_mp3_quality, path=path, round_id=round_id)

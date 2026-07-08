@@ -2043,6 +2043,52 @@ class TestAssetInspection:
             assert result["pdf"]["path"] == "/tmp/round.pdf"
             assert result["mp3"]["path"] == "/tmp/round.mp3"
 
+    def test_generate_round_assets_batch_continues_after_round_errors(self, app):
+        with app.app_context():
+            def fake_generate(round_id, **kwargs):
+                if round_id == 1:
+                    return {
+                        "round_id": 1,
+                        "review_url_path": "/rounds/1/bundle-review",
+                        "pdf": {"path": "/tmp/round1.pdf"},
+                    }
+                raise automation.AutomationError("Round 999 was not found.")
+
+            with patch("musicround.services.automation.generate_round_assets", side_effect=fake_generate) as mock_generate:
+                result = automation.generate_round_assets_batch(
+                    [1, 1, 999],
+                    user_id=7,
+                    include_pdf=True,
+                    include_mp3=False,
+                )
+
+            assert result["ok"] is False
+            assert result["status"] == "error"
+            assert result["round_ids"] == [1, 999]
+            assert result["count"] == 2
+            assert result["success_count"] == 1
+            assert result["error_count"] == 1
+            assert result["generated_round_ids"] == [1]
+            assert result["failed_round_ids"] == [999]
+            assert result["results"][0]["review_url_path"] == "/rounds/1/bundle-review"
+            assert result["results"][1]["status"] == "error"
+            assert mock_generate.call_count == 2
+            assert mock_generate.call_args_list[0].kwargs == {
+                "round_id": 1,
+                "user_id": 7,
+                "include_pdf": True,
+                "include_mp3": False,
+            }
+
+    def test_generate_round_assets_batch_validates_ids(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="at least one"):
+                automation.generate_round_assets_batch([])
+            with pytest.raises(automation.AutomationError, match="positive"):
+                automation.generate_round_assets_batch([0])
+            with pytest.raises(automation.AutomationError, match="at most 50"):
+                automation.generate_round_assets_batch(range(1, 52))
+
     def test_list_scheduled_round_emails_returns_pending_exports(self, app):
         with app.app_context():
             _configure_mail(app)
