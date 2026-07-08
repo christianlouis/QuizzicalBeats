@@ -1137,7 +1137,7 @@ class TestRoundDetailRoute:
         assert response.status_code == 400
         assert response.get_json() == {
             'success': False,
-            'error': 'Quality parameter values must be numeric.',
+            'error': 'Quality parameter values must be numeric and within allowed ranges.',
             'details': {
                 'invalid_parameters': [
                     {'name': 'expected_song_count', 'value': 'many'},
@@ -1147,6 +1147,44 @@ class TestRoundDetailRoute:
                 ],
             },
         }
+
+    def test_round_quality_endpoint_rejects_out_of_range_parameters(self, app, client):
+        """Quality endpoint should reject bounds instead of silently clamping them."""
+        _login(app, client)
+        song_id = _create_song(app, title='Quality Bounds Song')
+        round_id = _create_round(app, [song_id], name='Quality Bounds Round')
+
+        response = client.get(
+            f'/rounds/{round_id}/quality'
+            '?expected_song_count=0'
+            '&duration_tolerance_seconds=-5'
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['details']['invalid_parameters'] == [
+            {'name': 'expected_song_count', 'value': '0'},
+            {'name': 'duration_tolerance_seconds', 'value': '-5'},
+        ]
+
+    def test_round_quality_endpoint_rejects_inverted_preview_bounds(self, app, client):
+        """Preview min/max limits should fail fast before package inspection."""
+        _login(app, client)
+        song_id = _create_song(app, title='Quality Inverted Song')
+        round_id = _create_round(app, [song_id], name='Quality Inverted Round')
+
+        with patch('musicround.routes.rounds.automation.round_repair_report') as mock_report:
+            response = client.get(
+                f'/rounds/{round_id}/quality'
+                '?min_preview_seconds=35'
+                '&max_preview_seconds=20'
+            )
+
+        assert response.status_code == 400
+        assert response.get_json()['details']['invalid_parameters'] == [
+            {'name': 'min_preview_seconds', 'value': '35'},
+            {'name': 'max_preview_seconds', 'value': '20'},
+        ]
+        mock_report.assert_not_called()
 
     def test_replacement_endpoints_proxy_automation(self, app, client):
         """Replacement routes should make repair candidates actionable."""

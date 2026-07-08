@@ -891,10 +891,12 @@ def round_quality(round_id):
         except (TypeError, ValueError):
             invalid_parameters.append({'name': name, 'value': raw_value})
             return default
-        if minimum is not None:
-            value = max(minimum, value)
-        if maximum is not None:
-            value = min(maximum, value)
+        if minimum is not None and value < minimum:
+            invalid_parameters.append({'name': name, 'value': raw_value})
+            return default
+        if maximum is not None and value > maximum:
+            invalid_parameters.append({'name': name, 'value': raw_value})
+            return default
         return value
 
     def parse_float_query_arg(name, default, minimum=None):
@@ -924,10 +926,19 @@ def round_quality(round_id):
         automation.DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
         minimum=0.0,
     )
+    if (
+        request.args.get('min_preview_seconds') not in (None, '')
+        and request.args.get('max_preview_seconds') not in (None, '')
+        and min_preview_seconds > max_preview_seconds
+    ):
+        invalid_parameters.extend([
+            {'name': 'min_preview_seconds', 'value': request.args.get('min_preview_seconds')},
+            {'name': 'max_preview_seconds', 'value': request.args.get('max_preview_seconds')},
+        ])
     if invalid_parameters:
         return _automation_error_response(
             AutomationError(
-                'Quality parameter values must be numeric.',
+                'Quality parameter values must be numeric and within allowed ranges.',
                 details={'invalid_parameters': invalid_parameters},
             ),
             400,
