@@ -2820,15 +2820,7 @@ def round_repair_report(
     return {"quality": quality, "report": quality["report"]}
 
 
-def inspect_round_package_batch(
-    round_ids: Iterable[int],
-    user_id: int | None = None,
-    expected_song_count: int = 8,
-    min_preview_seconds: float = 20.0,
-    max_preview_seconds: float = 35.0,
-    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
-) -> dict[str, Any]:
-    """Inspect multiple round packages without aborting on one bad round."""
+def _normalize_round_ids(round_ids: Iterable[int]) -> list[int]:
     normalized_round_ids: list[int] = []
     seen_round_ids: set[int] = set()
     for value in round_ids or []:
@@ -2847,6 +2839,19 @@ def inspect_round_package_batch(
         raise AutomationError("round_ids must contain at least one round ID.")
     if len(normalized_round_ids) > 50:
         raise AutomationError("round_ids must contain at most 50 round IDs.")
+    return normalized_round_ids
+
+
+def inspect_round_package_batch(
+    round_ids: Iterable[int],
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Inspect multiple round packages without aborting on one bad round."""
+    normalized_round_ids = _normalize_round_ids(round_ids)
 
     rounds: list[dict[str, Any]] = []
     ok_count = 0
@@ -3063,6 +3068,87 @@ def round_repair_plan(
         "hints": [
             "This plan is read-only; apply replacements/additions explicitly.",
             "After changes, regenerate assets and rerun inspect_round_package before sending.",
+        ],
+    }
+
+
+def round_repair_plan_batch(
+    round_ids: Iterable[int],
+    user_id: int | None = None,
+    expected_song_count: int = 8,
+    replacement_limit: int = 5,
+    additional_limit: int = 10,
+    verify_previews: bool = False,
+    min_preview_seconds: float = 20.0,
+    max_preview_seconds: float = 35.0,
+    duration_tolerance_seconds: float = DEFAULT_MP3_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    """Build non-mutating repair plans for several rounds in one agent call."""
+    normalized_round_ids = _normalize_round_ids(round_ids)
+    plans: list[dict[str, Any]] = []
+    ready_count = 0
+    repair_count = 0
+    error_count = 0
+
+    for round_id in normalized_round_ids:
+        try:
+            plan = round_repair_plan(
+                round_id=round_id,
+                user_id=user_id,
+                expected_song_count=expected_song_count,
+                replacement_limit=replacement_limit,
+                additional_limit=additional_limit,
+                verify_previews=verify_previews,
+                min_preview_seconds=min_preview_seconds,
+                max_preview_seconds=max_preview_seconds,
+                duration_tolerance_seconds=duration_tolerance_seconds,
+            )
+        except AutomationError as exc:
+            error_count += 1
+            plans.append(
+                {
+                    "round_id": round_id,
+                    "ok": False,
+                    "status": "error",
+                    "error": str(exc),
+                    "details": exc.details,
+                    "needs_repair": True,
+                }
+            )
+            continue
+
+        needs_repair = not bool(plan.get("ok"))
+        if needs_repair:
+            repair_count += 1
+        else:
+            ready_count += 1
+        plan["needs_repair"] = needs_repair
+        plans.append(plan)
+
+    status = "ok"
+    if error_count:
+        status = "error"
+    elif repair_count:
+        status = "needs_repair"
+
+    return {
+        "ok": repair_count == 0 and error_count == 0,
+        "status": status,
+        "round_ids": normalized_round_ids,
+        "count": len(normalized_round_ids),
+        "ready_count": ready_count,
+        "repair_count": repair_count,
+        "error_count": error_count,
+        "plans": plans,
+        "ready_round_ids": [
+            item["round_id"] for item in plans if not item.get("needs_repair")
+        ],
+        "repair_round_ids": [
+            item["round_id"] for item in plans if item.get("needs_repair")
+        ],
+        "hints": [
+            "Apply only explicit replacement/addition actions from each plan.",
+            "After repairs, regenerate assets and rerun inspect_round_package_batch.",
         ],
     }
 

@@ -91,6 +91,7 @@ The MCP server exposes these tools:
 | `round_repair_report` | Return package quality plus a human-readable blocked/repair report. |
 | `inspect_round_package_batch` | Audit several rounds at once and split sendable round IDs from repair-needed IDs. |
 | `round_repair_plan` | Return a read-only repair plan with replacement and add-song candidates for a blocked round. |
+| `round_repair_plan_batch` | Return read-only repair plans for several blocked rounds in one call. |
 | `send_round_email` | Generate assets, block on failed package checks, and email only robust round bundles. |
 | `schedule_round_email` | Generate and inspect a robust round bundle, then schedule later email delivery; use `replace_existing=true` when rescheduling the same quiz round. |
 | `list_scheduled_round_emails` | List pending or historical scheduled email exports. |
@@ -138,6 +139,9 @@ explicitly set.
 8. Inspect the generated files and previews with `inspect_round_package`.
 9. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
+9. For several blocked rounds, call `round_repair_plan_batch`, apply only the
+   explicit `replace_round_song` / `add_round_song` actions selected from each
+   plan, regenerate assets, then rerun `inspect_round_package_batch`.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
    `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package
    gate before it creates the scheduled send. The timestamp must be in the

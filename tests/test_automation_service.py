@@ -1639,6 +1639,66 @@ class TestAssetInspection:
             with pytest.raises(automation.AutomationError, match="additional_limit"):
                 automation.round_repair_plan(round_id=1, additional_limit=51)
 
+    def test_round_repair_plan_batch_continues_after_round_errors(self, app):
+        with app.app_context():
+            def fake_plan(round_id, **kwargs):
+                if round_id == 1:
+                    return {
+                        "round_id": 1,
+                        "round_name": "Ready Round",
+                        "ok": True,
+                        "status": "ok",
+                        "next_actions": ["send_round_email"],
+                    }
+                if round_id == 2:
+                    return {
+                        "round_id": 2,
+                        "round_name": "Needs Repair",
+                        "ok": False,
+                        "status": "needs_substitution",
+                        "replacement_positions": [{"position": 3}],
+                        "next_actions": [
+                            "replace_failed_positions",
+                            "regenerate_assets",
+                            "inspect_round_package",
+                        ],
+                    }
+                raise automation.AutomationError("Round 999 was not found.")
+
+            with patch("musicround.services.automation.round_repair_plan", side_effect=fake_plan) as mock_plan:
+                result = automation.round_repair_plan_batch(
+                    [1, 2, 2, 999],
+                    user_id=7,
+                    replacement_limit=4,
+                    additional_limit=6,
+                    verify_previews=True,
+                )
+
+            assert result["ok"] is False
+            assert result["status"] == "error"
+            assert result["round_ids"] == [1, 2, 999]
+            assert result["ready_count"] == 1
+            assert result["repair_count"] == 1
+            assert result["error_count"] == 1
+            assert result["ready_round_ids"] == [1]
+            assert result["repair_round_ids"] == [2, 999]
+            assert result["plans"][0]["needs_repair"] is False
+            assert result["plans"][1]["needs_repair"] is True
+            assert result["plans"][2]["status"] == "error"
+            assert mock_plan.call_count == 3
+            assert mock_plan.call_args_list[0].kwargs["replacement_limit"] == 4
+            assert mock_plan.call_args_list[0].kwargs["additional_limit"] == 6
+            assert mock_plan.call_args_list[0].kwargs["verify_previews"] is True
+
+    def test_round_repair_plan_batch_validates_ids(self, app):
+        with app.app_context():
+            with pytest.raises(automation.AutomationError, match="at least one"):
+                automation.round_repair_plan_batch([])
+            with pytest.raises(automation.AutomationError, match="positive"):
+                automation.round_repair_plan_batch([-1])
+            with pytest.raises(automation.AutomationError, match="at most 50"):
+                automation.round_repair_plan_batch(range(1, 52))
+
     def test_round_audio_component_failures_hide_exception_details(self, app):
         with app.app_context():
             user = _create_user()
