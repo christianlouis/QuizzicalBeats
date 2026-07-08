@@ -614,6 +614,7 @@ def recent_usage_summary(
     months: int = 3,
     song_ids: list[int] | None = None,
     limit: int = 50,
+    repeat_cooldown_weeks: int | None = None,
 ) -> dict[str, Any]:
     """Summarize recent song usage and warn when selected songs were used recently."""
     return _with_app_context(
@@ -622,6 +623,7 @@ def recent_usage_summary(
         months=months,
         song_ids=song_ids,
         limit=limit,
+        repeat_cooldown_weeks=repeat_cooldown_weeks,
     )
 
 
@@ -760,7 +762,7 @@ def draft_round_audio_scripts(
     user_id: int | None = None,
     quiz_date: str | None = None,
     theme: str | None = None,
-    tone: str = "warm, concise, lightly humorous",
+    tone: str | None = None,
     persist: bool = False,
 ) -> dict[str, Any]:
     """Draft intro, replay, and outro script text before generating TTS audio."""
