@@ -2,6 +2,7 @@ import os
 import logging
 import importlib.util
 import json
+import gzip
 from flask import Flask, session, redirect, url_for, request
 from flask_login import LoginManager, current_user
 from flask_sqlalchemy import SQLAlchemy
@@ -31,6 +32,19 @@ csrf = CSRFProtect()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE_DIR = '/data'
+DEFAULT_COMPRESSIBLE_MIMETYPES = {
+    'application/javascript',
+    'application/json',
+    'application/manifest+json',
+    'application/xml',
+    'image/svg+xml',
+    'text/css',
+    'text/csv',
+    'text/html',
+    'text/javascript',
+    'text/plain',
+    'text/xml',
+}
 
 
 def _default_database_dir(app):
@@ -180,6 +194,50 @@ def _install_security_headers(app):
         return response
 
 
+def _configured_compression_mimetypes(app):
+    configured = app.config.get('RESPONSE_COMPRESSION_MIMETYPES')
+    if not configured:
+        return DEFAULT_COMPRESSIBLE_MIMETYPES
+    if isinstance(configured, str):
+        return {item.strip() for item in configured.split(',') if item.strip()}
+    return {str(item).strip() for item in configured if str(item).strip()}
+
+
+def _install_response_compression(app):
+    """Install conservative gzip response compression for text-like responses."""
+    if not app.config.get('RESPONSE_COMPRESSION_ENABLED', True):
+        return
+
+    @app.after_request
+    def gzip_response(response):
+        if 'gzip' not in request.headers.get('Accept-Encoding', '').lower():
+            return response
+        if response.direct_passthrough or response.is_streamed:
+            return response
+        if response.status_code < 200 or response.status_code in (204, 304):
+            return response
+        if response.headers.get('Content-Encoding'):
+            return response
+        if response.mimetype not in _configured_compression_mimetypes(app):
+            return response
+
+        body = response.get_data()
+        min_size = int(app.config.get('RESPONSE_COMPRESSION_MIN_BYTES') or 1024)
+        if len(body) < max(0, min_size):
+            return response
+
+        compressed = gzip.compress(body)
+        if len(compressed) >= len(body):
+            return response
+
+        response.set_data(compressed)
+        response.headers['Content-Encoding'] = 'gzip'
+        response.headers['Content-Length'] = str(len(compressed))
+        response.headers.pop('ETag', None)
+        response.vary.add('Accept-Encoding')
+        return response
+
+
 def run_migrations():
     """
     Run all migration scripts in the migrations directory
@@ -281,6 +339,7 @@ def create_app(config=None):
         app.logger.info("Applying ForceHTTPSMiddleware - all URLs will use HTTPS scheme regardless of headers")
 
     _install_security_headers(app)
+    _install_response_compression(app)
     
     _configure_database_uri(app)
     

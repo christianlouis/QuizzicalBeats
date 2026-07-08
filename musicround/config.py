@@ -127,6 +127,26 @@ class Config:
         "SECURITY_PERMISSIONS_POLICY",
         "camera=(), microphone=(), geolocation=()",
     )
+    RESPONSE_COMPRESSION_ENABLED = bool_from_config(os.getenv("RESPONSE_COMPRESSION_ENABLED", "True"))
+    RESPONSE_COMPRESSION_MIN_BYTES = _int_from_env("RESPONSE_COMPRESSION_MIN_BYTES", 1024)
+    RESPONSE_COMPRESSION_MIMETYPES = os.getenv(
+        "RESPONSE_COMPRESSION_MIMETYPES",
+        ",".join(
+            [
+                "application/javascript",
+                "application/json",
+                "application/manifest+json",
+                "application/xml",
+                "image/svg+xml",
+                "text/css",
+                "text/csv",
+                "text/html",
+                "text/javascript",
+                "text/plain",
+                "text/xml",
+            ]
+        ),
+    )
 
     # Minimal in-app authentication throttles. These are per-process safety nets,
     # not a replacement for edge/WAF rate limiting.

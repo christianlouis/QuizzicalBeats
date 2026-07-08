@@ -122,6 +122,21 @@ preflight, and health diagnostics warn when a full URI is masking complete
 split PostgreSQL configuration so the managed-database cutover does not silently
 keep using the old `/data` SQLite target.
 
+### Response Compression
+
+```bash
+RESPONSE_COMPRESSION_ENABLED=True
+RESPONSE_COMPRESSION_MIN_BYTES=1024
+# Optional comma-separated override for text-like response types:
+# RESPONSE_COMPRESSION_MIMETYPES=text/html,text/css,application/json
+```
+
+Quizzical Beats can gzip large text-like responses when the client advertises
+`Accept-Encoding: gzip`. Binary round artifacts such as PDFs, MP3s, and ZIP
+downloads are intentionally left untouched. Set
+`RESPONSE_COMPRESSION_ENABLED=False` when compression is owned entirely by the
+reverse proxy.
+
 ### OAuth Provider Configuration
 
 ```bash

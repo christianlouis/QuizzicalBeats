@@ -2,6 +2,7 @@
 import os
 import json
 import importlib
+import gzip
 from datetime import datetime, timedelta
 
 from flask import Flask
@@ -12,6 +13,7 @@ os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 from musicround import (
     _configure_database_uri,
     _install_security_headers,
+    _install_response_compression,
     _import_workers_enabled,
     _spotify_authlib_token_from_user,
     _store_spotify_authlib_token,
@@ -428,6 +430,76 @@ def test_security_headers_can_be_disabled():
 
     assert 'X-Content-Type-Options' not in response.headers
     assert 'Strict-Transport-Security' not in response.headers
+
+
+def test_response_compression_gzips_large_text_response():
+    """Large text-like responses should be compressed when clients support gzip."""
+    app = Flask(__name__)
+    app.config.update(
+        RESPONSE_COMPRESSION_ENABLED=True,
+        RESPONSE_COMPRESSION_MIN_BYTES=64,
+        RESPONSE_COMPRESSION_MIMETYPES='text/plain,application/json',
+    )
+    _install_response_compression(app)
+
+    @app.route('/large')
+    def large_route():
+        return app.response_class('quiz-beats-' * 200, mimetype='text/plain')
+
+    response = app.test_client().get('/large', headers={'Accept-Encoding': 'gzip'})
+
+    assert response.headers['Content-Encoding'] == 'gzip'
+    assert 'Accept-Encoding' in response.headers['Vary']
+    assert gzip.decompress(response.data) == b'quiz-beats-' * 200
+    assert int(response.headers['Content-Length']) == len(response.data)
+
+
+def test_response_compression_skips_clients_without_gzip():
+    """Responses should stay uncompressed unless the client advertises gzip."""
+    app = Flask(__name__)
+    app.config.update(RESPONSE_COMPRESSION_ENABLED=True, RESPONSE_COMPRESSION_MIN_BYTES=64)
+    _install_response_compression(app)
+
+    @app.route('/large')
+    def large_route():
+        return app.response_class('quiz-beats-' * 200, mimetype='text/plain')
+
+    response = app.test_client().get('/large')
+
+    assert 'Content-Encoding' not in response.headers
+    assert response.data == b'quiz-beats-' * 200
+
+
+def test_response_compression_skips_binary_downloads():
+    """Binary assets and generated artifacts must not be gzipped by the app."""
+    app = Flask(__name__)
+    app.config.update(RESPONSE_COMPRESSION_ENABLED=True, RESPONSE_COMPRESSION_MIN_BYTES=1)
+    _install_response_compression(app)
+
+    @app.route('/round.pdf')
+    def pdf_route():
+        return app.response_class(b'%PDF-' + (b'0' * 500), mimetype='application/pdf')
+
+    response = app.test_client().get('/round.pdf', headers={'Accept-Encoding': 'gzip'})
+
+    assert 'Content-Encoding' not in response.headers
+    assert response.data.startswith(b'%PDF-')
+
+
+def test_response_compression_can_be_disabled():
+    """Operators can keep compression owned by the reverse proxy only."""
+    app = Flask(__name__)
+    app.config.update(RESPONSE_COMPRESSION_ENABLED=False, RESPONSE_COMPRESSION_MIN_BYTES=1)
+    _install_response_compression(app)
+
+    @app.route('/large')
+    def large_route():
+        return app.response_class('quiz-beats-' * 200, mimetype='text/plain')
+
+    response = app.test_client().get('/large', headers={'Accept-Encoding': 'gzip'})
+
+    assert 'Content-Encoding' not in response.headers
+    assert response.data == b'quiz-beats-' * 200
 
 
 def test_spotify_authlib_token_from_legacy_json_user_token(app):
