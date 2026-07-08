@@ -12,6 +12,7 @@ import tempfile
 from copy import deepcopy
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
+from threading import RLock
 from time import monotonic
 from typing import Any
 
@@ -21,6 +22,7 @@ from flask_login import login_user, logout_user
 from pydub import AudioSegment
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 
 from musicround import db
 from musicround.helpers.database_config import (
@@ -93,6 +95,7 @@ MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 _FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_FIND_SONGS_CACHE_LOCK = RLock()
 DEFAULT_SEED_SOURCE_DEFINITIONS = [
     {
         "name": "Billboard Hot 100",
@@ -1145,14 +1148,15 @@ def _find_songs_cache_key(**kwargs: Any) -> tuple[Any, ...]:
 
 
 def _cache_get(cache_key: tuple[Any, ...]) -> dict[str, Any] | None:
-    cached = _FIND_SONGS_CACHE.get(cache_key)
-    if not cached:
-        return None
-    cached_at, payload = cached
-    if monotonic() - cached_at > SEARCH_CACHE_TTL_SECONDS:
-        _FIND_SONGS_CACHE.pop(cache_key, None)
-        return None
-    result = deepcopy(payload)
+    with _FIND_SONGS_CACHE_LOCK:
+        cached = _FIND_SONGS_CACHE.get(cache_key)
+        if not cached:
+            return None
+        cached_at, payload = cached
+        if monotonic() - cached_at > SEARCH_CACHE_TTL_SECONDS:
+            _FIND_SONGS_CACHE.pop(cache_key, None)
+            return None
+        result = deepcopy(payload)
     result["cache"] = {
         "hit": True,
         "ttl_seconds": SEARCH_CACHE_TTL_SECONDS,
@@ -1162,10 +1166,11 @@ def _cache_get(cache_key: tuple[Any, ...]) -> dict[str, Any] | None:
 
 
 def _cache_set(cache_key: tuple[Any, ...], payload: dict[str, Any]) -> None:
-    if len(_FIND_SONGS_CACHE) >= SEARCH_CACHE_MAX_ENTRIES:
-        oldest_key = min(_FIND_SONGS_CACHE, key=lambda key: _FIND_SONGS_CACHE[key][0])
-        _FIND_SONGS_CACHE.pop(oldest_key, None)
-    _FIND_SONGS_CACHE[cache_key] = (monotonic(), deepcopy(payload))
+    with _FIND_SONGS_CACHE_LOCK:
+        if len(_FIND_SONGS_CACHE) >= SEARCH_CACHE_MAX_ENTRIES:
+            oldest_key = min(_FIND_SONGS_CACHE, key=lambda key: _FIND_SONGS_CACHE[key][0])
+            _FIND_SONGS_CACHE.pop(oldest_key, None)
+        _FIND_SONGS_CACHE[cache_key] = (monotonic(), deepcopy(payload))
 
 
 def _normalized_search_terms(*values: str | None) -> list[str]:
@@ -1409,7 +1414,7 @@ def find_songs(
     if isrc:
         filters.append(Song.isrc == isrc)
 
-    song_query = Song.query
+    song_query = Song.query.options(selectinload(Song.tags))
     for condition in filters:
         song_query = song_query.filter(condition)
     total = song_query.count()

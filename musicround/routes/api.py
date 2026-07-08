@@ -904,7 +904,27 @@ def search_songs():
         unused_only=_bool_arg('unused_only') is True,
         limit=_int_arg('limit', default=20, minimum=1, maximum=100) or 20,
     )
-    return jsonify(result['songs'])
+    result_songs = result['songs']
+    song_ids = [song['id'] for song in result_songs]
+    metadata_by_id = {
+        song['id']: {
+            'search_score': song.get('search_score', 0),
+            'match_reasons': song.get('match_reasons', []),
+        }
+        for song in result_songs
+    }
+    songs_by_id = {
+        song.id: song
+        for song in Song.query.filter(Song.id.in_(song_ids)).all()
+    }
+    payload = []
+    for song_id in song_ids:
+        if song_id not in songs_by_id:
+            continue
+        song_payload = _song_payload(songs_by_id[song_id])
+        song_payload.update(metadata_by_id.get(song_id, {}))
+        payload.append(song_payload)
+    return jsonify(payload)
 
 @api_bp.route('/songs/update-audio-features', methods=['POST'])
 @login_required
