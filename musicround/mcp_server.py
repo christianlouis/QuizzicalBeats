@@ -308,6 +308,7 @@ def update_round_review_status(
     review_status: str,
     notes: str | None = None,
     reviewer_user_id: int | None = None,
+    include_review_payload: bool = False,
 ) -> dict[str, Any]:
     """Approve, block, reject, or reset a generated round before delivery."""
     return _with_app_context(
@@ -316,6 +317,7 @@ def update_round_review_status(
         review_status=review_status,
         notes=notes,
         reviewer_user_id=reviewer_user_id,
+        include_review_payload=include_review_payload,
     )
 
 
@@ -936,12 +938,17 @@ def create_round_from_text_playlist(
 
 
 @mcp.tool()
-def round_analytics_summary(months: int = 6, limit: int = 20) -> dict[str, Any]:
+def round_analytics_summary(
+    months: int = 6,
+    limit: int = 20,
+    repeat_threshold: int = 3,
+) -> dict[str, Any]:
     """Return catalog and round analytics for planning and fatigue checks."""
     return _with_app_context(
         automation.round_analytics_summary,
         months=months,
         limit=limit,
+        repeat_threshold=repeat_threshold,
     )
 
 
@@ -1117,10 +1124,8 @@ def schedule_round_email(
     subject: str | None = None,
     body_text: str | None = None,
     replace_existing: bool = False,
-    admin_override_user_id: int | None = None,
-    review_override_reason: str | None = None,
 ) -> dict[str, Any]:
-    """Schedule a round email for a future worker run."""
+    """Schedule an approved round email for a future worker run."""
     return _with_app_context(
         automation.schedule_round_email,
         round_id=round_id,
@@ -1130,8 +1135,6 @@ def schedule_round_email(
         subject=subject,
         body_text=body_text,
         replace_existing=replace_existing,
-        admin_override_user_id=admin_override_user_id,
-        review_override_reason=review_override_reason,
     )
 
 

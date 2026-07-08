@@ -2079,6 +2079,35 @@ class TestAssetInspection:
             assert exc_info.value.details["status"] == "review_not_approved"
             assert RoundExport.query.filter_by(round_id=round_id).count() == 0
 
+    def test_schedule_round_email_rejects_review_override(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            admin = _create_user(username="schedule-admin", email="schedule-admin@example.test")
+            admin.is_admin = True
+            song = _create_song(title="Scheduled Override", artist="Artist")
+            round_id = automation.create_round(
+                name="Scheduled Override Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
+            scheduled_for, _, _ = _future_schedule_pair()
+
+            with patch("musicround.services.automation.generate_round_assets") as mock_assets:
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.schedule_round_email(
+                        round_id,
+                        scheduled_for=scheduled_for,
+                        user_id=user.id,
+                        admin_override_user_id=admin.id,
+                        review_override_reason="Do this later.",
+                    )
+
+            mock_assets.assert_not_called()
+            assert exc_info.value.details["status"] == "scheduled_review_override_forbidden"
+            assert RoundExport.query.filter_by(round_id=round_id).count() == 0
+
     def test_round_review_payload_includes_review_inputs_and_repair_hints(self, app):
         with app.app_context():
             user = _create_user()
@@ -2120,6 +2149,73 @@ class TestAssetInspection:
             assert result["audio_scripts"][0]["script_type"] == "intro"
             assert result["quality"]["status"] == "needs_substitution"
             assert result["repair_hints"] == ["replace position 1"]
+
+    def test_update_round_review_status_is_lightweight_by_default(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Lightweight Review", artist="Artist")
+            round_id = automation.create_round(
+                name="Lightweight Review Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            with patch("musicround.services.automation.round_repair_report") as mock_repair:
+                result = automation.update_round_review_status(
+                    round_id,
+                    review_status="reviewed",
+                    notes="Ready for final approval.",
+                    reviewer_user_id=user.id,
+                )
+
+            mock_repair.assert_not_called()
+            assert result["updated"] is True
+            assert "review_payload" not in result
+            assert result["round"]["review_status"] == "reviewed"
+
+    def test_update_round_review_status_can_return_payload_when_requested(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Payload Review", artist="Artist")
+            round_id = automation.create_round(
+                name="Payload Review Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            with patch(
+                "musicround.services.automation.round_repair_report",
+                return_value={"ok": True, "status": "ok", "hints": []},
+            ) as mock_repair:
+                result = automation.update_round_review_status(
+                    round_id,
+                    review_status="approved",
+                    reviewer_user_id=user.id,
+                    include_review_payload=True,
+                )
+
+            mock_repair.assert_called_once()
+            assert result["review_payload"]["quality"]["status"] == "ok"
+
+    def test_update_round_review_status_rejects_manual_sent(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Manual Sent", artist="Artist")
+            round_id = automation.create_round(
+                name="Manual Sent Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+
+            with pytest.raises(automation.AutomationError, match="review_status"):
+                automation.update_round_review_status(
+                    round_id,
+                    review_status="sent",
+                    reviewer_user_id=user.id,
+                )
 
     def test_schedule_round_email_blocks_past_delivery_before_generation(self, app):
         with app.app_context():
@@ -3016,21 +3112,40 @@ class TestAgentPlanningAutomation:
 
     def test_round_analytics_summary_reports_catalog_health(self, app):
         with app.app_context():
-            _create_song(title="Used", artist="A", genre="Rock", used_count=4)
+            user = _create_user(username="analytics-master", email="analytics@example.test")
+            used_song = _create_song(title="Used", artist="A", genre="Rock", used_count=4)
             _create_song(title="Unused", artist="B", genre="Pop", used_count=0)
             _create_song(title="No Preview", artist="C", genre="Rock")
             _create_song(title="Unknown Genre", artist="D", genre="Unknown", preview_url="https://example.test/unknown.mp3")
             _create_song(title="Spaced Genre", artist="E", genre=" rock ", used_count=0)
             _create_song(title="Blank Genre", artist="F", genre="   ", used_count=0)
+            round_id = automation.create_round(
+                name="Analytics Used Round",
+                round_type="theme",
+                criteria="Rock Night",
+                song_ids=[used_song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.round_criteria_used = "Rock Night"
+            db.session.commit()
 
-            result = automation.round_analytics_summary(months=6, limit=5)
+            result = automation.round_analytics_summary(months=6, limit=5, repeat_threshold=3)
 
             assert result["song_count"] == 6
+            assert result["repeat_threshold"] == 3
             assert result["missing_preview_count"] == 5
             assert result["unknown_genre_count"] == 2
             assert result["genre_counts"]["Rock"] == 3
             assert "Unknown" not in result["genre_counts"]
             assert result["most_used_songs"][0]["title"] == "Used"
+            assert result["most_used_songs"][0]["above_repeat_threshold"] is True
+            assert result["most_used_songs"][0]["affected_rounds"][0]["id"]
+            assert result["most_used_songs"][0]["last_used_quizmaster"]["username"] == "analytics-master"
+            assert result["most_used_artists"][0]["artist"] == "A"
+            assert result["decade_counts"][0]["decade"] == "Unknown"
+            assert result["theme_counts"][0]["theme"] == "Rock Night"
+            assert result["fatigue_alerts"][0]["title"] == "Used"
             assert any(song["title"] == "Unused" for song in result["unused_candidates"])
 
     def test_recent_usage_summary_warns_for_recently_used_selected_songs(self, app):
@@ -3305,6 +3420,7 @@ class TestAgentPlanningAutomation:
                 song_ids=[song.id],
                 user_id=user.id,
             )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
             export = RoundExport(
                 round_id=round_id,
                 user_id=user.id,
@@ -3336,10 +3452,17 @@ class TestAgentPlanningAutomation:
             assert created["created"] is True
             assert created["plan"]["quiz_date"] == "2026-07-09T17:00:00Z"
             assert created["plan"]["due_at"] == "2026-07-09T15:00:00Z"
+            assert created["plan"]["missing_deliverables"] == [
+                "round",
+                "approved_round",
+                "scheduled_email",
+            ]
             assert listed["count"] == 1
+            assert listed["missing_deliverable_count"] == 1
             assert linked["plan"]["round_id"] == round_id
             assert linked["plan"]["export_id"] == export.id
             assert linked["plan"]["status"] == "scheduled"
+            assert linked["plan"]["deliverable_status"]["complete"] is True
             assert PlannedQuizRound.query.get(plan_id).round_id == round_id
 
     def test_planned_quiz_round_rejects_invalid_links(self, app):
@@ -3368,6 +3491,24 @@ class TestAgentPlanningAutomation:
             assert created["created"] is True
             assert created["plan"]["quizmaster_id"] is None
             assert created["plan"]["quizmaster"] is None
+
+    def test_planned_quiz_round_flags_due_missing_deliverables(self, app):
+        with app.app_context():
+            due_at = datetime.utcnow() + timedelta(hours=12)
+            quiz_date = due_at + timedelta(hours=2)
+
+            created = automation.create_planned_quiz_round(
+                quiz_date=quiz_date,
+                due_at=due_at,
+                status="blocked",
+            )
+            listed = automation.list_planned_quiz_rounds(status="blocked")
+
+            assert created["plan"]["due_warning"] is True
+            assert created["plan"]["blocked_close_to_due"] is True
+            assert created["plan"]["deliverable_status"]["needs_round"] is True
+            assert created["plan"]["deliverable_status"]["needs_scheduled_email"] is True
+            assert listed["due_warning_count"] == 1
 
     def test_draft_round_audio_scripts_uses_round_context(self, app):
         with app.app_context():
