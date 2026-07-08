@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added planned-round deliverable status and due-soon warnings to MCP payloads
   and the browser calendar so agents can see missing rounds, approvals, and
   scheduled email exports before quiz deadlines.
+- Added quizmaster profile preferences for language, tone, TTS voice, email
+  recipient, genre/decade taste, banned songs/artists, repeat cooldowns, and
+  same-quizmaster repeat warnings in agent planning payloads.
 - Added configurable music-round fatigue analytics for repeated songs, artists,
   decades, genres, and themes, including affected-round links and quizmaster
   context for repeated songs.

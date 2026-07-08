@@ -1380,7 +1380,7 @@ def round_review_payload(
             "position": position,
             "song": _song_summary(song),
             "preview_status": _round_preview_status(song),
-            "usage_warning": _song_usage_warning(song, window_start),
+            "usage_warning": _song_usage_warning(song, window_start, user_id=user.id if user else None),
         })
 
     mp3_path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
@@ -4354,18 +4354,70 @@ def create_round_from_text_playlist(
     }
 
 
-def _song_usage_warning(song: Song, window_start: datetime) -> dict[str, Any] | None:
-    if not song.last_used:
+def _recent_round_usage_for_song(
+    song_id: int,
+    window_start: datetime,
+    user_id: int | None = None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    query = Round.query.filter(Round.created_at >= window_start)
+    if user_id is not None:
+        query = query.filter(Round.user_id == user_id)
+    rounds = (
+        query.order_by(Round.created_at.desc(), Round.id.desc())
+        .limit(200)
+        .all()
+    )
+    matches = [
+        {
+            "id": round_obj.id,
+            "name": round_obj.name,
+            "created_at": _datetime_payload(round_obj.created_at),
+            "quizmaster": _user_summary(round_obj.owner),
+        }
+        for round_obj in rounds
+        if song_id in _round_song_ids(round_obj)
+    ]
+    return matches[:limit]
+
+
+def _song_usage_warning(
+    song: Song,
+    window_start: datetime,
+    user_id: int | None = None,
+) -> dict[str, Any] | None:
+    global_rounds = _recent_round_usage_for_song(song.id, window_start)
+    same_quizmaster_rounds = (
+        _recent_round_usage_for_song(song.id, window_start, user_id=user_id)
+        if user_id is not None
+        else []
+    )
+    if not song.last_used and not global_rounds:
         return None
-    if song.last_used < window_start:
+    if song.last_used and song.last_used < window_start and not global_rounds:
         return None
+    scope = "same_quizmaster" if same_quizmaster_rounds else "global"
+    latest_round = (same_quizmaster_rounds or global_rounds or [None])[0]
+    quizmaster = latest_round["quizmaster"] if latest_round else None
+    quizmaster_label = (
+        f" by {quizmaster['username']}" if quizmaster and quizmaster.get("username") else ""
+    )
+    used_on = (
+        song.last_used.date().isoformat()
+        if song.last_used
+        else (latest_round or {}).get("created_at", "recently")[:10]
+    )
     return {
         "song": _song_summary(song),
         "warning": (
-            f"Heads up: {song.artist} - {song.title} was used on "
-            f"{song.last_used.date().isoformat()}."
+            f"Heads up: {song.artist} - {song.title} was used{quizmaster_label} on "
+            f"{used_on}."
         ),
         "last_used": _datetime_payload(song.last_used),
+        "scope": scope,
+        "same_quizmaster_repeat": bool(same_quizmaster_rounds),
+        "global_repeat": bool(global_rounds),
+        "recent_rounds": same_quizmaster_rounds or global_rounds,
     }
 
 
@@ -4374,6 +4426,7 @@ def recent_usage_summary(
     months: int = 3,
     song_ids: list[int] | None = None,
     limit: int = 50,
+    repeat_cooldown_weeks: int | None = None,
 ) -> dict[str, Any]:
     """Summarize recent song and round usage for autonomous round planning."""
     if months < 1 or months > 24:
@@ -4381,8 +4434,15 @@ def recent_usage_summary(
     if limit < 1 or limit > 200:
         raise AutomationError("limit must be between 1 and 200.")
 
-    window_start = datetime.utcnow() - timedelta(days=months * 31)
+    cooldown_weeks = repeat_cooldown_weeks if repeat_cooldown_weeks is not None else months * 4
+    if cooldown_weeks < 1 or cooldown_weeks > 260:
+        raise AutomationError("repeat_cooldown_weeks must be between 1 and 260.")
+
+    window_start = datetime.utcnow() - timedelta(days=max(months * 31, cooldown_weeks * 7))
     rounds_query = Round.query.filter(Round.created_at >= window_start)
+    same_quizmaster_round_count = 0
+    if user_id is not None:
+        same_quizmaster_round_count = rounds_query.filter(Round.user_id == user_id).count()
     rounds = rounds_query.order_by(Round.created_at.desc(), Round.id.desc()).limit(limit).all()
 
     songs_query = Song.query.filter(Song.last_used.isnot(None)).filter(Song.last_used >= window_start)
@@ -4393,15 +4453,17 @@ def recent_usage_summary(
         selected = Song.query.filter(Song.id.in_(song_ids)).all()
         selected_warnings = [
             warning for song in selected
-            if (warning := _song_usage_warning(song, window_start)) is not None
+            if (warning := _song_usage_warning(song, window_start, user_id=user_id)) is not None
         ]
 
     user = _find_user(user_id) if user_id is not None else None
     return {
         "window_months": months,
         "window_start": _datetime_payload(window_start),
+        "repeat_cooldown_weeks": cooldown_weeks,
         "user": None if user is None else {"id": user.id, "username": user.username, "email": user.email},
         "round_count": len(rounds),
+        "same_quizmaster_round_count": same_quizmaster_round_count,
         "recent_rounds": [_round_summary(round_obj) for round_obj in rounds],
         "frequent_songs": [_song_summary(song) for song in songs],
         "selected_song_warnings": selected_warnings,
@@ -4550,7 +4612,7 @@ def round_analytics_summary(
 def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
     """Return personalization context for an agent planning a quiz round."""
     user = _find_user(user_id)
-    preferences = user.preferences
+    preferences = _quizmaster_preferences_payload(user)
     return {
         "quizmaster": {
             "id": user.id,
@@ -4558,15 +4620,13 @@ def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
             "email": user.email,
             "name": " ".join(part for part in (user.first_name, user.last_name) if part) or None,
         },
-        "preferences": {
-            "default_tts_service": preferences.default_tts_service if preferences else "polly",
-            "enable_intro": preferences.enable_intro if preferences else True,
-            "theme": preferences.theme if preferences else "light",
-            "has_intro_mp3": bool(user.intro_mp3),
-            "has_replay_mp3": bool(user.replay_mp3),
-            "has_outro_mp3": bool(user.outro_mp3),
-        },
-        "recent_usage": recent_usage_summary(user_id=user.id, months=months, limit=25),
+        "preferences": preferences,
+        "recent_usage": recent_usage_summary(
+            user_id=user.id,
+            months=months,
+            limit=25,
+            repeat_cooldown_weeks=preferences["repeat_cooldown_weeks"],
+        ),
     }
 
 
@@ -4574,6 +4634,65 @@ def _normalize_brief_text(value: str | None) -> str | None:
     if value is None:
         return None
     return " ".join(value.strip().split()) or None
+
+
+def _preferences_text_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    parsed: Any = None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        parsed = None
+    if isinstance(parsed, list):
+        items = parsed
+    else:
+        items = re.split(r"[\n,;]+", value)
+    return [
+        text
+        for item in items
+        if (text := " ".join(str(item).strip().split()))
+    ]
+
+
+def _quizmaster_preferences_payload(user: User) -> dict[str, Any]:
+    preferences = user.preferences
+    if preferences is None:
+        return {
+            "default_tts_service": "polly",
+            "default_language": "de",
+            "tone": "warm, concise, lightly humorous",
+            "tts_voice": None,
+            "email_recipient": user.email,
+            "enable_intro": True,
+            "theme": "light",
+            "preferred_genres": [],
+            "preferred_decades": [],
+            "banned_artists": [],
+            "banned_songs": [],
+            "repeat_cooldown_weeks": 12,
+            "has_intro_mp3": bool(user.intro_mp3),
+            "has_replay_mp3": bool(user.replay_mp3),
+            "has_outro_mp3": bool(user.outro_mp3),
+        }
+
+    return {
+        "default_tts_service": preferences.default_tts_service or "polly",
+        "default_language": preferences.default_language or "de",
+        "tone": preferences.tone or "warm, concise, lightly humorous",
+        "tts_voice": preferences.tts_voice,
+        "email_recipient": preferences.email_recipient or user.email,
+        "enable_intro": preferences.enable_intro,
+        "theme": preferences.theme or "light",
+        "preferred_genres": _preferences_text_list(preferences.preferred_genres),
+        "preferred_decades": _preferences_text_list(preferences.preferred_decades),
+        "banned_artists": _preferences_text_list(preferences.banned_artists),
+        "banned_songs": _preferences_text_list(preferences.banned_songs),
+        "repeat_cooldown_weeks": preferences.repeat_cooldown_weeks or 12,
+        "has_intro_mp3": bool(user.intro_mp3),
+        "has_replay_mp3": bool(user.replay_mp3),
+        "has_outro_mp3": bool(user.outro_mp3),
+    }
 
 
 def _normalize_brief_list(value: Iterable[Any] | str | None) -> list[str]:
@@ -4922,14 +5041,20 @@ def round_planning_brief(
 
     parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
     context = quizmaster_context(user_id=user_id, months=months)
+    profile = context["preferences"]
     normalized_theme = _normalize_brief_text(theme)
-    normalized_language = _normalize_brief_text(language)
+    normalized_language = _normalize_brief_text(language) or profile["default_language"]
     normalized_audience = _normalize_brief_text(audience)
     normalized_difficulty = _normalize_brief_text(difficulty)
-    normalized_mood = _normalize_brief_text(mood)
+    normalized_mood = _normalize_brief_text(mood) or profile["tone"]
     normalized_notes = _normalize_brief_text(notes)
     normalized_must_include = _normalize_brief_list(must_include)
     normalized_avoid = _normalize_brief_list(avoid)
+    banned_items = [
+        *(f"artist: {artist}" for artist in profile["banned_artists"]),
+        *(f"song: {song}" for song in profile["banned_songs"]),
+    ]
+    normalized_avoid = [*normalized_avoid, *banned_items]
     date_notes = []
     if parsed_date:
         weekday = parsed_date.strftime("%A")
@@ -4958,6 +5083,15 @@ def round_planning_brief(
         "mood": normalized_mood,
         "quizmaster": context["quizmaster"],
         "user_id": user_id,
+        "profile_preferences": {
+            "preferred_genres": profile["preferred_genres"],
+            "preferred_decades": profile["preferred_decades"],
+            "repeat_cooldown_weeks": profile["repeat_cooldown_weeks"],
+            "tts": {
+                "provider": profile["default_tts_service"],
+                "voice": profile["tts_voice"],
+            },
+        },
         "desired_song_count": desired_song_count,
         "must_include": normalized_must_include,
         "avoid": normalized_avoid,
@@ -4979,6 +5113,10 @@ def round_planning_brief(
         planning_notes.append("Treat must_include entries as preferred anchors, not as permission to bypass quality gates.")
     if normalized_avoid:
         planning_notes.append("Apply avoid entries before ranking candidates.")
+    if profile["preferred_genres"]:
+        planning_notes.append("Prefer these genres when they fit the brief: " + "; ".join(profile["preferred_genres"]) + ".")
+    if profile["preferred_decades"]:
+        planning_notes.append("Prefer these decades when they fit the brief: " + "; ".join(profile["preferred_decades"]) + ".")
     if normalized_notes:
         planning_notes.append(f"User notes: {normalized_notes}")
 
@@ -5014,7 +5152,7 @@ def draft_round_audio_scripts(
     user_id: int | None = None,
     quiz_date: str | datetime | None = None,
     theme: str | None = None,
-    tone: str = "warm, concise, lightly humorous",
+    tone: str | None = None,
     persist: bool = False,
 ) -> dict[str, Any]:
     """Draft intro, replay, and outro text for later TTS generation."""
@@ -5023,6 +5161,9 @@ def draft_round_audio_scripts(
         raise AutomationError(f"Round {round_id} was not found.")
 
     user = _find_user(user_id) if user_id is not None else None
+    preferences = _quizmaster_preferences_payload(user) if user else None
+    resolved_tone = tone or (preferences or {}).get("tone") or "warm, concise, lightly humorous"
+    resolved_language = (preferences or {}).get("default_language") or "de"
     parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
     songs = _ordered_round_songs(round_obj) if round_obj else []
     theme_label = theme or (round_obj.name if round_obj and round_obj.name else "music round")
@@ -5034,7 +5175,8 @@ def draft_round_audio_scripts(
     scripts = {
         "intro": (
             f"Welcome to the {theme_label}{date_phrase}{quizmaster_phrase}. "
-            f"Eight songs, twice through, and no mercy for confident wrong answers.{song_hint}"
+            f"Eight songs, twice through, and no mercy for confident wrong answers. "
+            f"Keep it {resolved_tone}.{song_hint}"
         ),
         "replay": (
             "Here comes the second listen. Trust your first instinct, unless your "
@@ -5051,7 +5193,12 @@ def draft_round_audio_scripts(
         "user_id": user.id if user else None,
         "quiz_date": _datetime_payload(parsed_date),
         "theme": theme_label,
-        "tone": tone,
+        "tone": resolved_tone,
+        "language": resolved_language,
+        "tts": {
+            "provider": (preferences or {}).get("default_tts_service") or "polly",
+            "voice": (preferences or {}).get("tts_voice"),
+        },
         "scripts": scripts,
         "next_step": "Review the text, then call generate_tts_snippet for intro, replay, and outro.",
     }
@@ -5064,7 +5211,7 @@ def draft_round_audio_scripts(
             scripts=scripts,
             quiz_date=parsed_date,
             theme=theme_label,
-            tone=tone,
+            tone=resolved_tone,
         )
         result["script_records"] = saved["scripts"]
         result["next_step"] = (

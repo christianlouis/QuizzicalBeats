@@ -187,6 +187,15 @@ class TestUserPreferencesModel:
         fetched = UserPreferences.query.filter_by(user_id=user.id).first()
         assert fetched is not None
         assert fetched.default_tts_service == 'polly'
+        assert fetched.default_language == 'de'
+        assert fetched.tone == 'warm, concise, lightly humorous'
+        assert fetched.tts_voice is None
+        assert fetched.email_recipient is None
+        assert fetched.preferred_genres is None
+        assert fetched.preferred_decades is None
+        assert fetched.banned_artists is None
+        assert fetched.banned_songs is None
+        assert fetched.repeat_cooldown_weeks == 12
         assert fetched.enable_intro is True
         assert fetched.theme == 'light'
         assert fetched.import_job_email_notifications is True

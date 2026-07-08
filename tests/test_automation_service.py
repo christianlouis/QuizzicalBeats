@@ -3160,15 +3160,26 @@ class TestAgentPlanningAutomation:
             recent_song.last_used = datetime.utcnow() - timedelta(days=10)
             old_song.last_used = datetime.utcnow() - timedelta(days=200)
             db.session.commit()
+            automation.create_round(
+                name="Recent Same Quizmaster",
+                round_type="manual",
+                song_ids=[recent_song.id],
+                user_id=user.id,
+            )
 
             result = automation.recent_usage_summary(
                 user_id=user.id,
                 months=3,
                 song_ids=[recent_song.id, old_song.id],
+                repeat_cooldown_weeks=12,
             )
 
             assert result["selected_song_warnings"][0]["song"]["id"] == recent_song.id
             assert "Repeated" in result["selected_song_warnings"][0]["warning"]
+            assert result["selected_song_warnings"][0]["scope"] == "same_quizmaster"
+            assert result["selected_song_warnings"][0]["same_quizmaster_repeat"] is True
+            assert result["same_quizmaster_round_count"] == 1
+            assert result["repeat_cooldown_weeks"] == 12
             assert all(
                 warning["song"]["id"] != old_song.id
                 for warning in result["selected_song_warnings"]
@@ -3331,6 +3342,15 @@ class TestAgentPlanningAutomation:
             preferences = UserPreferences(
                 user=user,
                 default_tts_service="elevenlabs",
+                default_language="de",
+                tone="dry, seasonal, pub-friendly",
+                tts_voice="Rachel",
+                email_recipient="host@example.test",
+                preferred_genres=json.dumps(["Rock", "Pop"]),
+                preferred_decades="1980s, 1990s",
+                banned_artists="Banned Artist",
+                banned_songs="Banned Song",
+                repeat_cooldown_weeks=16,
                 enable_intro=True,
                 theme="dark",
             )
@@ -3342,8 +3362,18 @@ class TestAgentPlanningAutomation:
             assert result["quizmaster"]["username"] == "christian"
             assert result["quizmaster"]["name"] == "Christian"
             assert result["preferences"]["default_tts_service"] == "elevenlabs"
+            assert result["preferences"]["default_language"] == "de"
+            assert result["preferences"]["tone"] == "dry, seasonal, pub-friendly"
+            assert result["preferences"]["tts_voice"] == "Rachel"
+            assert result["preferences"]["email_recipient"] == "host@example.test"
+            assert result["preferences"]["preferred_genres"] == ["Rock", "Pop"]
+            assert result["preferences"]["preferred_decades"] == ["1980s", "1990s"]
+            assert result["preferences"]["banned_artists"] == ["Banned Artist"]
+            assert result["preferences"]["banned_songs"] == ["Banned Song"]
+            assert result["preferences"]["repeat_cooldown_weeks"] == 16
             assert result["preferences"]["theme"] == "dark"
             assert result["recent_usage"]["window_months"] == 3
+            assert result["recent_usage"]["repeat_cooldown_weeks"] == 16
 
     def test_round_planning_brief_returns_constraints_and_seasonal_notes(self, app):
         with app.app_context():
@@ -3409,6 +3439,43 @@ class TestAgentPlanningAutomation:
                 explanation["key"] == "must_include"
                 for explanation in result["round_planning_context"]["constraint_explanations"]
             )
+
+    def test_round_planning_brief_uses_quizmaster_profile_defaults(self, app):
+        with app.app_context():
+            user = _create_user(username="profile-agent", email="profile@example.test")
+            db.session.add(
+                UserPreferences(
+                    user=user,
+                    default_language="en",
+                    tone="wry and late-summer",
+                    preferred_genres="Rock\nCountry",
+                    preferred_decades=json.dumps(["1980s", "2000s"]),
+                    banned_artists="Banned Artist",
+                    banned_songs="Banned Song",
+                    default_tts_service="elevenlabs",
+                    tts_voice="Adam",
+                    repeat_cooldown_weeks=20,
+                )
+            )
+            db.session.commit()
+
+            result = automation.round_planning_brief(
+                user_id=user.id,
+                theme="road trip",
+            )
+
+            assert result["brief"]["language"] == "en"
+            assert result["brief"]["mood"] == "wry and late-summer"
+            assert "artist: Banned Artist" in result["brief"]["avoid"]
+            assert "song: Banned Song" in result["brief"]["avoid"]
+            assert result["brief"]["profile_preferences"]["preferred_genres"] == ["Rock", "Country"]
+            assert result["brief"]["profile_preferences"]["preferred_decades"] == ["1980s", "2000s"]
+            assert result["brief"]["profile_preferences"]["tts"] == {
+                "provider": "elevenlabs",
+                "voice": "Adam",
+            }
+            assert any("Rock; Country" in note for note in result["planning_notes"])
+            assert result["round_planning_context"]["recent_usage"]["repeat_cooldown_weeks"] == 20
 
     def test_planned_quiz_round_lifecycle(self, app):
         with app.app_context():
@@ -3513,6 +3580,16 @@ class TestAgentPlanningAutomation:
     def test_draft_round_audio_scripts_uses_round_context(self, app):
         with app.app_context():
             user = _create_user()
+            db.session.add(
+                UserPreferences(
+                    user=user,
+                    default_language="en",
+                    tone="playful but precise",
+                    default_tts_service="elevenlabs",
+                    tts_voice="Rachel",
+                )
+            )
+            db.session.commit()
             song = _create_song(title="As It Was", artist="Harry Styles")
             round_id = automation.create_round(
                 name="Pop Night",
@@ -3528,6 +3605,10 @@ class TestAgentPlanningAutomation:
 
             assert result["round_name"] == "Pop Night"
             assert "Harry Styles" in result["scripts"]["intro"]
+            assert "playful but precise" in result["scripts"]["intro"]
+            assert result["tone"] == "playful but precise"
+            assert result["language"] == "en"
+            assert result["tts"] == {"provider": "elevenlabs", "voice": "Rachel"}
             assert "second listen" in result["scripts"]["replay"]
             assert result["next_step"].startswith("Review the text")
 

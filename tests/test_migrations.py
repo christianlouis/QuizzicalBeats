@@ -16,6 +16,7 @@ from musicround.models import (
     SeedSource,
     SeedSourceRun,
     Song,
+    UserPreferences,
 )
 
 
@@ -498,6 +499,60 @@ def test_add_planned_quiz_rounds_to_legacy_database(tmp_path):
         "planned_quiz_round",
     )
     assert PlannedQuizRound.__tablename__ == "planned_quiz_round"
+
+
+def test_add_quizmaster_profile_preferences_to_legacy_database(tmp_path):
+    """Existing user preferences get quizmaster profile columns."""
+    database_path = tmp_path / "legacy-quizmaster-profile.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        db.create_all()
+        db.session.remove()
+        db.drop_all()
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE user_preferences (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER UNIQUE,
+                    default_tts_service VARCHAR(32),
+                    enable_intro BOOLEAN,
+                    theme VARCHAR(16)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO user_preferences "
+                "(id, user_id, default_tts_service, enable_intro, theme) "
+                "VALUES (1, 10, 'polly', 1, 'light')"
+            )
+
+        from migrations import add_quizmaster_profile_preferences
+
+        assert add_quizmaster_profile_preferences.run_migration() is True
+        assert add_quizmaster_profile_preferences.run_migration() is None
+
+    columns = set(_column_names(database_path, "user_preferences"))
+    assert {
+        "default_language",
+        "tone",
+        "tts_voice",
+        "email_recipient",
+        "preferred_genres",
+        "preferred_decades",
+        "banned_artists",
+        "banned_songs",
+        "repeat_cooldown_weeks",
+    }.issubset(columns)
+    with sqlite3.connect(database_path) as conn:
+        row = conn.execute(
+            "SELECT default_language, tone, repeat_cooldown_weeks "
+            "FROM user_preferences WHERE id = 1"
+        ).fetchone()
+    assert row[0] == "de"
+    assert row[1] == "warm, concise, lightly humorous"
+    assert row[2] == 12
+    assert "default_language" in UserPreferences.__table__.columns.keys()
 
 
 def test_round_songs_comment_matches_storage_behavior():
