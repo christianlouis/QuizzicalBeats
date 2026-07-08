@@ -143,6 +143,44 @@ def test_add_import_job_attempts_adds_retry_columns_to_legacy_table(tmp_path):
     assert expected_columns.issubset(ImportJobRecord.__table__.columns.keys())
 
 
+def test_add_import_job_result_metadata_adds_structured_metadata_column(tmp_path):
+    """Legacy import queues get structured result metadata for repair hints."""
+    database_path = tmp_path / "legacy-import-result-metadata.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE import_job_record (
+                id INTEGER PRIMARY KEY,
+                service_name VARCHAR(50) NOT NULL,
+                item_type VARCHAR(20) NOT NULL,
+                item_id VARCHAR(255) NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 10,
+                user_id INTEGER NOT NULL,
+                status VARCHAR(20),
+                created_at DATETIME,
+                started_at DATETIME,
+                completed_at DATETIME,
+                error_message TEXT,
+                imported_count INTEGER,
+                skipped_count INTEGER,
+                attempt_count INTEGER DEFAULT 0,
+                max_attempts INTEGER DEFAULT 3
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_import_job_result_metadata
+
+        assert add_import_job_result_metadata.run_migration() is True
+        assert add_import_job_result_metadata.run_migration() is None
+
+    columns = set(_column_names(database_path, "import_job_record"))
+    assert "result_metadata" in columns
+    assert "result_metadata" in ImportJobRecord.__table__.columns.keys()
+
+
 def test_add_query_performance_indexes_to_existing_tables(tmp_path):
     """Existing databases get indexes for catalog, queue, and scheduled-send reads."""
     database_path = tmp_path / "legacy-performance.db"

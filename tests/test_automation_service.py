@@ -1,6 +1,7 @@
 """Tests for agent automation services."""
 
 import os
+import json
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -2136,6 +2137,61 @@ class TestAgentPlanningAutomation:
             assert job["progress_label"] == "Manual review required"
             assert any("Reset attempts" in hint for hint in job["repair_hints"])
             assert job["failed_position_hints"] == []
+
+    def test_import_progress_events_includes_failed_position_hints(self, app):
+        with app.app_context():
+            user = _create_user(username="positionmeta", email="positionmeta@example.test")
+            record = ImportJobRecord(
+                service_name="spotify",
+                item_type="playlist",
+                item_id="playlist-needs-position-repair",
+                priority=5,
+                user_id=user.id,
+                status="completed",
+                imported_count=1,
+                skipped_count=1,
+                result_metadata=json.dumps({
+                    "playlist_positions": [
+                        {
+                            "position": 1,
+                            "artist": "Resolved Artist",
+                            "title": "Resolved Track",
+                            "song_id": 123,
+                            "status": "resolved",
+                            "reason": None,
+                        },
+                        {
+                            "position": 2,
+                            "artist": "Broken Artist",
+                            "title": "Broken Track",
+                            "song_id": None,
+                            "status": "failed",
+                            "reason": "missing_spotify_track_id",
+                        },
+                    ],
+                }),
+            )
+            db.session.add(record)
+            db.session.commit()
+
+            result = automation.import_progress_events(user_id=user.id)
+            job = result["recent_jobs"][0]
+
+            assert job["failed_position_hints"] == [
+                {
+                    "position": 2,
+                    "artist": "Broken Artist",
+                    "title": "Broken Track",
+                    "song_id": None,
+                    "status": "failed",
+                    "reason": "missing_spotify_track_id",
+                    "message": (
+                        "Review playlist position 2: Broken Artist - Broken Track "
+                        "(missing_spotify_track_id)."
+                    ),
+                }
+            ]
+            assert any("failed_position_hints" in hint for hint in job["repair_hints"])
 
     def test_parse_text_playlist_marks_rows_that_need_review(self, app):
         with app.app_context():

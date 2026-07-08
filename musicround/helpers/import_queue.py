@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from queue import PriorityQueue, Empty
@@ -56,6 +57,36 @@ def _import_job_notification_body(record: ImportJobRecord) -> str:
         "Open the import queue in Quizzical Beats for repair or retry actions.",
     ])
     return "\n".join(lines)
+
+
+def _safe_import_result_metadata(result: Any) -> dict[str, Any] | None:
+    """Return structured import metadata that is safe to persist and expose."""
+    if not isinstance(result, dict):
+        return None
+
+    positions = result.get("playlist_positions")
+    if not isinstance(positions, list):
+        return None
+
+    safe_positions: list[dict[str, Any]] = []
+    for item in positions:
+        if not isinstance(item, dict):
+            continue
+        safe_positions.append(
+            {
+                "position": item.get("position"),
+                "spotify_track_id": item.get("spotify_track_id"),
+                "artist": item.get("artist"),
+                "title": item.get("title"),
+                "song_id": item.get("song_id"),
+                "status": item.get("status"),
+                "reason": item.get("reason"),
+            }
+        )
+    if not safe_positions:
+        return None
+
+    return {"playlist_positions": safe_positions}
 
 
 @dataclass(order=True)
@@ -302,7 +333,13 @@ class ImportWorker(threading.Thread):
                     **import_kwargs,
                 )
                 imported_count, skipped_count, error_message = self._summarize_result(result)
-                self._mark_completed(record, imported_count, skipped_count, error_message)
+                self._mark_completed(
+                    record,
+                    imported_count,
+                    skipped_count,
+                    error_message,
+                    _safe_import_result_metadata(result),
+                )
                 db.session.commit()
                 self._notify_terminal_job(record)
             except Exception as exc:  # pylint: disable=broad-except
@@ -356,6 +393,7 @@ class ImportWorker(threading.Thread):
         imported_count: int,
         skipped_count: int,
         error_message: Optional[str],
+        result_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         if not record:
             return
@@ -364,6 +402,7 @@ class ImportWorker(threading.Thread):
         record.imported_count = imported_count
         record.skipped_count = skipped_count
         record.error_message = error_message
+        record.result_metadata = json.dumps(result_metadata, sort_keys=True) if result_metadata else None
 
     def _mark_failed(
         self,

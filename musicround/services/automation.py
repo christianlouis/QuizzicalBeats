@@ -2820,6 +2820,48 @@ def _import_job_summary(record: ImportJobRecord) -> dict[str, Any]:
     }
 
 
+def _import_job_result_metadata(record: ImportJobRecord) -> dict[str, Any]:
+    raw_metadata = getattr(record, "result_metadata", None)
+    if not raw_metadata:
+        return {}
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    try:
+        parsed = json.loads(raw_metadata)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _import_job_failed_position_hints(record: ImportJobRecord) -> list[dict[str, Any]]:
+    metadata = _import_job_result_metadata(record)
+    positions = metadata.get("playlist_positions")
+    if not isinstance(positions, list):
+        return []
+
+    failed_positions: list[dict[str, Any]] = []
+    for item in positions:
+        if not isinstance(item, dict) or item.get("status") == "resolved":
+            continue
+        failed_positions.append(
+            {
+                "position": item.get("position"),
+                "artist": item.get("artist"),
+                "title": item.get("title"),
+                "song_id": item.get("song_id"),
+                "status": item.get("status"),
+                "reason": item.get("reason"),
+                "message": (
+                    f"Review playlist position {item.get('position')}: "
+                    f"{item.get('artist') or 'Unknown artist'} - "
+                    f"{item.get('title') or 'Unknown title'} "
+                    f"({item.get('reason') or item.get('status') or 'not resolved'})."
+                ),
+            }
+        )
+    return failed_positions
+
+
 def import_job_status_metadata(record: ImportJobRecord) -> dict[str, Any]:
     """Return repair-oriented metadata for import progress views and MCP clients."""
     status = record.status or "pending"
@@ -2863,6 +2905,9 @@ def import_job_status_metadata(record: ImportJobRecord) -> dict[str, Any]:
         hints.append("No detailed failure message was recorded; inspect worker logs if retry fails again.")
     if imported_count:
         hints.append(f"{imported_count} item(s) imported before this status was recorded.")
+    failed_position_hints = _import_job_failed_position_hints(record)
+    if failed_position_hints:
+        hints.append("Review failed_position_hints for playlist positions that need replacement or retry.")
 
     return {
         "retryable": retryable,
@@ -2870,7 +2915,7 @@ def import_job_status_metadata(record: ImportJobRecord) -> dict[str, Any]:
         "progress_percent": progress_percent_by_status.get(status, 0),
         "progress_label": progress_label_by_status.get(status, status.replace("_", " ").title()),
         "repair_hints": hints,
-        "failed_position_hints": [],
+        "failed_position_hints": failed_position_hints,
     }
 
 

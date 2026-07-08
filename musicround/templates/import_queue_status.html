@@ -134,6 +134,13 @@
                                 {% endfor %}
                             </ul>
                             {% endif %}
+                            {% if job_meta.failed_position_hints %}
+                            <ul class="mt-2 list-disc pl-4 text-xs text-orange-700 max-w-md">
+                                {% for item in job_meta.failed_position_hints[:5] %}
+                                <li>Position {{ item.position }}: {{ item.artist or 'Unknown artist' }} - {{ item.title or 'Unknown title' }} ({{ item.reason or item.status or 'not resolved' }})</li>
+                                {% endfor %}
+                            </ul>
+                            {% endif %}
                         </td>
                         <td class="px-5 py-3 text-sm text-gray-700">
                             {{ job.imported_count or 0 }} imported, {{ job.skipped_count or 0 }} skipped

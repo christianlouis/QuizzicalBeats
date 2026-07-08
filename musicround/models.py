@@ -607,6 +607,7 @@ class ImportJobRecord(db.Model):
     skipped_count = db.Column(db.Integer, default=0)
     attempt_count = db.Column(db.Integer, default=0)
     max_attempts = db.Column(db.Integer, default=3)
+    result_metadata = db.Column(db.Text)
 
     __table_args__ = (
         db.Index('idx_import_job_claim', 'status', 'priority', 'created_at'),

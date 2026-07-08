@@ -1,4 +1,5 @@
 """Tests for the import queue data structures."""
+import json
 import pytest
 import threading
 import time
@@ -381,6 +382,69 @@ class TestImportWorker:
             assert updated.completed_at is not None
             assert updated.imported_count == 3
             assert updated.skipped_count == 1
+
+    def test_process_job_persists_safe_playlist_position_metadata(self, app):
+        """Playlist imports should keep repairable position metadata for MCP/status clients."""
+        with app.app_context():
+            user = User(username='positionworker', email='positionworker@example.com')
+            user.password = 'WorkerPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+            queue = ImportQueue()
+            record = enqueue_import_job(
+                queue=queue,
+                service_name='spotify',
+                item_type='playlist',
+                item_id='playlist-positions',
+                user_id=user.id,
+                priority=1,
+            )
+            job = queue.get_job(timeout=0.1)
+            worker = ImportWorker(app, queue)
+
+            with patch('musicround.helpers.import_queue.ImportHelper.import_item') as mock_import:
+                mock_import.return_value = {
+                    'imported_count': 1,
+                    'skipped_count': 1,
+                    'playlist_positions': [
+                        {
+                            'position': 1,
+                            'spotify_track_id': 'spotify-ok',
+                            'artist': 'Resolved Artist',
+                            'title': 'Resolved Track',
+                            'song_id': 42,
+                            'status': 'resolved',
+                            'reason': None,
+                            'unsafe_token': 'secret',
+                        },
+                        {
+                            'position': 2,
+                            'spotify_track_id': None,
+                            'artist': 'Broken Artist',
+                            'title': 'Broken Track',
+                            'song_id': None,
+                            'status': 'failed',
+                            'reason': 'missing_spotify_track_id',
+                            'provider_error': 'token=secret',
+                        },
+                    ],
+                }
+                worker._process_job(job)
+
+            updated = ImportJobRecord.query.get(record.id)
+            metadata = json.loads(updated.result_metadata)
+            assert metadata['playlist_positions'][0] == {
+                'position': 1,
+                'spotify_track_id': 'spotify-ok',
+                'artist': 'Resolved Artist',
+                'title': 'Resolved Track',
+                'song_id': 42,
+                'status': 'resolved',
+                'reason': None,
+            }
+            assert metadata['playlist_positions'][1]['reason'] == 'missing_spotify_track_id'
+            assert 'secret' not in updated.result_metadata
 
     def test_process_job_sends_completion_notification_when_enabled(self, app):
         """Completed imports should notify the owning user when configured."""
