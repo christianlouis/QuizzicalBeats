@@ -4269,6 +4269,67 @@ def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
     }
 
 
+def _normalize_brief_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return " ".join(value.strip().split()) or None
+
+
+def _normalize_brief_list(value: Iterable[Any] | str | None) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    else:
+        items = list(value)
+
+    normalized = []
+    for item in items:
+        if item is None:
+            continue
+        text = " ".join(str(item).strip().split())
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _round_planning_constraint_explanations(
+    constraints: list[str],
+    must_include: list[str],
+    avoid: list[str],
+) -> list[dict[str, str]]:
+    explanations = [
+        {
+            "constraint": constraints[0],
+            "selection_guidance": "Select and verify the full target count before creating assets.",
+            "rejection_guidance": "Reject drafts with too few playable songs or unresolved placeholders.",
+        },
+        {
+            "constraint": constraints[1],
+            "selection_guidance": "Prefer songs with known preview URLs and inspect previews before scheduling.",
+            "rejection_guidance": "Reject songs without previews unless a replacement can be found immediately.",
+        },
+        {
+            "constraint": constraints[2],
+            "selection_guidance": "Use recent usage and quizmaster history to keep the round fresh.",
+            "rejection_guidance": "Reject or justify recently used songs, especially for the same quizmaster.",
+        },
+    ]
+    if must_include:
+        explanations.append({
+            "constraint": "Honor must_include unless a track is unavailable or fails preview checks.",
+            "selection_guidance": "Treat must_include entries as preferred anchors for search and candidate ranking.",
+            "rejection_guidance": "Explain any skipped must_include item with availability, preview, or duplicate-risk evidence.",
+        })
+    if avoid:
+        explanations.append({
+            "constraint": "Avoid excluded songs, artists, genres, eras, or moods listed in the brief.",
+            "selection_guidance": "Use avoid entries as negative filters before proposing candidates.",
+            "rejection_guidance": "Reject candidates that match avoid entries unless the user explicitly overrides the brief.",
+        })
+    return explanations
+
+
 def create_planned_quiz_round(
     quiz_date: str | datetime,
     quizmaster_id: int | None = None,
@@ -4398,6 +4459,13 @@ def round_planning_brief(
     user_id: int,
     quiz_date: str | datetime | None = None,
     theme: str | None = None,
+    language: str | None = None,
+    audience: str | None = None,
+    difficulty: str | None = None,
+    mood: str | None = None,
+    must_include: Iterable[Any] | str | None = None,
+    avoid: Iterable[Any] | str | None = None,
+    notes: str | None = None,
     desired_song_count: int = 8,
     months: int = 3,
 ) -> dict[str, Any]:
@@ -4407,6 +4475,14 @@ def round_planning_brief(
 
     parsed_date = _parse_datetime_utc(quiz_date) if quiz_date else None
     context = quizmaster_context(user_id=user_id, months=months)
+    normalized_theme = _normalize_brief_text(theme)
+    normalized_language = _normalize_brief_text(language)
+    normalized_audience = _normalize_brief_text(audience)
+    normalized_difficulty = _normalize_brief_text(difficulty)
+    normalized_mood = _normalize_brief_text(mood)
+    normalized_notes = _normalize_brief_text(notes)
+    normalized_must_include = _normalize_brief_list(must_include)
+    normalized_avoid = _normalize_brief_list(avoid)
     date_notes = []
     if parsed_date:
         weekday = parsed_date.strftime("%A")
@@ -4422,12 +4498,75 @@ def round_planning_brief(
         "Avoid songs that appear in selected_song_warnings or have high recent used_count.",
         "Prefer mainstream recognizability unless the theme explicitly asks for deeper cuts.",
     ]
+    if normalized_language:
+        constraints.append(f"Use {normalized_language} for round copy, hints, and review notes.")
+    if normalized_audience:
+        constraints.append(f"Fit song choices and humor to this audience: {normalized_audience}.")
+    if normalized_difficulty:
+        constraints.append(f"Target difficulty: {normalized_difficulty}.")
+    if normalized_mood:
+        constraints.append(f"Target mood: {normalized_mood}.")
+    if normalized_must_include:
+        constraints.append(
+            "Try to include these anchors when they pass preview and duplicate checks: "
+            + "; ".join(normalized_must_include)
+            + "."
+        )
+    if normalized_avoid:
+        constraints.append("Avoid these explicit exclusions: " + "; ".join(normalized_avoid) + ".")
+
+    brief = {
+        "theme": normalized_theme,
+        "quiz_date": _datetime_payload(parsed_date),
+        "language": normalized_language,
+        "audience": normalized_audience,
+        "difficulty": normalized_difficulty,
+        "mood": normalized_mood,
+        "quizmaster": context["quizmaster"],
+        "user_id": user_id,
+        "desired_song_count": desired_song_count,
+        "must_include": normalized_must_include,
+        "avoid": normalized_avoid,
+        "notes": normalized_notes,
+    }
+    constraint_explanations = _round_planning_constraint_explanations(
+        constraints,
+        must_include=normalized_must_include,
+        avoid=normalized_avoid,
+    )
+    planning_notes = [
+        f"Build exactly {desired_song_count} playable songs before generating or sending assets.",
+        "Use recent usage warnings as rejection reasons or call them out explicitly when overriding.",
+        "Check preview availability early; missing previews should become replacement requests.",
+    ]
+    if normalized_theme:
+        planning_notes.append(f"Keep the round anchored on theme: {normalized_theme}.")
+    if normalized_must_include:
+        planning_notes.append("Treat must_include entries as preferred anchors, not as permission to bypass quality gates.")
+    if normalized_avoid:
+        planning_notes.append("Apply avoid entries before ranking candidates.")
+    if normalized_notes:
+        planning_notes.append(f"User notes: {normalized_notes}")
+
+    round_planning_context = {
+        "brief": brief,
+        "date_notes": date_notes,
+        "constraints": constraints,
+        "constraint_explanations": constraint_explanations,
+        "planning_notes": planning_notes,
+        "quizmaster_context": context,
+        "recent_usage": context["recent_usage"],
+    }
     return {
-        "theme": theme,
+        "brief": brief,
+        "round_planning_context": round_planning_context,
+        "theme": normalized_theme,
         "quiz_date": _datetime_payload(parsed_date),
         "date_notes": date_notes,
         "desired_song_count": desired_song_count,
         "constraints": constraints,
+        "constraint_explanations": constraint_explanations,
+        "planning_notes": planning_notes,
         "quizmaster_context": context,
         "agent_prompt": (
             "Use this brief to propose a complete music round. Explain any repeated "

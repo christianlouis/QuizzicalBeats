@@ -71,7 +71,7 @@ The MCP server exposes these tools:
 | `add_round_song` | Add one song to a round and invalidate generated assets. |
 | `recent_usage_summary` | Summarize recent rounds, frequently used songs, and selected-song warnings. |
 | `quizmaster_context` | Return quizmaster preferences and recent usage for personalized planning. |
-| `round_planning_brief` | Build an agent-readable brief for a robust themed round. |
+| `round_planning_brief` | Build an agent-readable structured brief for a robust themed round. |
 | `create_planned_quiz_round` | Create a planned quiz date before a concrete round exists. |
 | `list_planned_quiz_rounds` | List planned quiz dates for agents and production-board views. |
 | `update_planned_quiz_round` | Update a planned quiz date and optional linked deliverables. |
@@ -121,6 +121,11 @@ explicitly set.
 2. Start with `quizmaster_context`, `recent_usage_summary`, or
    `round_planning_brief` so repeated songs and personalization constraints are
    visible before selecting tracks.
+   `round_planning_brief` accepts `theme`, `quiz_date`, `language`,
+   `audience`, `difficulty`, `mood`, `user_id`, `must_include`, `avoid`, and
+   `notes`. It returns a stable `brief` object plus `round_planning_context`
+   with constraints, review notes, recent usage, and selection/rejection
+   guidance so an agent can explain why candidates were accepted or skipped.
 3. Search with `find_songs` to avoid duplicates.
 4. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
