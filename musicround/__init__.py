@@ -152,6 +152,34 @@ def _store_spotify_authlib_token(user, token):
             )
         except (TypeError, ValueError):
             pass
+
+
+def _install_security_headers(app):
+    """Install conservative response headers for production deployments."""
+    if not app.config.get('SECURITY_HEADERS_ENABLED', True):
+        return
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        frame_options = app.config.get('SECURITY_FRAME_OPTIONS')
+        if frame_options:
+            response.headers.setdefault('X-Frame-Options', str(frame_options))
+        referrer_policy = app.config.get('SECURITY_REFERRER_POLICY')
+        if referrer_policy:
+            response.headers.setdefault('Referrer-Policy', str(referrer_policy))
+        permissions_policy = app.config.get('SECURITY_PERMISSIONS_POLICY')
+        if permissions_policy:
+            response.headers.setdefault('Permissions-Policy', str(permissions_policy))
+        if app.config.get('USE_HTTPS') and app.config.get('SECURITY_HSTS_ENABLED', True):
+            max_age = int(app.config.get('SECURITY_HSTS_MAX_AGE') or 31536000)
+            hsts_value = f'max-age={max(0, max_age)}'
+            if app.config.get('SECURITY_HSTS_INCLUDE_SUBDOMAINS'):
+                hsts_value += '; includeSubDomains'
+            response.headers.setdefault('Strict-Transport-Security', hsts_value)
+        return response
+
+
 def run_migrations():
     """
     Run all migration scripts in the migrations directory
@@ -251,6 +279,8 @@ def create_app(config=None):
         # Apply the HTTPS middleware when USE_HTTPS is True
         app.wsgi_app = ForceHTTPSMiddleware(app.wsgi_app)
         app.logger.info("Applying ForceHTTPSMiddleware - all URLs will use HTTPS scheme regardless of headers")
+
+    _install_security_headers(app)
     
     _configure_database_uri(app)
     

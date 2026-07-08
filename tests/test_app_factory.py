@@ -11,6 +11,7 @@ os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 
 from musicround import (
     _configure_database_uri,
+    _install_security_headers,
     _import_workers_enabled,
     _spotify_authlib_token_from_user,
     _store_spotify_authlib_token,
@@ -349,6 +350,68 @@ def test_create_app_does_not_start_import_workers_by_default(monkeypatch):
     with app.app_context():
         db.session.remove()
         db.drop_all()
+
+
+def test_security_headers_are_installed_on_responses():
+    """Production security headers should be present by default."""
+    app = Flask(__name__)
+    app.config.update(
+        SECURITY_HEADERS_ENABLED=True,
+        USE_HTTPS=False,
+        SECURITY_FRAME_OPTIONS='DENY',
+        SECURITY_REFERRER_POLICY='strict-origin-when-cross-origin',
+        SECURITY_PERMISSIONS_POLICY='camera=(), microphone=(), geolocation=()',
+    )
+    _install_security_headers(app)
+
+    @app.route('/headers')
+    def headers_route():
+        return 'ok'
+
+    response = app.test_client().get('/headers')
+
+    assert response.headers['X-Content-Type-Options'] == 'nosniff'
+    assert response.headers['X-Frame-Options'] == 'DENY'
+    assert response.headers['Referrer-Policy'] == 'strict-origin-when-cross-origin'
+    assert response.headers['Permissions-Policy'] == 'camera=(), microphone=(), geolocation=()'
+    assert 'Strict-Transport-Security' not in response.headers
+
+
+def test_security_headers_add_hsts_only_when_https_is_forced():
+    """HSTS should only be emitted when the app is configured for HTTPS."""
+    app = Flask(__name__)
+    app.config.update(
+        SECURITY_HEADERS_ENABLED=True,
+        USE_HTTPS=True,
+        SECURITY_HSTS_ENABLED=True,
+        SECURITY_HSTS_MAX_AGE=123,
+        SECURITY_HSTS_INCLUDE_SUBDOMAINS=True,
+    )
+    _install_security_headers(app)
+
+    @app.route('/headers')
+    def headers_route():
+        return 'ok'
+
+    response = app.test_client().get('/headers')
+
+    assert response.headers['Strict-Transport-Security'] == 'max-age=123; includeSubDomains'
+
+
+def test_security_headers_can_be_disabled():
+    """Operators can disable app-level headers if the edge already owns them."""
+    app = Flask(__name__)
+    app.config.update(SECURITY_HEADERS_ENABLED=False, USE_HTTPS=True)
+    _install_security_headers(app)
+
+    @app.route('/headers')
+    def headers_route():
+        return 'ok'
+
+    response = app.test_client().get('/headers')
+
+    assert 'X-Content-Type-Options' not in response.headers
+    assert 'Strict-Transport-Security' not in response.headers
 
 
 def test_spotify_authlib_token_from_legacy_json_user_token(app):

@@ -112,6 +112,22 @@ class Config:
     except (TypeError, ValueError):
         PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 
+    SECURITY_HEADERS_ENABLED = bool_from_config(os.getenv("SECURITY_HEADERS_ENABLED", "True"))
+    SECURITY_HSTS_ENABLED = bool_from_config(os.getenv("SECURITY_HSTS_ENABLED", "True"))
+    SECURITY_HSTS_MAX_AGE = _int_from_env("SECURITY_HSTS_MAX_AGE", 31536000)
+    SECURITY_HSTS_INCLUDE_SUBDOMAINS = bool_from_config(
+        os.getenv("SECURITY_HSTS_INCLUDE_SUBDOMAINS", "False")
+    )
+    SECURITY_FRAME_OPTIONS = os.getenv("SECURITY_FRAME_OPTIONS", "DENY")
+    SECURITY_REFERRER_POLICY = os.getenv(
+        "SECURITY_REFERRER_POLICY",
+        "strict-origin-when-cross-origin",
+    )
+    SECURITY_PERMISSIONS_POLICY = os.getenv(
+        "SECURITY_PERMISSIONS_POLICY",
+        "camera=(), microphone=(), geolocation=()",
+    )
+
     # Minimal in-app authentication throttles. These are per-process safety nets,
     # not a replacement for edge/WAF rate limiting.
     LOGIN_RATE_LIMIT_ATTEMPTS = _int_from_env("LOGIN_RATE_LIMIT_ATTEMPTS", 5)

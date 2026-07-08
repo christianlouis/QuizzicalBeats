@@ -298,7 +298,7 @@ docker scan quizzicalbeats:latest
 
 - [ ] Add two-factor authentication (TOTP)
 - [ ] Implement rate limiting middleware
-- [ ] Add security headers middleware
+- [x] Add security headers middleware
 - [ ] Content Security Policy (CSP)
 - [ ] Subresource Integrity (SRI)
 - [ ] Add honeypot fields to forms
