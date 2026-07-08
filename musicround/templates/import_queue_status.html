@@ -8,6 +8,9 @@
         <div>
             <h1 class="text-3xl font-bold text-navy-800 font-montserrat">Import Queue</h1>
             <p class="text-gray-600 mt-1">Queued, active, and recent import jobs.</p>
+            <p id="queue-poll-status" class="text-xs text-gray-500 mt-2" data-status-url="{{ url_for('import.queue_status_json') }}">
+                Live polling every 15 seconds.
+            </p>
         </div>
         <a href="{{ url_for('core.view_songs') }}" class="inline-flex items-center justify-center px-4 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300">
             <i class="fas fa-music mr-2"></i> View Songs
@@ -17,23 +20,23 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <div class="bg-white rounded-lg shadow p-5">
             <div class="text-sm text-gray-500">Queued</div>
-            <div class="text-3xl font-bold text-navy-800">{{ stats.queue_size }}</div>
+            <div class="text-3xl font-bold text-navy-800" data-stat="queue_size">{{ stats.queue_size }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-5">
             <div class="text-sm text-gray-500">Active</div>
-            <div class="text-3xl font-bold text-teal-600">{{ stats.active_jobs }}</div>
+            <div class="text-3xl font-bold text-teal-600" data-stat="active_jobs">{{ stats.active_jobs }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-5">
             <div class="text-sm text-gray-500">Completed Today</div>
-            <div class="text-3xl font-bold text-green-600">{{ stats.completed_today }}</div>
+            <div class="text-3xl font-bold text-green-600" data-stat="completed_today">{{ stats.completed_today }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-5">
             <div class="text-sm text-gray-500">Failed Today</div>
-            <div class="text-3xl font-bold text-orange-600">{{ stats.failed_today }}</div>
+            <div class="text-3xl font-bold text-orange-600" data-stat="failed_today">{{ stats.failed_today }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-5">
             <div class="text-sm text-gray-500">Dead-letter Today</div>
-            <div class="text-3xl font-bold text-red-600">{{ stats.dead_letter_jobs }}</div>
+            <div class="text-3xl font-bold text-red-600" data-stat="dead_letter_jobs">{{ stats.dead_letter_jobs }}</div>
         </div>
     </div>
 
@@ -153,4 +156,36 @@
         </div>
     </div>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const statusEl = document.getElementById('queue-poll-status');
+        if (!statusEl || !statusEl.dataset.statusUrl) {
+            return;
+        }
+        const updateStats = async () => {
+            try {
+                const response = await fetch(statusEl.dataset.statusUrl, {
+                    headers: { Accept: 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    throw new Error('poll failed');
+                }
+                const data = await response.json();
+                Object.entries(data.stats || {}).forEach(([key, value]) => {
+                    const target = document.querySelector(`[data-stat="${key}"]`);
+                    if (target) {
+                        target.textContent = value;
+                    }
+                });
+                const active = (data.active_jobs || []).length;
+                const retryable = (data.recent_jobs || []).filter((job) => job.retryable).length;
+                statusEl.textContent = `Live polling active. ${active} active, ${retryable} retryable.`;
+            } catch (error) {
+                statusEl.textContent = 'Live polling paused. Refresh to retry.';
+            }
+        };
+        window.setInterval(updateStats, 15000);
+    });
+</script>
 {% endblock %}

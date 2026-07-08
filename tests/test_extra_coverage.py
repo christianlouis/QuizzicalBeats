@@ -290,6 +290,9 @@ class TestImportQueueStatusRoute:
         response = client.get('/import/queue-status')
         assert response.status_code == 200
         assert b'Import Queue' in response.data
+        assert b'data-status-url="/import/queue-status.json"' in response.data
+        assert b'data-stat="queue_size"' in response.data
+        assert b'Live polling every 15 seconds.' in response.data
 
     def test_queue_status_shows_failed_job_details_for_admin(self, app, client):
         """Test queue-status renders persisted failure details."""

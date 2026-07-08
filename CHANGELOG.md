@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imports.
 - Added retryability, progress labels, and repair hints to import job status
   payloads for MCP, JSON polling, and the admin import queue view.
+- Added live stat polling to the admin import queue view so active and retryable
+  import progress updates without a manual page refresh.
 - Added browser round sharing controls for owners/admins to grant and revoke
   viewer/editor/producer access from the round detail page.
 - Added persistent round-sharing audit events with MCP access for collaboration
