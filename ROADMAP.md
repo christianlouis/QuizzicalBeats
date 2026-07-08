@@ -187,7 +187,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Graceful shutdown/restart through Gunicorn entrypoint
 - [ ] Nginx reverse proxy configuration
 - [ ] SSL termination
-- [ ] Static file optimization
+- [x] Static file optimization
 - [x] Response compression
 - [x] Security headers
 

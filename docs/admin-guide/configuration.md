@@ -137,6 +137,17 @@ downloads are intentionally left untouched. Set
 `RESPONSE_COMPRESSION_ENABLED=False` when compression is owned entirely by the
 reverse proxy.
 
+### Static Asset Caching
+
+```bash
+STATIC_ASSET_CACHE_ENABLED=True
+STATIC_ASSET_CACHE_SECONDS=86400
+```
+
+When Flask serves static CSS, JavaScript, image, or default audio assets, QB adds
+bounded public cache headers. Disable this when static files are served directly
+by Nginx, a CDN, or another edge layer that owns cache policy.
+
 ### OAuth Provider Configuration
 
 ```bash

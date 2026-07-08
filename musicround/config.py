@@ -147,6 +147,8 @@ class Config:
             ]
         ),
     )
+    STATIC_ASSET_CACHE_ENABLED = bool_from_config(os.getenv("STATIC_ASSET_CACHE_ENABLED", "True"))
+    STATIC_ASSET_CACHE_SECONDS = _int_from_env("STATIC_ASSET_CACHE_SECONDS", 86400)
 
     # Minimal in-app authentication throttles. These are per-process safety nets,
     # not a replacement for edge/WAF rate limiting.

@@ -19,7 +19,7 @@ from musicround.helpers.database_config import (
     managed_database_requirement_error,
 )
 from musicround.version import VERSION_INFO, get_version_str
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from musicround.helpers.auth_helpers import oauth # Import the oauth object
 from musicround.helpers.logging_utils import oauth_token_log_summary
 
@@ -238,6 +238,25 @@ def _install_response_compression(app):
         return response
 
 
+def _install_static_asset_cache(app):
+    """Install cache headers for Flask-served static assets."""
+    if not app.config.get('STATIC_ASSET_CACHE_ENABLED', True):
+        return
+
+    @app.after_request
+    def add_static_asset_cache(response):
+        if request.endpoint != 'static':
+            return response
+        if response.status_code < 200 or response.status_code >= 300:
+            return response
+        max_age = int(app.config.get('STATIC_ASSET_CACHE_SECONDS') or 86400)
+        max_age = max(0, max_age)
+        response.cache_control.public = True
+        response.cache_control.max_age = max_age
+        response.expires = datetime.now(timezone.utc) + timedelta(seconds=max_age)
+        return response
+
+
 def run_migrations():
     """
     Run all migration scripts in the migrations directory
@@ -340,6 +359,7 @@ def create_app(config=None):
 
     _install_security_headers(app)
     _install_response_compression(app)
+    _install_static_asset_cache(app)
     
     _configure_database_uri(app)
     

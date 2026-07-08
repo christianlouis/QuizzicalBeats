@@ -14,6 +14,7 @@ from musicround import (
     _configure_database_uri,
     _install_security_headers,
     _install_response_compression,
+    _install_static_asset_cache,
     _import_workers_enabled,
     _spotify_authlib_token_from_user,
     _store_spotify_authlib_token,
@@ -500,6 +501,54 @@ def test_response_compression_can_be_disabled():
 
     assert 'Content-Encoding' not in response.headers
     assert response.data == b'quiz-beats-' * 200
+
+
+def test_static_asset_cache_sets_public_max_age(tmp_path):
+    """Flask-served static assets should get bounded browser cache headers."""
+    static_dir = tmp_path / 'static'
+    static_dir.mkdir()
+    (static_dir / 'style.css').write_text('body { color: navy; }')
+    app = Flask(__name__, static_folder=str(static_dir), static_url_path='/static')
+    app.config.update(STATIC_ASSET_CACHE_ENABLED=True, STATIC_ASSET_CACHE_SECONDS=123)
+    _install_static_asset_cache(app)
+
+    response = app.test_client().get('/static/style.css')
+
+    assert response.status_code == 200
+    assert 'public' in response.headers['Cache-Control']
+    assert 'max-age=123' in response.headers['Cache-Control']
+    assert response.headers.get('Expires')
+
+
+def test_static_asset_cache_can_be_disabled(tmp_path):
+    """Operators can leave static caching entirely to the edge proxy."""
+    static_dir = tmp_path / 'static'
+    static_dir.mkdir()
+    (static_dir / 'style.css').write_text('body { color: navy; }')
+    app = Flask(__name__, static_folder=str(static_dir), static_url_path='/static')
+    app.config.update(STATIC_ASSET_CACHE_ENABLED=False, STATIC_ASSET_CACHE_SECONDS=123)
+    _install_static_asset_cache(app)
+
+    response = app.test_client().get('/static/style.css')
+
+    assert response.status_code == 200
+    assert 'max-age=123' not in response.headers.get('Cache-Control', '')
+
+
+def test_static_asset_cache_ignores_normal_routes():
+    """Dynamic pages should not inherit static-asset cache policy."""
+    app = Flask(__name__)
+    app.config.update(STATIC_ASSET_CACHE_ENABLED=True, STATIC_ASSET_CACHE_SECONDS=123)
+    _install_static_asset_cache(app)
+
+    @app.route('/dynamic')
+    def dynamic_route():
+        return 'dynamic'
+
+    response = app.test_client().get('/dynamic')
+
+    assert response.status_code == 200
+    assert 'max-age=123' not in response.headers.get('Cache-Control', '')
 
 
 def test_spotify_authlib_token_from_legacy_json_user_token(app):
