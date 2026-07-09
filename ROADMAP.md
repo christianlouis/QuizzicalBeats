@@ -472,7 +472,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [ ] User invitations via email/username UI
 - [ ] Presence indicators
 - [ ] Revision history
-- [x] Public sharing links with system-setting guard
+- [x] Public sharing links with system-setting guard and optional expiration
 - [x] Access audit logs for shares and public-link lifecycle
 - [ ] Comment threads
 

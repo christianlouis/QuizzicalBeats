@@ -440,11 +440,15 @@ def list_round_access_events(
 
 
 @mcp.tool()
-def enable_round_public_link(round_id: int) -> dict[str, Any]:
-    """Enable a token-based read-only public link for a round via system automation."""
+def enable_round_public_link(
+    round_id: int,
+    expires_at: str | None = None,
+) -> dict[str, Any]:
+    """Enable a token-based read-only public link with optional expiration."""
     return _with_app_context(
         automation.enable_round_public_link,
         round_id=round_id,
+        expires_at=expires_at,
     )
 
 

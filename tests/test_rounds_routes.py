@@ -1015,10 +1015,11 @@ class TestRoundDetailRoute:
             round_.user_id = owner_id
             round_.visibility = 'private'
             db.session.commit()
+        expires_on = (datetime.utcnow() + timedelta(days=3)).date().isoformat()
 
         enable_response = client.post(
             f'/rounds/{round_id}/public-link',
-            data={'action': 'enable'},
+            data={'action': 'enable', 'expires_at': expires_on},
             follow_redirects=True,
         )
 
@@ -1026,9 +1027,12 @@ class TestRoundDetailRoute:
         assert b'Public round link enabled.' in enable_response.data
         assert b'Public Read-only Link' in enable_response.data
         assert b'Disable Link' in enable_response.data
+        assert f'Expires {expires_on}'.encode() in enable_response.data
         with app.app_context():
-            public_token = db.session.get(Round, round_id).public_token
+            round_obj = db.session.get(Round, round_id)
+            public_token = round_obj.public_token
             assert public_token
+            assert round_obj.public_token_expires_at is not None
             assert RoundAccessEvent.query.filter_by(
                 round_id=round_id,
                 action='public_link_enabled',

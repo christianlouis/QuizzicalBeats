@@ -465,6 +465,7 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
         "visibility",
         "public_token",
         "public_token_created_at",
+        "public_token_expires_at",
     }.issubset(round_columns)
     assert "idx_round_owner_created" in _index_names(database_path, "round")
     assert "idx_round_public_token" in _index_names(database_path, "round")
@@ -508,6 +509,7 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
     }
     assert "user_id" in Round.__table__.columns.keys()
     assert "public_token" in Round.__table__.columns.keys()
+    assert "public_token_expires_at" in Round.__table__.columns.keys()
     assert Round.__table__.columns["public_token"].unique is not True
     assert any(
         index.name == "idx_round_public_token" and index.unique

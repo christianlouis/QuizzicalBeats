@@ -954,15 +954,23 @@ class TestRoundAutomation:
             with pytest.raises(automation.AutomationError, match="owner or an admin"):
                 automation.enable_round_public_link(round_id, actor_user_id=viewer.id)
 
-            enabled = automation.enable_round_public_link(round_id, actor_user_id=owner.id)
+            expires_at = datetime.utcnow() + timedelta(days=2)
+            enabled = automation.enable_round_public_link(
+                round_id,
+                actor_user_id=owner.id,
+                expires_at=expires_at.isoformat(),
+            )
             public = automation.get_public_round(enabled["public_token"])
             refreshed = automation.enable_round_public_link(round_id, actor_user_id=admin.id)
             disabled = automation.disable_round_public_link(round_id, actor_user_id=owner.id)
 
             assert enabled["created"] is True
             assert enabled["public_url_path"].startswith("/rounds/public/")
+            assert enabled["public_token_expires_at"] == f"{expires_at.isoformat()}Z"
             assert enabled["round"]["public_link_enabled"] is True
+            assert enabled["round"]["public_link_expired"] is False
             assert public["round"]["name"] == "Public Link Round"
+            assert public["round"]["public_token_expires_at"] == f"{expires_at.isoformat()}Z"
             assert public["round"]["songs"][0]["title"] == "Public Song"
             assert public["round"]["owner"] == {
                 "id": owner.id,
@@ -972,18 +980,43 @@ class TestRoundAutomation:
             assert "email" not in public["round"]["owner"]
             assert refreshed["created"] is False
             assert refreshed["public_token"] == enabled["public_token"]
+            assert refreshed["public_token_expires_at"] is None
             assert refreshed["access_event"]["action"] == "public_link_refreshed"
             assert disabled["disabled"] is True
             assert disabled["round"]["public_link_enabled"] is False
+            assert disabled["round"]["public_token_expires_at"] is None
             with pytest.raises(automation.AutomationError, match="not found"):
                 automation.get_public_round(enabled["public_token"])
 
-            actions = [event.action for event in RoundAccessEvent.query.order_by(RoundAccessEvent.id).all()]
+            actions = [
+                event.action
+                for event in RoundAccessEvent.query.order_by(RoundAccessEvent.id).all()
+            ]
             assert actions == [
                 "public_link_enabled",
                 "public_link_refreshed",
                 "public_link_disabled",
             ]
+
+    def test_expired_public_round_links_are_not_returned(self, app):
+        with app.app_context():
+            owner = _create_user(username="expired_owner", email="expired@example.test")
+            song = _create_song(title="Expired Public Song", artist="Artist")
+            round_id = automation.create_round(
+                name="Expired Public Link Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            SystemSetting.set("enable_public_rounds", "true")
+            enabled = automation.enable_round_public_link(round_id, actor_user_id=owner.id)
+            round_obj = db.session.get(Round, round_id)
+            round_obj.public_token_expires_at = datetime.utcnow() - timedelta(seconds=1)
+            db.session.commit()
+
+            with pytest.raises(automation.AutomationError, match="not found"):
+                automation.get_public_round(enabled["public_token"])
+            assert automation.round_review_payload(round_id)["round"]["public_link_expired"] is True
 
 
 class TestAssetInspection:

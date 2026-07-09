@@ -885,7 +885,11 @@ def update_public_round_link(round_id):
             automation.disable_round_public_link(round_id, actor_user_id=current_user.id)
             flash('Public round link disabled.', 'success')
         elif action == 'enable':
-            automation.enable_round_public_link(round_id, actor_user_id=current_user.id)
+            automation.enable_round_public_link(
+                round_id,
+                actor_user_id=current_user.id,
+                expires_at=request.form.get('expires_at'),
+            )
             flash('Public round link enabled.', 'success')
         else:
             flash('Unknown public link action.', 'error')

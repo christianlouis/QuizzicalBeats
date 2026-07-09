@@ -839,6 +839,41 @@ def _new_public_round_token() -> str:
             return token
 
 
+def _parse_public_link_expires_at(value: datetime | str | None) -> datetime | None:
+    """Normalize optional public-link expiration to a naive UTC datetime."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        expires_at = value
+    elif isinstance(value, str):
+        raw_value = value.strip()
+        if not raw_value:
+            return None
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_value):
+            raw_value = f"{raw_value}T23:59:59"
+        if raw_value.endswith("Z"):
+            raw_value = f"{raw_value[:-1]}+00:00"
+        try:
+            expires_at = datetime.fromisoformat(raw_value)
+        except ValueError as exc:
+            raise AutomationError("expires_at must be an ISO datetime or YYYY-MM-DD date.") from exc
+    else:
+        raise AutomationError("expires_at must be an ISO datetime or YYYY-MM-DD date.")
+
+    if expires_at.tzinfo:
+        expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+    if expires_at <= datetime.utcnow():
+        raise AutomationError("expires_at must be in the future.")
+    return expires_at
+
+
+def _public_round_link_expired(round_obj: Round, now: datetime | None = None) -> bool:
+    return bool(
+        round_obj.public_token_expires_at
+        and round_obj.public_token_expires_at <= (now or datetime.utcnow())
+    )
+
+
 def _round_summary(round_obj: Round) -> dict[str, Any]:
     ids = _round_song_ids(round_obj)
     ordered = _ordered_round_songs(round_obj)
@@ -848,13 +883,20 @@ def _round_summary(round_obj: Round) -> dict[str, Any]:
         "owner_user_id": round_obj.user_id,
         "owner": _user_summary(round_obj.owner),
         "visibility": round_obj.visibility,
-        "public_link_enabled": bool(round_obj.public_token),
+        "public_link_enabled": (
+            bool(round_obj.public_token) and not _public_round_link_expired(round_obj)
+        ),
         "public_token_created_at": _datetime_payload(round_obj.public_token_created_at),
+        "public_token_expires_at": _datetime_payload(round_obj.public_token_expires_at),
+        "public_link_expired": _public_round_link_expired(round_obj),
         "round_type": round_obj.round_type,
         "criteria": round_obj.round_criteria_used,
         "song_ids": ids,
         "songs": [_song_summary(song) for song in ordered],
-        "shares": [_round_share_summary(share) for share in round_obj.shares.order_by(RoundShare.id.asc()).all()],
+        "shares": [
+            _round_share_summary(share)
+            for share in round_obj.shares.order_by(RoundShare.id.asc()).all()
+        ],
         "mp3_generated": round_obj.mp3_generated,
         "pdf_generated": round_obj.pdf_generated,
         "last_generated_at": (
@@ -965,6 +1007,7 @@ def _public_round_summary(round_obj: Round) -> dict[str, Any]:
         "round_type": round_obj.round_type,
         "criteria": round_obj.round_criteria_used,
         "created_at": _datetime_payload(round_obj.created_at),
+        "public_token_expires_at": _datetime_payload(round_obj.public_token_expires_at),
         "song_count": len(_round_song_ids(round_obj)),
         "songs": [_song_summary(song) for song in _ordered_round_songs(round_obj)],
         "owner": _public_user_summary(round_obj.owner),
@@ -2203,6 +2246,7 @@ def list_round_access_events(
 def enable_round_public_link(
     round_id: int,
     actor_user_id: int | None = None,
+    expires_at: datetime | str | None = None,
 ) -> dict[str, Any]:
     """Enable a token-based read-only public link for a round."""
     if not _public_round_links_enabled():
@@ -2215,11 +2259,13 @@ def enable_round_public_link(
     if not round_obj.public_token:
         round_obj.public_token = _new_public_round_token()
         round_obj.public_token_created_at = datetime.utcnow()
+    round_obj.public_token_expires_at = _parse_public_link_expires_at(expires_at)
     round_obj.updated_at = datetime.utcnow()
     event = _record_round_access_event(
         round_obj,
         "public_link_enabled" if created else "public_link_refreshed",
         actor_user_id=actor_id,
+        details=json.dumps({"expires_at": _datetime_payload(round_obj.public_token_expires_at)}),
     )
     db.session.commit()
     return {
@@ -2227,6 +2273,7 @@ def enable_round_public_link(
         "public_token": round_obj.public_token,
         "public_url_path": f"/rounds/public/{round_obj.public_token}",
         "public_token_created_at": _datetime_payload(round_obj.public_token_created_at),
+        "public_token_expires_at": _datetime_payload(round_obj.public_token_expires_at),
         "access_event": _round_access_event_summary(event),
         "round": _round_summary(round_obj),
     }
@@ -2244,6 +2291,7 @@ def disable_round_public_link(
     had_public_link = bool(round_obj.public_token)
     round_obj.public_token = None
     round_obj.public_token_created_at = None
+    round_obj.public_token_expires_at = None
     round_obj.updated_at = datetime.utcnow()
     event = _record_round_access_event(
         round_obj,
@@ -2264,7 +2312,7 @@ def get_public_round(public_token: str) -> dict[str, Any]:
     if not token:
         raise AutomationError("public_token is required.")
     round_obj = Round.query.filter_by(public_token=token).first()
-    if not round_obj:
+    if not round_obj or _public_round_link_expired(round_obj):
         raise AutomationError("Public round link was not found.")
     return {"round": _public_round_summary(round_obj)}
 

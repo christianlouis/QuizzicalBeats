@@ -280,6 +280,7 @@ class Round(db.Model):
     visibility = db.Column(db.String(20), default='private', nullable=False)
     public_token = db.Column(db.String(64), nullable=True)
     public_token_created_at = db.Column(db.DateTime, nullable=True)
+    public_token_expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
     mp3_generated = db.Column(db.Boolean, default=False)  # Track if MP3 has been generated

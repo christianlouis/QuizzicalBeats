@@ -146,9 +146,14 @@
             {% if public_rounds_enabled %}
                 {% if round.public_token %}
                 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                    <a href="{{ url_for('rounds.public_round', public_token=round.public_token) }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
-                        {{ url_for('rounds.public_round', public_token=round.public_token, _external=True) }}
-                    </a>
+                    <div class="min-w-0">
+                        <a href="{{ url_for('rounds.public_round', public_token=round.public_token) }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
+                            {{ url_for('rounds.public_round', public_token=round.public_token, _external=True) }}
+                        </a>
+                        {% if round.public_token_expires_at %}
+                        <p class="text-xs text-gray-500 mt-1">Expires {{ round.public_token_expires_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                        {% endif %}
+                    </div>
                     <form method="POST" action="{{ url_for('rounds.update_public_round_link', round_id=round.id) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="action" value="disable"/>
@@ -161,6 +166,8 @@
                 <form method="POST" action="{{ url_for('rounds.update_public_round_link', round_id=round.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="enable"/>
+                    <label for="public_link_expires_at" class="block text-sm font-medium text-gray-700 mb-1">Optional expiration</label>
+                    <input id="public_link_expires_at" name="expires_at" type="date" class="mb-3 px-3 py-2 border border-gray-300 rounded-md w-full max-w-xs"/>
                     <button type="submit" class="inline-flex items-center px-3 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-md text-sm font-semibold">
                         <i class="fas fa-link mr-2"></i>Create Public Link
                     </button>

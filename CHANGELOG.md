@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added optional expiration dates for public read-only round links across
+  automation, MCP, browser management, and legacy database migration.
 - Updated ROADMAP.md to reflect shipped seed-source candidate review, artifact
   storage abstraction, and collaboration access-control slices while keeping
   the remaining cloud, scheduler, and real-time work visible for follow-up.

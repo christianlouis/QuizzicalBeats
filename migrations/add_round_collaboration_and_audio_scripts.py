@@ -63,10 +63,25 @@ def run_migration():
                 )
                 changes_made = True
             if "public_token" not in round_columns:
-                conn.execute(text(f"ALTER TABLE {round_table} ADD COLUMN public_token VARCHAR(64)"))
+                conn.execute(
+                    text(f"ALTER TABLE {round_table} ADD COLUMN public_token VARCHAR(64)")
+                )
                 changes_made = True
             if "public_token_created_at" not in round_columns:
-                conn.execute(text(f"ALTER TABLE {round_table} ADD COLUMN public_token_created_at DATETIME"))
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {round_table} "
+                        "ADD COLUMN public_token_created_at DATETIME"
+                    )
+                )
+                changes_made = True
+            if "public_token_expires_at" not in round_columns:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {round_table} "
+                        "ADD COLUMN public_token_expires_at DATETIME"
+                    )
+                )
                 changes_made = True
 
             if not _table_exists(inspector, "round_share"):
