@@ -161,6 +161,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Fixed the quizmaster preference migration so missing user preference rows get
+  defaults for existing required notification, TTS, intro, theme, and timezone
+  columns.
 - Fixed legacy OAuth migrations so PostgreSQL deployments no longer log
   SQLite-only `PRAGMA`, `sqlite_master`, or unquoted `user` SQL errors on
   startup.

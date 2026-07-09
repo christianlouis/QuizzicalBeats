@@ -18,6 +18,19 @@ PROFILE_COLUMNS = {
     "timezone": "VARCHAR(64) DEFAULT 'Europe/Berlin' NOT NULL",
 }
 
+MISSING_PREFERENCES_DEFAULTS = {
+    "default_tts_service": "'polly'",
+    "default_language": "'de'",
+    "tone": "'warm, concise, lightly humorous'",
+    "repeat_cooldown_weeks": "12",
+    "timezone": "'Europe/Berlin'",
+    "enable_intro": "TRUE",
+    "theme": "'light'",
+    "import_job_email_notifications": "TRUE",
+    "oauth_token_email_notifications": "TRUE",
+    "round_blocked_email_notifications": "TRUE",
+}
+
 
 def run_migration():
     try:
@@ -58,15 +71,20 @@ def run_migration():
                 )
             ).rowcount > 0
             if has_user_table:
+                refreshed_columns = {
+                    column["name"] for column in inspect(conn).get_columns("user_preferences")
+                }
+                insert_columns = ["user_id"]
+                select_values = ["u.id"]
+                for column_name, default_sql in MISSING_PREFERENCES_DEFAULTS.items():
+                    if column_name in refreshed_columns:
+                        insert_columns.append(column_name)
+                        select_values.append(default_sql)
                 changed = changed or conn.execute(
                     text(
                         'INSERT INTO user_preferences '
-                        "(user_id, default_language, tone, repeat_cooldown_weeks, timezone) "
-                        'SELECT u.id, '
-                        "'de', "
-                        "'warm, concise, lightly humorous', "
-                        "12, "
-                        "'Europe/Berlin' "
+                        f"({', '.join(insert_columns)}) "
+                        f"SELECT {', '.join(select_values)} "
                         'FROM "user" u '
                         "WHERE NOT EXISTS ("
                         "SELECT 1 FROM user_preferences p WHERE p.user_id = u.id"

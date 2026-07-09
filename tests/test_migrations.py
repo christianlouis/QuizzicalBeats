@@ -854,6 +854,81 @@ def test_quizmaster_profile_preferences_creates_missing_user_preferences(tmp_pat
     assert row[4] == "Europe/Berlin"
 
 
+def test_quizmaster_profile_preferences_creates_missing_preferences_with_required_notification_defaults(tmp_path):
+    """Missing preference inserts include required columns added by later migrations."""
+    database_path = tmp_path / "legacy-missing-required-preferences.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        db.create_all()
+        db.session.remove()
+        db.drop_all()
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE "user" (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(80) UNIQUE NOT NULL,
+                    email VARCHAR(120) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE user_preferences (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER UNIQUE,
+                    default_tts_service VARCHAR(32) NOT NULL,
+                    enable_intro BOOLEAN NOT NULL,
+                    theme VARCHAR(16) NOT NULL,
+                    default_language VARCHAR(16),
+                    tone VARCHAR(200),
+                    tts_voice VARCHAR(120),
+                    email_recipient VARCHAR(120),
+                    preferred_genres TEXT,
+                    preferred_decades TEXT,
+                    banned_artists TEXT,
+                    banned_songs TEXT,
+                    repeat_cooldown_weeks INTEGER,
+                    timezone VARCHAR(64),
+                    import_job_email_notifications BOOLEAN NOT NULL,
+                    oauth_token_email_notifications BOOLEAN NOT NULL,
+                    round_blocked_email_notifications BOOLEAN NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO \"user\" (id, username, email, password_hash) "
+                "VALUES (1, 'christianlouis', 'christianlouis@gmail.com', NULL)"
+            )
+
+        from migrations import add_quizmaster_profile_preferences
+
+        assert add_quizmaster_profile_preferences.run_migration() is True
+        assert add_quizmaster_profile_preferences.run_migration() is None
+
+    with sqlite3.connect(database_path) as conn:
+        row = conn.execute(
+            "SELECT default_tts_service, enable_intro, theme, "
+            "default_language, tone, repeat_cooldown_weeks, timezone, "
+            "import_job_email_notifications, oauth_token_email_notifications, "
+            "round_blocked_email_notifications "
+            "FROM user_preferences WHERE user_id = 1"
+        ).fetchone()
+    assert row == (
+        "polly",
+        1,
+        "light",
+        "de",
+        "warm, concise, lightly humorous",
+        12,
+        "Europe/Berlin",
+        1,
+        1,
+        1,
+    )
+
+
 def test_round_songs_comment_matches_storage_behavior():
     """Round.songs remains documented and parsed as comma-separated IDs."""
     round_ = Round(
