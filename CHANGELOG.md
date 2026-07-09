@@ -78,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a local performance smoke CLI for catalog search, playlist parsing, round-review payloads, and MCP-like analytics summaries.
 - Added a deployment smoke CLI for public health, security headers, server header, static cache, and gzip checks.
 - Added a credential-safe Kubernetes manifest audit for managed database cutover readiness.
+- Added PostgreSQL-compatible song source widening so legacy curated import labels
+  migrate without truncation during managed database cutovers.
 - Added a direct scheduled-email processing CLI for app-image CronJobs.
 - Added a backup readiness CLI that blocks built-in app ZIP backups for managed
   SQL deployments and points operators to external database backup tooling.

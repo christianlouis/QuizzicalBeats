@@ -187,7 +187,7 @@ class Song(db.Model):
     apple_cover_url = db.Column(db.String(500), nullable=True)      # Apple Music cover
     popularity = db.Column(db.Integer)
     used_count = db.Column(db.Integer, default=0)
-    source = db.Column(db.String(20), default='spotify')  # 'spotify', 'deezer', or 'acrcloud'
+    source = db.Column(db.String(50), default='spotify')  # e.g. spotify, deezer, acrcloud, curated seed names
     import_date = db.Column(db.DateTime, default=datetime.utcnow)  # Add import date
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_used = db.Column(db.DateTime)

@@ -111,6 +111,30 @@ def test_song_deezer_id_uses_big_integer_for_large_catalog_ids(tmp_path):
         assert widen_song_deezer_id.run_migration() is None
 
 
+def test_song_source_accepts_curated_import_labels(tmp_path):
+    """Curated seed labels can be longer than the old 20-character source field."""
+    assert Song.__table__.columns["source"].type.length == 50
+
+    database_path = tmp_path / "legacy-song.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE song (
+                id INTEGER PRIMARY KEY,
+                source VARCHAR(20),
+                title VARCHAR(200) NOT NULL,
+                artist VARCHAR(200) NOT NULL
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import widen_song_source
+
+        assert widen_song_source.run_migration() is None
+
+
 def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tmp_path):
     """Legacy round tables get generated-asset status columns."""
     database_path = tmp_path / "legacy-round.db"
