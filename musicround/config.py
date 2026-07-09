@@ -87,6 +87,15 @@ class Config:
     DATA_DIR = os.getenv("DATA_DIR", "/data")
     ROUND_MP3_DIR = os.getenv("ROUND_MP3_DIR", "/data/rounds")
     ROUND_PDF_DIR = os.getenv("ROUND_PDF_DIR", "/data/pdfs")
+    # Openmusic demo endpoint is the default discovery source. A local mirror is optional.
+    OMDB_SERVER_URL = os.getenv("OMDB_SERVER_URL", "https://server.openmusic.app")
+    OMDB_SERVER_TIMEOUT = _int_from_env("OMDB_SERVER_TIMEOUT", 10)
+    OMDB_DATABASE_URL = os.getenv("OMDB_DATABASE_URL")
+    OMDB_SCHEMA = os.getenv("OMDB_SCHEMA", "public")
+    OMDB_TRACKS_TABLE = os.getenv("OMDB_TRACKS_TABLE", "tracks")
+    OMDB_ALBUMS_TABLE = os.getenv("OMDB_ALBUMS_TABLE", "albums")
+    OMDB_ARTISTS_TABLE = os.getenv("OMDB_ARTISTS_TABLE", "artists")
+    OMDB_ARTIST_TRACKS_TABLE = os.getenv("OMDB_ARTIST_TRACKS_TABLE", "artist_track")
     APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Berlin")
     
     # Automation settings

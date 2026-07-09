@@ -143,6 +143,38 @@ def backfill_song_isrc(
 
 
 @mcp.tool()
+def normalize_catalog_popularity(
+    limit: int = 5000,
+    dry_run: bool = True,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Repair legacy popularity values so every catalog score is 0-100."""
+    return _with_app_context(
+        automation.normalize_catalog_popularity,
+        limit=limit,
+        dry_run=dry_run,
+        song_ids=song_ids,
+    )
+
+
+@mcp.tool()
+def enrich_songs_from_deezer(
+    limit: int = 100,
+    dry_run: bool = True,
+    overwrite: bool = False,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Fill incomplete catalog metadata from Deezer only, with rate limiting."""
+    return _with_app_context(
+        automation.enrich_songs_from_deezer,
+        limit=limit,
+        dry_run=dry_run,
+        overwrite=overwrite,
+        song_ids=song_ids,
+    )
+
+
+@mcp.tool()
 def export_song_isrc_catalog(
     missing_only: bool = False,
     limit: int = 50000,
@@ -635,6 +667,7 @@ def record_seed_source_run(
 def fetch_seed_source_candidates(
     seed_source_id: int,
     text: str | None = None,
+    query: str | None = None,
     limit: int = 100,
     timeout_seconds: float = 20.0,
     record_run: bool = True,
@@ -644,10 +677,17 @@ def fetch_seed_source_candidates(
         automation.fetch_seed_source_candidates,
         seed_source_id=seed_source_id,
         text=text,
+        query=query,
         limit=limit,
         timeout_seconds=timeout_seconds,
         record_run=record_run,
     )
+
+
+@mcp.tool()
+def omdb_catalog_status() -> dict[str, Any]:
+    """Return credential-safe readiness for the optional OMDB catalog mirror."""
+    return _with_app_context(automation.omdb_catalog_status)
 
 
 @mcp.tool()

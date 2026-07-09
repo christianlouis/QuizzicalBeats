@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added Deezer-first metadata enrichment with dry-run MCP automation, album
+  metadata caching, and rate limiting so the catalog can be improved without
+  automatically calling paid providers.
+- Added an enforced 0-100 popularity contract: new Deezer imports normalize raw
+  rank values, legacy values can be repaired through MCP, and browser refreshes
+  cannot persist out-of-range popularity scores.
+- Added an explicit full-provider metadata refresh action; the default browser
+  refresh is now Deezer-only, while the broad provider path requires a user
+  confirmation before it can invoke paid services.
+- Added Openmusic/OMDB candidate discovery through the public demo server, with
+  an optional self-hosted PostgreSQL mirror path. OMDB candidates remain
+  review-only until Deezer, MusicBrainz, or Spotify resolves their identity.
 - Marked the Collaboration Core roadmap milestone complete now that browser and
   MCP shared-round editing, roles, invitations, presence, public links, audit
   history, and comments are implemented.

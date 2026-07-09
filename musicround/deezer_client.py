@@ -5,7 +5,7 @@ import random
 import time
 from flask import current_app
 from musicround.models import Song, db
-from musicround.helpers.metadata import get_song_metadata_by_isrc
+from musicround.helpers.metadata import get_song_metadata_by_isrc, normalize_deezer_rank
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ class DeezerClient:
             year=release_year,
             preview_url=preview_url,
             cover_url=cover_url,
-            popularity=track_info.get('rank', 0), # Deezer 'rank' can be used as popularity
+            popularity=normalize_deezer_rank(track_info.get('rank')),
             isrc=isrc, # Save the ISRC
             used_count=0
         )

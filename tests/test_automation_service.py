@@ -85,6 +85,17 @@ class DeezerIsrcStub:
         return self.tracks.get(int(track_id))
 
 
+class DeezerMetadataStub(DeezerIsrcStub):
+    def __init__(self, tracks, albums):
+        super().__init__(tracks)
+        self.albums = albums
+        self.album_calls = []
+
+    def get_album(self, album_id):
+        self.album_calls.append(album_id)
+        return self.albums.get(int(album_id))
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -282,6 +293,57 @@ class TestSongAutomation:
             assert result["skipped_count"] == 1
             assert result["results"][0]["attempts"][0]["status"] == "deezer_isrc_missing_or_invalid"
             assert db.session.get(Song, song.id).isrc is None
+
+    def test_normalize_catalog_popularity_repairs_legacy_deezer_ranks(self, app):
+        with app.app_context():
+            song = _create_song(title="Raw Rank", artist="A", deezer_id=123, popularity=674462)
+
+            dry_run = automation.normalize_catalog_popularity(limit=10, dry_run=True)
+            assert dry_run["processed_count"] == 1
+            assert dry_run["results"][0]["normalized_popularity"] == 67
+            assert db.session.get(Song, song.id).popularity == 674462
+
+            updated = automation.normalize_catalog_popularity(limit=10, dry_run=False)
+            assert updated["updated_count"] == 1
+            assert db.session.get(Song, song.id).popularity == 67
+
+    def test_enrich_songs_from_deezer_fills_incomplete_metadata_without_other_providers(self, app):
+        with app.app_context():
+            song = _create_song(title="Needs Metadata", artist="A", deezer_id=123, popularity=674462)
+            app.config["deezer"] = DeezerMetadataStub(
+                {
+                    123: {
+                        "id": 123,
+                        "title": "Needs Metadata",
+                        "artist": {"name": "A"},
+                        "isrc": "US-RC1-76-07839",
+                        "rank": 674462,
+                        "preview": "https://example.test/preview.mp3",
+                        "album": {"id": 44, "cover": "https://example.test/cover.jpg"},
+                    }
+                },
+                {
+                    44: {
+                        "release_date": "1999-01-01",
+                        "genres": {"data": [{"name": "Rock"}]},
+                    }
+                },
+            )
+
+            dry_run = automation.enrich_songs_from_deezer(limit=10, dry_run=True)
+            assert dry_run["processed_count"] == 1
+            assert set(dry_run["results"][0]["changed_fields"]) >= {"isrc", "genre", "year", "popularity"}
+            assert db.session.get(Song, song.id).isrc is None
+
+            updated = automation.enrich_songs_from_deezer(limit=10, dry_run=False)
+            refreshed = db.session.get(Song, song.id)
+            assert updated["updated_count"] == 1
+            assert refreshed.isrc == "US-RC1-76-07839"
+            assert refreshed.genre == "Rock"
+            assert refreshed.year == 1999
+            assert refreshed.popularity == 67
+            assert refreshed.metadata_sources == "deezer"
+            assert sorted(tag.name for tag in refreshed.tags) == ["rock"]
 
     def test_export_song_isrc_catalog_returns_csv(self, app):
         with app.app_context():

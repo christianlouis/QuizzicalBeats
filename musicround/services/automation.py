@@ -15,7 +15,7 @@ from copy import deepcopy
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from threading import RLock
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -40,6 +40,8 @@ from musicround.helpers.database_config import (
 )
 from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
+from musicround.helpers.metadata import get_deezer_track_metadata, normalize_deezer_rank
+from musicround.helpers.omdb import OmdbError, omdb_catalog_status, search_omdb_catalog
 from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
@@ -92,6 +94,7 @@ SEARCH_CACHE_TTL_SECONDS = 60.0
 SEARCH_CACHE_MAX_ENTRIES = 128
 SEARCH_RELEVANCE_CANDIDATE_LIMIT = 1000
 ISRC_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
+DEEZER_ENRICHMENT_REQUEST_DELAY_SECONDS = 0.1
 
 ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
 ROUND_MANUAL_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected"}
@@ -172,6 +175,17 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "notes": (
             "Large popularity-ranked Spotify snapshot for mainstream candidate "
             "discovery. Review candidates before importing."
+        ),
+    },
+    {
+        "name": "OMDB Lite Catalog",
+        "source_type": "curated",
+        "provider": "omdb",
+        "cadence": "snapshot",
+        "priority": 80,
+        "notes": (
+            "Optional local Openmusic Database mirror for high-view candidate discovery. "
+            "Candidates must be resolved through Deezer/MusicBrainz/Spotify before import."
         ),
     },
     {
@@ -611,6 +625,207 @@ def backfill_song_isrc(
             "Keep dry_run=true for inspection; set dry_run=false to write resolved ISRCs.",
         ],
     }
+
+
+def _song_needs_deezer_enrichment_condition() -> Any:
+    return or_(
+        _song_missing_isrc_condition(),
+        Song.genre.is_(None),
+        db.func.trim(Song.genre) == "",
+        Song.year.is_(None),
+        Song.preview_url.is_(None),
+        db.func.trim(Song.preview_url) == "",
+        Song.cover_url.is_(None),
+        db.func.trim(Song.cover_url) == "",
+        Song.popularity.is_(None),
+        Song.popularity < 0,
+        Song.popularity > 100,
+    )
+
+
+def _song_metadata_sources(song: Song) -> set[str]:
+    return {
+        source.strip()
+        for source in (song.metadata_sources or "").split(",")
+        if source.strip()
+    }
+
+
+def _apply_deezer_metadata(song: Song, metadata: dict[str, Any], *, overwrite: bool) -> list[str]:
+    """Apply Deezer metadata, retaining curated values unless overwrite is requested."""
+    changed_fields: list[str] = []
+    add_genre_tags = bool(metadata.get("genre")) and (overwrite or not song.genre)
+    fields = {
+        "isrc": metadata.get("isrc"),
+        "genre": metadata.get("genre"),
+        "year": metadata.get("year"),
+        "preview_url": metadata.get("preview_url"),
+        "cover_url": metadata.get("cover_url"),
+        "deezer_preview_url": metadata.get("deezer_preview_url"),
+        "deezer_cover_url": metadata.get("deezer_cover_url"),
+    }
+    for field_name, value in fields.items():
+        if value in (None, ""):
+            continue
+        current_value = getattr(song, field_name)
+        if overwrite or current_value in (None, ""):
+            if field_name == "year":
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+            if current_value != value:
+                setattr(song, field_name, value)
+                changed_fields.append(field_name)
+
+    popularity = metadata.get("popularity")
+    if popularity is not None and (overwrite or song.popularity is None or not 0 <= song.popularity <= 100):
+        if song.popularity != popularity:
+            song.popularity = popularity
+            changed_fields.append("popularity")
+
+    if metadata.get("deezer_id") and str(song.deezer_id) != str(metadata["deezer_id"]):
+        song.deezer_id = metadata["deezer_id"]
+        changed_fields.append("deezer_id")
+
+    sources = _song_metadata_sources(song)
+    sources.add("deezer")
+    metadata_sources = ",".join(sorted(sources))
+    if song.metadata_sources != metadata_sources:
+        song.metadata_sources = metadata_sources
+        changed_fields.append("metadata_sources")
+
+    if add_genre_tags:
+        ImportHelper.create_tags_from_genre(song, metadata["genre"])
+    return changed_fields
+
+
+def normalize_catalog_popularity(
+    limit: int = 5000,
+    dry_run: bool = True,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Repair legacy popularity values outside the catalog's 0-100 contract.
+
+    Rows with a Deezer identity are interpreted as previously stored Deezer raw
+    ranks.  All other invalid values are clamped to the supported range.
+    """
+    if limit < 1 or limit > 50000:
+        raise AutomationError("limit must be between 1 and 50000.")
+    query = Song.query.filter(or_(Song.popularity < 0, Song.popularity > 100))
+    if song_ids:
+        try:
+            query = query.filter(Song.id.in_([int(song_id) for song_id in song_ids]))
+        except (TypeError, ValueError):
+            raise AutomationError("song_ids must contain integer IDs.") from None
+    songs = query.order_by(Song.id.asc()).limit(limit).all()
+    results = []
+    for song in songs:
+        normalized = (
+            normalize_deezer_rank(song.popularity)
+            if song.deezer_id else max(0, min(100, int(song.popularity)))
+        )
+        results.append({
+            "song": _song_summary(song),
+            "previous_popularity": song.popularity,
+            "normalized_popularity": normalized,
+            "strategy": "deezer_rank" if song.deezer_id else "clamp",
+        })
+        if not dry_run:
+            song.popularity = normalized
+    if not dry_run and songs:
+        db.session.commit()
+    return {
+        "dry_run": dry_run,
+        "processed_count": len(songs),
+        "updated_count": 0 if dry_run else len(songs),
+        "remaining_invalid_popularity": Song.query.filter(
+            or_(Song.popularity < 0, Song.popularity > 100)
+        ).count() if dry_run else max(0, Song.query.filter(or_(Song.popularity < 0, Song.popularity > 100)).count()),
+        "results": results,
+        "hints": [
+            "Deezer raw ranks are converted against the documented 1,000,000 maximum.",
+            "Use dry_run=true to review the repair, then dry_run=false to write it.",
+        ],
+    }
+
+
+def enrich_songs_from_deezer(
+    limit: int = 100,
+    dry_run: bool = True,
+    overwrite: bool = False,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Enrich incomplete catalog rows from Deezer without calling paid providers."""
+    if limit < 1 or limit > 1000:
+        raise AutomationError("limit must be between 1 and 1000.")
+    query = Song.query.filter(Song.deezer_id.isnot(None))
+    if song_ids:
+        try:
+            query = query.filter(Song.id.in_([int(song_id) for song_id in song_ids]))
+        except (TypeError, ValueError):
+            raise AutomationError("song_ids must contain integer IDs.") from None
+    elif not overwrite:
+        query = query.filter(_song_needs_deezer_enrichment_condition())
+
+    songs = query.order_by(Song.id.asc()).limit(limit).all()
+    album_cache: dict[Any, Any] = {}
+    results: list[dict[str, Any]] = []
+    updated_count = 0
+    skipped_count = 0
+    for index, song in enumerate(songs):
+        metadata = get_deezer_track_metadata(song.deezer_id, current_app, album_cache)
+        if not metadata.get("deezer_id"):
+            results.append({"song": _song_summary(song), "status": "not_found", "changed_fields": []})
+            skipped_count += 1
+            continue
+        if dry_run:
+            changed_fields = _apply_deezer_metadata_preview(song, metadata, overwrite=overwrite)
+        else:
+            changed_fields = _apply_deezer_metadata(song, metadata, overwrite=overwrite)
+            if changed_fields:
+                updated_count += 1
+        results.append({
+            "song": _song_summary(song),
+            "status": "would_update" if dry_run and changed_fields else ("updated" if changed_fields else "unchanged"),
+            "changed_fields": changed_fields,
+            "provider": "deezer",
+        })
+        if index < len(songs) - 1:
+            sleep(DEEZER_ENRICHMENT_REQUEST_DELAY_SECONDS)
+    if not dry_run and updated_count:
+        db.session.commit()
+    return {
+        "dry_run": dry_run,
+        "provider": "deezer",
+        "processed_count": len(songs),
+        "updated_count": 0 if dry_run else updated_count,
+        "skipped_count": skipped_count,
+        "results": results,
+        "hints": [
+            "This only calls Deezer; it does not call Spotify, ACRCloud, Last.fm, or AI providers.",
+            "Use overwrite=true only when Deezer should replace existing curated metadata.",
+        ],
+    }
+
+
+def _apply_deezer_metadata_preview(song: Song, metadata: dict[str, Any], *, overwrite: bool) -> list[str]:
+    """Calculate a Deezer enrichment diff without mutating the session."""
+    changed_fields = []
+    for field_name in (
+        "isrc", "genre", "year", "preview_url", "cover_url", "deezer_preview_url", "deezer_cover_url"
+    ):
+        value = metadata.get(field_name)
+        if value not in (None, "") and (overwrite or getattr(song, field_name) in (None, "")):
+            if getattr(song, field_name) != value:
+                changed_fields.append(field_name)
+    popularity = metadata.get("popularity")
+    if popularity is not None and (overwrite or song.popularity is None or not 0 <= song.popularity <= 100):
+        if song.popularity != popularity:
+            changed_fields.append("popularity")
+    if "deezer" not in _song_metadata_sources(song):
+        changed_fields.append("metadata_sources")
+    return changed_fields
 
 
 def export_song_isrc_catalog(
@@ -2875,9 +3090,47 @@ def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) 
     return parse_text_playlist(text, limit=limit)
 
 
+def _omdb_candidates(query: str, limit: int) -> dict[str, Any]:
+    rows = search_omdb_catalog(current_app, query, limit)
+    candidates = []
+    for line_number, row in enumerate(rows, start=1):
+        candidate = _playlist_candidate(
+            line_number,
+            f"{row.get('artist') or ''} - {row.get('title') or ''}",
+            str(row.get("title") or ""),
+            str(row.get("artist") or ""),
+            issues=["omdb_identity_unverified"],
+        )
+        if not candidate:
+            continue
+        candidate.update({
+            "omdb_track_id": row.get("omdb_track_id"),
+            "album_name": row.get("album_name") or None,
+            "year": row.get("year"),
+            "duration_seconds": row.get("runtime_seconds"),
+            "source_views": row.get("views"),
+            "popularity": None,
+            "isrc": None,
+            "source_rank": None,
+        })
+        candidates.append(candidate)
+    return {
+        "count": len(candidates),
+        "candidates": candidates,
+        "low_confidence_count": len(candidates),
+        "low_confidence": candidates,
+        "ready_for_import": False,
+        "hints": [
+            "OMDB view counts are a discovery signal, not QB's normalized popularity score.",
+            "Resolve every candidate against Deezer, MusicBrainz, or Spotify before importing.",
+        ],
+    }
+
+
 def fetch_seed_source_candidates(
     seed_source_id: int,
     text: str | None = None,
+    query: str | None = None,
     limit: int = 100,
     timeout_seconds: float = 20.0,
     record_run: bool = True,
@@ -2895,15 +3148,22 @@ def fetch_seed_source_candidates(
     content_type = None
     payload_text = (text or "").strip()
     try:
-        if not payload_text:
-            if not source.url:
-                raise AutomationError("seed source has no URL; pass text for manual review.")
-            response = requests.get(source.url, timeout=timeout_seconds)
-            if response.status_code >= 400:
-                raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR)
-            content_type = response.headers.get("content-type")
-            payload_text = response.text
-        parsed = _parse_seed_source_payload(payload_text, content_type, limit)
+        if source.provider == "omdb" and not payload_text:
+            parsed = _omdb_candidates(query or "", limit)
+        else:
+            if not payload_text:
+                if not source.url:
+                    raise AutomationError("seed source has no URL; pass text for manual review.")
+                response = requests.get(source.url, timeout=timeout_seconds)
+                if response.status_code >= 400:
+                    raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR)
+                content_type = response.headers.get("content-type")
+                payload_text = response.text
+            parsed = _parse_seed_source_payload(payload_text, content_type, limit)
+    except OmdbError as exc:
+        if record_run:
+            record_seed_source_run(source.id, status="failed", error_message=str(exc), completed=True)
+        raise AutomationError(str(exc)) from exc
     except AutomationError as exc:
         if record_run:
             record_seed_source_run(

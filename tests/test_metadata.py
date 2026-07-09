@@ -25,6 +25,7 @@ from musicround.helpers.metadata import (
     get_musicbrainz_data,
     get_spotify_data,
     get_deezer_data,
+    get_deezer_track_metadata,
     get_lastfm_data,
     get_openai_data,
     get_acrcloud_data
@@ -42,6 +43,33 @@ class TestMetadataHelper(unittest.TestCase):
         
         # Test ISRC for AC/DC's Highway to Hell
         self.test_isrc = "AUAP07900028"
+
+    def test_deezer_track_metadata_normalizes_rank_and_uses_album_metadata(self):
+        deezer = MagicMock()
+        deezer.get_track.return_value = {
+            "id": 123,
+            "title": "Provider Track",
+            "artist": {"name": "Provider Artist"},
+            "isrc": "USRC17607839",
+            "rank": 674462,
+            "preview": "https://example.test/preview.mp3",
+            "album": {"id": 44, "cover_big": "https://example.test/cover.jpg"},
+        }
+        deezer.get_album.return_value = {
+            "release_date": "1999-01-01",
+            "genres": {"data": [{"name": "Rock"}]},
+            "cover_xl": "https://example.test/cover-xl.jpg",
+        }
+        self.mock_app.config = {"deezer": deezer}
+
+        metadata = get_deezer_track_metadata(123, self.mock_app)
+
+        self.assertEqual(metadata["popularity"], 67)
+        self.assertEqual(metadata["genre"], "Rock")
+        self.assertEqual(metadata["year"], "1999")
+        self.assertEqual(metadata["isrc"], "USRC17607839")
+        self.assertEqual(metadata["cover_url"], "https://example.test/cover-xl.jpg")
+        self.assertEqual(metadata["sources"], ["deezer"])
 
     @patch('musicround.helpers.metadata.get_musicbrainz_data')
     @patch('musicround.helpers.metadata.get_spotify_data')

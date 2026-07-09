@@ -3,7 +3,11 @@ API routes for song operations in the Music Round application
 """
 from flask import Blueprint, jsonify, request, current_app, session, redirect, url_for
 from musicround.models import Song, Tag, SongTag, db, Round
-from musicround.helpers.metadata import get_song_metadata_by_isrc
+from musicround.helpers.metadata import (
+    get_deezer_track_metadata,
+    get_song_metadata_by_isrc,
+    normalize_popularity,
+)
 from flask_wtf.csrf import CSRFProtect
 import traceback  # Add import at the top
 import logging
@@ -276,7 +280,7 @@ def mutate_song_detail(song_id):
             song.isrc = data['isrc']
         if 'popularity' in data and data['popularity'] is not None:
             try:
-                song.popularity = int(data['popularity'])
+                song.popularity = normalize_popularity(data['popularity'])
             except (ValueError, TypeError):
                 current_app.logger.warning(f"Invalid popularity value: {data['popularity']}")
         
@@ -351,26 +355,37 @@ def mutate_song_detail(song_id):
 @api_bp.route('/songs/<int:song_id>/refresh-metadata', methods=['POST'])
 @login_required
 def refresh_song_metadata(song_id):
-    """API endpoint for refreshing song metadata"""
+    """Refresh one song with Deezer-only or full provider metadata."""
     song = Song.query.get_or_404(song_id)
-    
-    # Check if we have an ISRC code to use for refreshing metadata
-    if not song.isrc:
-        current_app.logger.warning(f"Cannot refresh metadata for song {song_id} - no ISRC code")
-        return jsonify({'error': 'Song has no ISRC code to refresh metadata'}), 400
+    provider = (request.args.get('provider') or 'deezer').strip().lower()
+    if provider not in {'deezer', 'full'}:
+        return jsonify({'error': 'provider must be deezer or full'}), 400
+
+    if provider == 'deezer' and not song.deezer_id:
+        return jsonify({'error': 'Song has no Deezer ID to refresh metadata'}), 400
+    if provider == 'full' and not song.isrc:
+        current_app.logger.warning(f"Cannot fully refresh metadata for song {song_id} - no ISRC code")
+        return jsonify({'error': 'Song has no ISRC code for a full metadata refresh'}), 400
     
     try:
-        # Get fresh metadata using the existing ISRC
-        current_app.logger.debug(
-            "Starting metadata refresh for song %s with ISRC %s",
-            song_id,
-            song.isrc,
-        )
-        metadata = get_song_metadata_by_isrc(song.isrc, current_app)
+        if provider == 'deezer':
+            current_app.logger.debug(
+                "Starting Deezer-only metadata refresh for song %s with Deezer ID %s",
+                song_id,
+                song.deezer_id,
+            )
+            metadata = get_deezer_track_metadata(song.deezer_id, current_app)
+        else:
+            current_app.logger.debug(
+                "Starting full metadata refresh for song %s with ISRC %s",
+                song_id,
+                song.isrc,
+            )
+            metadata = get_song_metadata_by_isrc(song.isrc, current_app)
         
-        if not metadata:
-            current_app.logger.warning(f"No metadata found for ISRC {song.isrc}")
-            return jsonify({'error': 'No metadata found for this ISRC'}), 404
+        if not metadata or (provider == 'deezer' and not metadata.get('deezer_id')):
+            current_app.logger.warning("No %s metadata found for song %s", provider, song_id)
+            return jsonify({'error': 'No metadata found for this song'}), 404
         
         # Debug the metadata received
         current_app.logger.debug(f"Received metadata structure: {type(metadata).__name__}")
@@ -399,6 +414,8 @@ def refresh_song_metadata(song_id):
         if metadata.get('year'):
             current_app.logger.debug(f"Updating year to '{metadata['year']}'")
             song.year = metadata['year']
+        if metadata.get('isrc'):
+            song.isrc = metadata['isrc']
         
         # Check additional metadata for genres and add tags from there too
         if 'genres' in metadata:
@@ -440,7 +457,7 @@ def refresh_song_metadata(song_id):
             
         # Update popularity if available
         if metadata.get('popularity') is not None:
-            song.popularity = metadata['popularity']
+            song.popularity = normalize_popularity(metadata['popularity'])
             
         # Store metadata sources
         if metadata.get('sources'):

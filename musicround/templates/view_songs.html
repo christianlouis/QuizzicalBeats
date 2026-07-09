@@ -824,7 +824,11 @@
                                         <div class="mb-6 flex flex-col space-y-2">
                                             <button id="refreshSongBtn" data-song-id="${songId}" 
                                                 class="w-full bg-teal-500 hover:bg-teal-600 text-white font-medium py-2 px-4 rounded-md flex items-center justify-center">
-                                                <i class="fas fa-sync-alt mr-2"></i> Refresh Metadata
+                                                <i class="fas fa-sync-alt mr-2"></i> Refresh Deezer Data
+                                            </button>
+                                            <button id="fullRefreshSongBtn" data-song-id="${songId}"
+                                                class="w-full border border-teal-500 text-teal-700 hover:bg-teal-50 font-medium py-2 px-4 rounded-md flex items-center justify-center">
+                                                <i class="fas fa-cloud-download-alt mr-2"></i> Full Provider Refresh
                                             </button>
                                             
                                             <button id="deleteSongModalBtn" data-song-id="${songId}" data-song-title="${data.title}"
@@ -950,9 +954,8 @@
                         setUpTagsSystem(data.tags || []);
                         
                         // Modal refresh metadata button handler
-                        $('#refreshSongBtn').on('click', function() {
-                            const btnSongId = $(this).data('song-id');
-                            const button = $(this);
+                        function refreshSongMetadata(button, provider) {
+                            const btnSongId = button.data('song-id');
                             
                             // Update button state
                             const originalHtml = button.html();
@@ -960,7 +963,7 @@
                             
                             // Call API to refresh metadata
                             $.ajax({
-                                url: `/api/songs/${btnSongId}/refresh-metadata`,
+                                url: `/api/songs/${btnSongId}/refresh-metadata?provider=${provider}`,
                                 method: 'POST',
                                 success: function(data) {
                                     // Update form fields
@@ -1012,6 +1015,15 @@
                                     showToast(xhr.responseJSON?.error || 'Failed to refresh metadata', 'error');
                                 }
                             });
+                        }
+
+                        $('#refreshSongBtn').on('click', function() {
+                            refreshSongMetadata($(this), 'deezer');
+                        });
+                        $('#fullRefreshSongBtn').on('click', function() {
+                            if (window.confirm('This checks all configured metadata providers and may use paid APIs. Continue?')) {
+                                refreshSongMetadata($(this), 'full');
+                            }
                         });
                         
                         // Delete song button in modal handler

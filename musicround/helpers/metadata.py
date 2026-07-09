@@ -6,6 +6,123 @@ from flask import current_app
 from collections import Counter
 import traceback  # Added for detailed error tracking
 
+
+DEEZER_RANK_MAX = 1_000_000
+
+
+def normalize_popularity(value, *, provider=None):
+    """Return the catalog popularity score on the documented 0-100 scale.
+
+    Spotify and curated seed sources already provide a 0-100 score.  Deezer's
+    ``rank`` is a larger, provider-specific integer, so it needs a conversion
+    before it can share the same column and UI with those scores.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if provider == "deezer":
+        numeric_value = numeric_value / DEEZER_RANK_MAX * 100
+    return max(0, min(100, int(round(numeric_value))))
+
+
+def normalize_deezer_rank(rank):
+    """Convert Deezer's raw track rank into the catalog's 0-100 score."""
+    return normalize_popularity(rank, provider="deezer")
+
+
+def _deezer_client_request(deezer_id, app=None):
+    deezer_client = app.config.get("deezer") if app else None
+    if deezer_client:
+        if hasattr(deezer_client, "get_track"):
+            return deezer_client.get_track(deezer_id)
+        return deezer_client._make_request(f"track/{deezer_id}")
+
+    response = requests.get(f"https://api.deezer.com/track/{deezer_id}", timeout=10)
+    return response.json() if response.status_code == 200 else None
+
+
+def _deezer_album_request(album_id, app=None):
+    deezer_client = app.config.get("deezer") if app else None
+    if deezer_client:
+        if hasattr(deezer_client, "get_album"):
+            return deezer_client.get_album(album_id)
+        return deezer_client._make_request(f"album/{album_id}")
+
+    response = requests.get(f"https://api.deezer.com/album/{album_id}", timeout=10)
+    return response.json() if response.status_code == 200 else None
+
+
+def get_deezer_track_metadata(deezer_id, app=None, album_cache=None):
+    """Fetch one track's metadata from Deezer only.
+
+    This deliberately avoids ACRCloud, Spotify, Last.fm, MusicBrainz, and AI
+    providers.  ``album_cache`` can be shared by a bulk caller to avoid
+    repeatedly looking up the same album just to obtain genre and release year.
+    """
+    result = {"sources": ["deezer"]}
+    if not deezer_id:
+        return result
+
+    try:
+        track = _deezer_client_request(deezer_id, app)
+    except Exception as exc:
+        if app:
+            app.logger.warning("Deezer metadata lookup failed for %s: %s", deezer_id, exc)
+        return result
+    if not track or track.get("error"):
+        return result
+
+    album = track.get("album") or {}
+    result.update({
+        "title": track.get("title"),
+        "artist_name": (track.get("artist") or {}).get("name"),
+        "isrc": track.get("isrc"),
+        "deezer_id": track.get("id"),
+        "popularity": normalize_deezer_rank(track.get("rank")),
+        "deezer_preview_url": track.get("preview"),
+        "preview_url": track.get("preview"),
+        "deezer_cover_url": (
+            album.get("cover_xl") or album.get("cover_big") or album.get("cover")
+        ),
+        "cover_url": (
+            album.get("cover_xl") or album.get("cover_big") or album.get("cover")
+        ),
+    })
+
+    album_id = album.get("id")
+    album_metadata = None
+    if album_id:
+        if album_cache is not None and album_id in album_cache:
+            album_metadata = album_cache[album_id]
+        else:
+            try:
+                album_metadata = _deezer_album_request(album_id, app)
+            except Exception as exc:
+                if app:
+                    app.logger.warning("Deezer album lookup failed for %s: %s", album_id, exc)
+            if album_cache is not None:
+                album_cache[album_id] = album_metadata
+
+    if album_metadata and not album_metadata.get("error"):
+        release_date = album_metadata.get("release_date")
+        if release_date:
+            result["year"] = release_date[:4]
+        genre_data = (album_metadata.get("genres") or {}).get("data") or []
+        if genre_data:
+            result["genre"] = genre_data[0].get("name")
+        result["deezer_cover_url"] = (
+            album_metadata.get("cover_xl")
+            or album_metadata.get("cover_big")
+            or result.get("deezer_cover_url")
+        )
+        result["cover_url"] = result["deezer_cover_url"]
+
+    return {key: value for key, value in result.items() if value not in (None, "")}
+
 def get_song_metadata_by_isrc(isrc, app=None):
     """
     Get comprehensive song metadata by ISRC code from multiple sources.
@@ -208,6 +325,8 @@ def get_song_metadata_by_isrc(isrc, app=None):
                 years.append(deezer_data["year"])
             if deezer_data.get("genre"):
                 genres.append(deezer_data["genre"])
+            if metadata["popularity"] is None and deezer_data.get("popularity") is not None:
+                metadata["popularity"] = deezer_data["popularity"]
             if deezer_data.get("deezer_preview_url"):
                 metadata["deezer_preview_url"] = deezer_data["deezer_preview_url"]
             if deezer_data.get("id"):
@@ -530,6 +649,9 @@ def get_deezer_data(isrc, app=None):
             
             # Extract Deezer ID
             result["id"] = track.get('id')
+
+            # Deezer returns a provider-specific raw rank, never a catalog score.
+            result["popularity"] = normalize_deezer_rank(track.get('rank'))
             
             # Get album details to extract more info
             if track.get('album') and track['album'].get('id'):

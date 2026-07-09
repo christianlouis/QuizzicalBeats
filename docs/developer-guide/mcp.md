@@ -39,6 +39,8 @@ The MCP server exposes these tools:
 | `add_song` | Add or update a catalog song, including platform IDs and tags. |
 | `isrc_catalog_status` | Report catalog ISRC coverage, missing-provider counts, and example rows. |
 | `backfill_song_isrc` | Fill missing ISRC values from Spotify or Deezer track metadata, with dry-run support. |
+| `normalize_catalog_popularity` | Audit or repair legacy popularity values so every catalog score is normalized to 0-100. |
+| `enrich_songs_from_deezer` | Fill incomplete catalog rows from Deezer only, with rate limiting and dry-run support. |
 | `export_song_isrc_catalog` | Export catalog song IDs, ISRCs, and provider IDs as CSV text. |
 | `datastore_schema` | Describe all mapped datastore object types, columns, and primary keys. |
 | `database_configuration_summary` | Report credential-safe database backend, managed-DB guard, and PG* readiness for cutover checks. |
@@ -67,7 +69,8 @@ The MCP server exposes these tools:
 | `list_seed_sources` | List configured catalog seed sources for agent planning. |
 | `seed_default_seed_sources` | Create or update the default mainstream chart and rock/metal festival source registry. |
 | `record_seed_source_run` | Record seed-source read/import attempts and outcomes. |
-| `fetch_seed_source_candidates` | Read a seed source URL or pasted text into reviewable candidates without importing songs. |
+| `fetch_seed_source_candidates` | Read a seed source URL, OMDB/Openmusic query, or pasted text into reviewable candidates without importing songs. |
+| `omdb_catalog_status` | Report readiness for the free Openmusic demo server or optional local OMDB mirror. |
 | `find_songs` | Search the catalog with relevance ranking, match explanations, filters for genre/year/preview/usage/tag/tempo, facets, suggestions, and short-lived cache metadata. |
 | `suggest_replacement_songs` | Suggest catalog songs for a failed, unplayable, or overused song. |
 | `replace_round_song` | Replace one song at a 1-based round position and invalidate generated assets. |

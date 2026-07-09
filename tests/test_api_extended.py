@@ -226,7 +226,7 @@ class TestSongTagsApi:
             'musicround.routes.api.get_song_metadata_by_isrc',
             side_effect=RuntimeError('provider-secret metadata traceback'),
         ):
-            response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+            response = client.post(f'/api/songs/{song_id}/refresh-metadata?provider=full')
 
         data = response.get_json()
         assert response.status_code == 500
@@ -253,7 +253,7 @@ class TestSongTagsApi:
             'musicround.routes.api.db.session.commit',
             side_effect=RuntimeError('database-secret /data/song_data.db'),
         ):
-            response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+            response = client.post(f'/api/songs/{song_id}/refresh-metadata?provider=full')
 
         data = response.get_json()
         assert response.status_code == 500
@@ -263,6 +263,29 @@ class TestSongTagsApi:
         }
         assert 'database-secret' not in response.get_data(as_text=True)
         assert '/data/song_data.db' not in response.get_data(as_text=True)
+
+    def test_refresh_metadata_defaults_to_deezer_and_normalizes_popularity(self, app, client):
+        _create_user_and_login(app, client, 'deezermeta', 'deezermeta@example.com')
+        with app.app_context():
+            song = Song(title='Deezer Meta', artist='Artist', deezer_id=123)
+            db.session.add(song)
+            db.session.commit()
+            song_id = song.id
+
+        with patch(
+            'musicround.routes.api.get_deezer_track_metadata',
+            return_value={
+                'title': 'Deezer Meta',
+                'artist_name': 'Artist',
+                'deezer_id': 123,
+                'popularity': 67,
+                'sources': ['deezer'],
+            },
+        ):
+            response = client.post(f'/api/songs/{song_id}/refresh-metadata')
+
+        assert response.status_code == 200
+        assert response.get_json()['popularity'] == 67
 
 
 class TestSongSearchApi:
