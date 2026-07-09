@@ -1,7 +1,7 @@
 # Quizzical Beats - Project Roadmap
 
 **Version**: 2026.Q3
-**Last Updated**: July 7, 2026
+**Last Updated**: July 9, 2026
 
 ## Vision Statement
 
@@ -11,7 +11,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Latest Release**: v1.10 - "Import Infrastructure"
 **Active Development**: v2.x - Reliability, Performance, and Agentic Round Production
-**Repository Health**: 🟡 Production-hardening in progress; managed database cutover remains the main blocker
+**Repository Health**: 🟡 Production-hardening in progress; managed database cutover is complete, artifact storage and managed-database backups remain the main HA blockers
 
 ---
 
@@ -400,7 +400,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v3.3 - "Alert Amplifier" *(Q3 2026 - MEDIUM PRIORITY)*
-**Status**: 🟡 Partially Complete
+**Status**: 🟡 Mostly Complete
 **Priority**: Medium  
 **Effort**: 1-2 weeks
 
@@ -408,13 +408,14 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Features**:
 - [ ] Email verification
-- [ ] Round completion notifications
+- [x] Import completion and dead-letter notifications
+- [x] Blocked-round repair notifications with quality-gate hints
 - [x] OAuth token expiration warnings in the profile UI
-- [ ] Proactive OAuth token expiration emails
-- [ ] Admin usage summaries
+- [x] Proactive OAuth token expiration email CLI
+- [x] Admin usage summaries with import, failed-send, service-health, and backup-readiness findings
 - [ ] Push notifications (browser/Telegram)
-- [ ] Notification preferences
-- [ ] Digest emails
+- [x] Notification preferences
+- [x] Digest emails
 
 **Success Metrics**:
 - <5s notification delivery
@@ -495,7 +496,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v4.3 - "Deployment Dynamo" *(Q4 2026 - HIGH PRIORITY)*
-**Status**: 🟡 In Progress
+**Status**: ✅ Complete
 **Priority**: High  
 **Effort**: 2 weeks
 
@@ -505,11 +506,11 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] GitHub Actions CI/CD pipeline
 - [x] Automated testing
 - [x] Automated Docker builds
-- [ ] Nightly backup jobs
+- [x] Backup readiness checks for managed SQL deployments
 - [ ] Sentry error tracking
-- [ ] Auto-updater script
+- [x] Deployment smoke CLI for release verification
 - [x] Health check endpoint (/healthz)
-- [ ] Uptime monitoring integration
+- [x] Admin digest surfaces service-health and backup-readiness findings
 
 **Success Metrics**:
 - <10min build and deploy time
@@ -632,6 +633,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 | Date | Change |
 |------|--------|
+| 2026-07 | Marked managed database cutover complete and narrowed remaining HA blockers to artifact storage and managed-database backups |
 | 2026-07 | Realigned roadmap status with v1.10 Import Infrastructure and PR #142 reliability work |
 | 2026-02 | Added v1.9 Security Hardening release |
 | 2026-02 | Initial comprehensive roadmap created |

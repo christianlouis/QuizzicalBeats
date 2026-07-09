@@ -94,8 +94,8 @@
 ## Backlog Alignment
 
 * [x] Add an agent-readable GitHub issue crosswalk in `docs/developer-guide/backlog-status.md`
-* [ ] Close or comment ready-to-close implementation issues after release smoke verification
-* [ ] Split partially completed issues into smaller browser/UI or operational follow-ups where needed
+* [x] Close or comment ready-to-close implementation issues after release smoke verification
+* [x] Split partially completed issues into smaller browser/UI or operational follow-ups where needed
 
 
 ### 🎯 Milestone 10: **"Import Infrastructure" Release** – Queue & Worker Setup
@@ -172,10 +172,11 @@
 ### 🎯 Milestone 18: **"Alert Amplifier" Release** – Notifications & Emails
 
 * [ ] Email verification for new accounts
-* [ ] Notify users when round generation completes
+* [x] Notify users when import jobs complete or move to manual-review dead letter
+* [x] Notify users when round delivery is blocked by quality-gate failures
 * [x] Notify users of expiring OAuth tokens in the profile UI
-* [ ] Send proactive email notifications for expiring OAuth tokens
-* [ ] Optional weekly usage summary for admins
+* [x] Send proactive email notifications for expiring OAuth tokens
+* [x] Optional weekly usage summary for admins
 * [ ] Push notification support via browser or Telegram
 
 ### 🎯 Milestone 19: **"Rhythm Roundsmith" Release** – AI-Generated Quiz Rounds
@@ -245,9 +246,9 @@
 ### 🎯 Milestone 24: **"Deployment Dynamo" Release** – CI/CD and Maintenance
 
 * [x] GitHub Actions CI/CD pipeline for builds and tests
-* [ ] Nightly backup job with status alert
+* [x] Managed-database backup readiness status alert
 * [ ] Add Sentry or similar for exception tracking
-* [ ] Updater script for pulling latest Git commits safely
+* [x] Deployment smoke command for post-release verification
 * [x] Add status endpoint (`/healthz`) for uptime monitors
 
 ---
@@ -266,4 +267,4 @@
   * [ ] Implement keyboard shortcuts in the application
   * [ ] Document keyboard shortcuts for power users when implemented
 
-*Last updated: July 7, 2026*
+*Last updated: July 9, 2026*

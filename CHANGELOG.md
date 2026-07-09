@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Aligned the roadmap, TODO list, and agentic backlog crosswalk with the
+  current GitHub issue state so agents can distinguish the remaining
+  milestone-scale work from the old bug-slice backlog.
 - Added planned-round deliverable status and due-soon warnings to MCP payloads
   and the browser calendar so agents can see missing rounds, approvals, and
   scheduled email exports before quiz deadlines.
