@@ -3212,7 +3212,11 @@ def generate_round_pdf(round_id: int) -> dict[str, Any]:
     return {"round_id": round_id, "path": path, "bytes": len(pdf_data)}
 
 
-def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, Any]:
+def generate_round_mp3(
+    round_id: int,
+    user_id: int | None = None,
+    force_regenerate: bool = True,
+) -> dict[str, Any]:
     from musicround.routes.rounds import round_mp3
 
     round_obj = db.session.get(Round, round_id)
@@ -3227,7 +3231,12 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
             AUTOMATION_STORAGE_ERROR,
             details=check_round_artifact_storage(include_pdf=False),
         ) from exc
-    with current_app.test_request_context(headers={"X-Requested-With": "XMLHttpRequest"}):
+    form_data = {"force": "true"} if force_regenerate else None
+    with current_app.test_request_context(
+        method="POST",
+        data=form_data,
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    ):
         login_user(user)
         try:
             response = round_mp3(round_id)
@@ -3251,6 +3260,7 @@ def generate_round_assets(
     user_id: int | None = None,
     include_pdf: bool = True,
     include_mp3: bool = True,
+    force_mp3_regenerate: bool = True,
 ) -> dict[str, Any]:
     """Generate requested round assets."""
     try:
@@ -3268,7 +3278,11 @@ def generate_round_assets(
     if include_pdf:
         assets["pdf"] = generate_round_pdf(round_id)
     if include_mp3:
-        assets["mp3"] = generate_round_mp3(round_id, user_id=user_id)
+        assets["mp3"] = generate_round_mp3(
+            round_id,
+            user_id=user_id,
+            force_regenerate=force_mp3_regenerate,
+        )
     return assets
 
 
@@ -3277,6 +3291,7 @@ def generate_round_assets_batch(
     user_id: int | None = None,
     include_pdf: bool = True,
     include_mp3: bool = True,
+    force_mp3_regenerate: bool = True,
 ) -> dict[str, Any]:
     """Generate requested assets for several rounds without aborting the whole batch."""
     normalized_round_ids = _normalize_round_ids(round_ids)
@@ -3291,6 +3306,7 @@ def generate_round_assets_batch(
                 user_id=user_id,
                 include_pdf=include_pdf,
                 include_mp3=include_mp3,
+                force_mp3_regenerate=force_mp3_regenerate,
             )
         except AutomationError as exc:
             error_count += 1
@@ -3455,7 +3471,7 @@ def _round_audio_components(
 
     for mp3_type in ("intro", "replay", "outro"):
         try:
-            segment = AudioSegment.from_mp3(get_mp3_path(user, mp3_type))
+            segment = AudioSegment.from_mp3(get_mp3_path(user, mp3_type, round_id=round_id))
             components["custom_audio_ms"][mp3_type] = len(segment)
         except Exception as exc:
             current_app.logger.error(
@@ -5913,6 +5929,14 @@ def _audio_script_summary(script: RoundAudioScript) -> dict[str, Any]:
     }
 
 
+def _mark_round_mp3_stale(round_obj: Round | None) -> None:
+    """Force the next MP3 render to include changed round audio scripts."""
+    if not round_obj:
+        return
+    round_obj.mp3_generated = False
+    round_obj.last_generated_at = None
+
+
 def _validate_script_type(script_type: str) -> str:
     normalized = (script_type or "").strip().lower()
     if normalized not in {"intro", "replay", "outro", "track_hint"}:
@@ -5963,6 +5987,7 @@ def save_round_audio_scripts(
         )
         db.session.add(script)
         created_scripts.append(script)
+    _mark_round_mp3_stale(round_obj)
     db.session.commit()
     return {
         "created": len(created_scripts),
@@ -6065,6 +6090,7 @@ def save_round_track_hints(
         )
         db.session.add(script)
         created_scripts.append(script)
+    _mark_round_mp3_stale(round_obj)
     db.session.commit()
     return {
         "created": len(created_scripts),
@@ -6122,6 +6148,7 @@ def update_round_audio_script(
     if selected is not None:
         script.selected = bool(selected)
     script.updated_at = datetime.utcnow()
+    _mark_round_mp3_stale(script.round)
     db.session.commit()
     return {"script": _audio_script_summary(script)}
 
@@ -6179,6 +6206,7 @@ def generate_tts_from_script(
     script.selected = True
     script.status = "used"
     script.updated_at = datetime.utcnow()
+    _mark_round_mp3_stale(script.round)
     db.session.commit()
     return {"script": _audio_script_summary(script), "generated": generated}
 

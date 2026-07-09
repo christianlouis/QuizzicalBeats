@@ -1142,9 +1142,9 @@ def round_mp3(round_id):
     # Load intro, outro, and replay audio segments - using user's custom ones if available
     try:
         # Use get_mp3_path helper to get the appropriate path for each MP3 type
-        intro_path = get_mp3_path(current_user, 'intro')
-        outro_path = get_mp3_path(current_user, 'outro')
-        replay_path = get_mp3_path(current_user, 'replay')
+        intro_path = get_mp3_path(current_user, 'intro', round_id=round_id)
+        outro_path = get_mp3_path(current_user, 'outro', round_id=round_id)
+        replay_path = get_mp3_path(current_user, 'replay', round_id=round_id)
         
         intro = AudioSegment.from_mp3(intro_path)
         outro = AudioSegment.from_mp3(outro_path)

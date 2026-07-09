@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
+from musicround.helpers.paths import app_data_path
 from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, SystemSetting
 from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
 from musicround.services.automation import AutomationError
@@ -1771,6 +1772,64 @@ class TestLegacyEmptyRoundRoutes:
 
 class TestRoundMp3Hints:
     """Tests for optional per-track hint audio in generated MP3s."""
+
+    def test_round_mp3_uses_selected_round_intro_before_user_default(self, app, client, tmp_path):
+        """Round-specific generated intro audio should override the user/default intro."""
+        _login(app, client)
+        song_id = _create_song(app, title='Round Intro Song')
+        round_id = _create_round(app, [song_id], name='Round Intro Round')
+        intro_rel_path = 'custommp3/roundsuser/round_intro.mp3'
+        with app.app_context():
+            app.config['DATA_DIR'] = str(tmp_path / 'data')
+            song = db.session.get(Song, song_id)
+            song.deezer_id = 123
+            intro_path = app_data_path(intro_rel_path)
+            os.makedirs(os.path.dirname(intro_path), exist_ok=True)
+            with open(intro_path, 'wb') as handle:
+                handle.write(b'ID3')
+            db.session.add(RoundAudioScript(
+                round_id=round_id,
+                script_type='intro',
+                text='A round-specific opener.',
+                status='used',
+                selected=True,
+                generated_mp3_path=intro_rel_path,
+            ))
+            db.session.commit()
+            app.config['ROUND_MP3_DIR'] = str(tmp_path)
+            app.config['deezer'] = _DeezerPreviewStub()
+
+        exported_lengths = []
+
+        def fake_from_mp3(path):
+            path = str(path)
+            if path.endswith('round_intro.mp3'):
+                return AudioSegment.silent(duration=5000)
+            if path.endswith('intro.mp3') or path.endswith('replay.mp3') or path.endswith('outro.mp3'):
+                return AudioSegment.silent(duration=1000)
+            if 'song_' in path:
+                return AudioSegment.silent(duration=30000)
+            if path.endswith('1.mp3'):
+                return AudioSegment.silent(duration=100)
+            return AudioSegment.silent(duration=1)
+
+        def fake_export(segment, path, format='mp3'):
+            exported_lengths.append(len(segment))
+            with open(path, 'wb') as handle:
+                handle.write(b'ID3')
+            return None
+
+        with patch('musicround.routes.rounds.AudioSegment.from_mp3', side_effect=fake_from_mp3), \
+                patch('musicround.routes.rounds.requests.get', return_value=_PreviewResponse()), \
+                patch('pydub.audio_segment.AudioSegment.export', fake_export):
+            response = client.post(
+                f'/rounds/round/{round_id}/mp3',
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()['success'] is True
+        assert exported_lengths == [67200]
 
     def test_round_mp3_inserts_selected_track_hint_before_first_play(self, app, client, tmp_path):
         """Generated MP3 duration should include selected hint audio once."""

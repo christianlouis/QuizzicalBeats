@@ -2049,6 +2049,31 @@ class TestAssetInspection:
             assert message == automation.AUTOMATION_MP3_GENERATION_ERROR
             assert "private-token-secret" not in message
 
+    def test_generate_round_mp3_forces_regeneration_for_automation(self, app, tmp_path):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Force Automation", artist="Artist", deezer_id="123")
+            round_id = automation.create_round(
+                name="Force Automation Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            app.config["ROUND_MP3_DIR"] = str(tmp_path)
+            expected_path = tmp_path / f"round_{round_id}.mp3"
+
+            def fake_round_mp3(_round_id):
+                from flask import request
+
+                assert request.form.get("force") == "true"
+                expected_path.write_bytes(b"ID3")
+                return {"success": True}
+
+            with patch("musicround.routes.rounds.round_mp3", side_effect=fake_round_mp3):
+                result = automation.generate_round_mp3(round_id, user_id=user.id)
+
+            assert result["path"] == str(expected_path)
+            assert result["bytes"] == 3
+
     def test_email_round_blocks_when_package_quality_fails(self, app):
         with app.app_context():
             user = _create_user()
@@ -2682,6 +2707,7 @@ class TestAssetInspection:
                 "user_id": 7,
                 "include_pdf": True,
                 "include_mp3": False,
+                "force_mp3_regenerate": True,
             }
 
     def test_generate_round_assets_batch_validates_ids(self, app):
@@ -4001,3 +4027,33 @@ class TestAgentPlanningAutomation:
             assert generated["generated"]["mp3_type"] == "track_hint"
             assert generated["generated"]["path"].endswith("round_1_hint_1.mp3")
             assert User.query.get(user.id).intro_mp3 == "custommp3/agentuser/existing-intro.mp3"
+
+    def test_tts_generation_marks_existing_round_mp3_stale(self, app):
+        with app.app_context():
+            user = _create_user()
+            song = _create_song(title="Stale", artist="Artist")
+            round_id = automation.create_round(
+                name="Stale Audio",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=user.id,
+            )["round"]["id"]
+            saved = automation.save_round_audio_scripts(
+                round_id,
+                user_id=user.id,
+                scripts={"intro": "Fresh intro"},
+                status="approved",
+            )
+            script_id = saved["scripts"][0]["id"]
+            round_obj = db.session.get(Round, round_id)
+            round_obj.mp3_generated = True
+            round_obj.last_generated_at = datetime.utcnow()
+            db.session.commit()
+
+            with patch("musicround.services.automation.generate_tts_mp3") as mock_tts:
+                mock_tts.return_value = "custommp3/agentuser/intro.mp3"
+                automation.generate_tts_from_script(script_id, service="openai")
+
+            round_obj = db.session.get(Round, round_id)
+            assert round_obj.mp3_generated is False
+            assert round_obj.last_generated_at is None

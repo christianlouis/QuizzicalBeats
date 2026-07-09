@@ -161,6 +161,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable `DATA_DIR` support for custom MP3s, backups, Spotify cache files, and authenticated data downloads.
 
 ### Fixed
+- Fixed scheduled-email MP3 delivery so automation forces a fresh render,
+  selected round-specific intro/replay/outro scripts are honored, and audio
+  script changes mark existing round MP3s stale.
 - Fixed the quizmaster preference migration so missing user preference rows get
   defaults for existing required notification, TTS, intro, theme, and timezone
   columns.

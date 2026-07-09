@@ -115,17 +115,44 @@ def allowed_file(filename):
     allowed_extensions = {'mp3'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-def get_mp3_path(user, mp3_type):
+def get_mp3_path(user, mp3_type, round_id=None):
     """
-    Get the path to a user's custom MP3 file or the default if not set
+    Get a round-specific, user custom, or default MP3 path.
     
     Args:
         user: User object from database
         mp3_type (str): Type of MP3 (intro, outro, or replay)
+        round_id (int): Optional round ID to prefer selected generated audio scripts
     
     Returns:
         str: Path to the MP3 file
     """
+    if round_id is not None and mp3_type in {'intro', 'replay', 'outro'}:
+        try:
+            from musicround.models import RoundAudioScript
+
+            script = (
+                RoundAudioScript.query.filter_by(
+                    round_id=round_id,
+                    script_type=mp3_type,
+                    selected=True,
+                )
+                .filter(RoundAudioScript.generated_mp3_path.isnot(None))
+                .order_by(RoundAudioScript.updated_at.desc().nullslast(), RoundAudioScript.id.desc())
+                .first()
+            )
+            if script and script.generated_mp3_path:
+                script_path = app_data_path(script.generated_mp3_path)
+                if os.path.exists(script_path):
+                    return script_path
+        except Exception as exc:
+            current_app.logger.warning(
+                "Could not load round-specific %s audio for round %s: %s",
+                mp3_type,
+                round_id,
+                exc,
+            )
+
     user_setting_attr = f"{mp3_type}_mp3"
     user_mp3_path = getattr(user, user_setting_attr)
     
