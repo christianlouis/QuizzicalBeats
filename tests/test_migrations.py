@@ -135,6 +135,83 @@ def test_song_source_accepts_curated_import_labels(tmp_path):
         assert widen_song_source.run_migration() is None
 
 
+def test_add_spotify_oauth_columns_adds_index_without_sqlite_master_query(tmp_path):
+    """Spotify OAuth migration uses SQLAlchemy inspector instead of sqlite_master SQL."""
+    database_path = tmp_path / "legacy-spotify-oauth.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE user (
+                id INTEGER PRIMARY KEY,
+                username VARCHAR(80) NOT NULL,
+                email VARCHAR(120) NOT NULL,
+                password_hash VARCHAR(128)
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_spotify_oauth_columns
+
+        assert add_spotify_oauth_columns.run_migration() is True
+
+    columns = set(_column_names(database_path, "user"))
+    assert {
+        "spotify_id",
+        "spotify_token",
+        "spotify_refresh_token",
+        "spotify_token_expiry",
+    }.issubset(columns)
+    assert "idx_user_spotify_id" in _index_names(database_path, "user")
+
+
+def test_ensure_oauth_provider_unique_indexes_normalizes_blank_values(tmp_path):
+    """Provider uniqueness migration quotes the user table and handles blanks."""
+    database_path = tmp_path / "legacy-oauth-indexes.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE user (
+                id INTEGER PRIMARY KEY,
+                google_id VARCHAR(100),
+                authentik_id VARCHAR(100),
+                dropbox_id VARCHAR(100)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO user (id, google_id, authentik_id, dropbox_id) "
+            "VALUES (1, '', 'auth-a', NULL)"
+        )
+        conn.execute(
+            "INSERT INTO user (id, google_id, authentik_id, dropbox_id) "
+            "VALUES (2, 'google-a', '', 'dropbox-a')"
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import ensure_oauth_provider_unique_indexes
+
+        assert ensure_oauth_provider_unique_indexes.run_migration() is True
+
+    indexes = set(_index_names(database_path, "user"))
+    assert {
+        "idx_user_google_id",
+        "idx_user_authentik_id",
+        "idx_user_dropbox_id",
+    }.issubset(indexes)
+    with sqlite3.connect(database_path) as conn:
+        blank_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM user
+            WHERE google_id = '' OR authentik_id = '' OR dropbox_id = ''
+            """
+        ).fetchone()[0]
+    assert blank_count == 0
+
+
 def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tmp_path):
     """Legacy round tables get generated-asset status columns."""
     database_path = tmp_path / "legacy-round.db"
@@ -341,7 +418,12 @@ def test_add_round_collaboration_and_audio_scripts_to_legacy_database(tmp_path):
         assert add_round_collaboration_and_audio_scripts.run_migration() is None
 
     round_columns = set(_column_names(database_path, "round"))
-    assert {"user_id", "visibility", "public_token", "public_token_created_at"}.issubset(round_columns)
+    assert {
+        "user_id",
+        "visibility",
+        "public_token",
+        "public_token_created_at",
+    }.issubset(round_columns)
     assert "idx_round_owner_created" in _index_names(database_path, "round")
     assert "idx_round_public_token" in _index_names(database_path, "round")
     assert "round_share" in _table_names(database_path)
@@ -442,7 +524,9 @@ def test_add_seed_source_registry_to_legacy_database(tmp_path):
     assert "seed_source" in _table_names(database_path)
     assert "seed_source_run" in _table_names(database_path)
     assert "idx_seed_source_type_active" in _index_names(database_path, "seed_source")
-    assert "idx_seed_source_run_source_status" in _index_names(database_path, "seed_source_run")
+    assert "idx_seed_source_run_source_status" in _index_names(
+        database_path, "seed_source_run"
+    )
     assert "notes" in _column_names(database_path, "seed_source")
     assert any(
         row[2] == "seed_source" and row[3] == "seed_source_id" and row[4] == "id"
@@ -450,8 +534,12 @@ def test_add_seed_source_registry_to_legacy_database(tmp_path):
     )
     assert SeedSource.__tablename__ == "seed_source"
     assert SeedSourceRun.__tablename__ == "seed_source_run"
-    assert "idx_seed_source_type_active" in {index.name for index in SeedSource.__table__.indexes}
-    assert "idx_seed_source_run_source_status" in {index.name for index in SeedSourceRun.__table__.indexes}
+    assert "idx_seed_source_type_active" in {
+        index.name for index in SeedSource.__table__.indexes
+    }
+    assert "idx_seed_source_run_source_status" in {
+        index.name for index in SeedSourceRun.__table__.indexes
+    }
 
 
 def test_add_seed_source_registry_rebuilds_existing_run_table_with_foreign_key(tmp_path):
@@ -490,13 +578,16 @@ def test_add_seed_source_registry_rebuilds_existing_run_table_with_foreign_key(t
             """
         )
         conn.execute(
-            "INSERT INTO seed_source (id, name, source_type, created_at) VALUES (1, 'Charts', 'chart', '2026-07-07')"
+            "INSERT INTO seed_source (id, name, source_type, created_at) "
+            "VALUES (1, 'Charts', 'chart', '2026-07-07')"
         )
         conn.execute(
-            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) VALUES (10, 1, 'success', '2026-07-07')"
+            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) "
+            "VALUES (10, 1, 'success', '2026-07-07')"
         )
         conn.execute(
-            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) VALUES (11, 999, 'orphan', '2026-07-07')"
+            "INSERT INTO seed_source_run (id, seed_source_id, status, started_at) "
+            "VALUES (11, 999, 'orphan', '2026-07-07')"
         )
 
     app = _legacy_app(database_path)

@@ -17,15 +17,21 @@ def _index_exists(inspector, index_name):
     return any(index.get("name") == index_name for index in inspector.get_indexes("user"))
 
 
+def _quote(conn, identifier):
+    return conn.dialect.identifier_preparer.quote(identifier)
+
+
 def _find_duplicate_values(conn, column_name):
     """Return non-null provider IDs that would violate the new unique index."""
+    user_table = _quote(conn, "user")
+    provider_column = _quote(conn, column_name)
     return conn.execute(
         text(
             f"""
-            SELECT {column_name}, COUNT(*) AS duplicate_count
-            FROM user
-            WHERE {column_name} IS NOT NULL
-            GROUP BY {column_name}
+            SELECT {provider_column}, COUNT(*) AS duplicate_count
+            FROM {user_table}
+            WHERE {provider_column} IS NOT NULL
+            GROUP BY {provider_column}
             HAVING COUNT(*) > 1
             LIMIT 10
             """
@@ -35,21 +41,31 @@ def _find_duplicate_values(conn, column_name):
 
 def _normalize_empty_values(conn, column_name):
     """Convert legacy blank provider IDs to NULL before adding uniqueness."""
-    query = text(f"UPDATE user SET {column_name} = NULL WHERE {column_name} = ''")
+    user_table = _quote(conn, "user")
+    provider_column = _quote(conn, column_name)
+    query = text(
+        f"UPDATE {user_table} SET {provider_column} = NULL "
+        f"WHERE {provider_column} = ''"
+    )
     return conn.execute(query).rowcount
 
 
 def _create_unique_index(conn, column_name, index_name):
     """Create a unique provider-ID index using syntax supported by the active DB."""
     dialect_name = conn.dialect.name.lower()
+    user_table = _quote(conn, "user")
+    provider_column = _quote(conn, column_name)
+    quoted_index = _quote(conn, index_name)
     if dialect_name in {"mysql", "mariadb"}:
-        conn.execute(text(f"CREATE UNIQUE INDEX {index_name} ON user ({column_name})"))
+        conn.execute(
+            text(f"CREATE UNIQUE INDEX {quoted_index} ON {user_table} ({provider_column})")
+        )
         return
 
     conn.execute(
         text(
-            f"CREATE UNIQUE INDEX {index_name} ON user ({column_name}) "
-            f"WHERE {column_name} IS NOT NULL"
+            f"CREATE UNIQUE INDEX {quoted_index} ON {user_table} ({provider_column}) "
+            f"WHERE {provider_column} IS NOT NULL"
         )
     )
 

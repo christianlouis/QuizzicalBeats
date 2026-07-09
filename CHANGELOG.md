@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a credential-safe Kubernetes manifest audit for managed database cutover readiness.
 - Added PostgreSQL-compatible song source widening so legacy curated import labels
   migrate without truncation during managed database cutovers.
+- Fixed legacy OAuth migrations so PostgreSQL deployments no longer log
+  SQLite-only `PRAGMA`, `sqlite_master`, or unquoted `user` SQL errors on
+  startup.
 - Added a direct scheduled-email processing CLI for app-image CronJobs.
 - Added a backup readiness CLI that blocks built-in app ZIP backups for managed
   SQL deployments and points operators to external database backup tooling.
