@@ -468,7 +468,8 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Persisted round ownership and viewer/editor/producer share grants
 - [x] Browser owner/visibility filtering and edit-route access checks
 - [x] Producer role for shared asset generation and delivery without owner-only admin powers
-- [ ] Collaboration roles beyond viewer/editor/producer (comment/admin)
+- [x] Comment-only collaboration role for review feedback without edit/production rights
+- [ ] Collaboration admin role beyond owner-managed sharing
 - [ ] User invitations via email/username UI
 - [ ] Presence indicators
 - [ ] Revision history

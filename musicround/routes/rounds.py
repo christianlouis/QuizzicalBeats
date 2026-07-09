@@ -46,7 +46,8 @@ ROUND_QUALITY_SESSION_REPORT_MAX_CHARS = 2000
 ROUND_MP3_STATUS_EXISTS = 'exists'
 ROUND_MP3_STATUS_GENERATED = 'generated'
 ROUND_MP3_STATUS_REGENERATED = 'regenerated'
-ROUND_SHARE_VALID_ROLES = {'viewer', 'editor', 'producer'}
+ROUND_SHARE_VALID_ROLES = {'viewer', 'comment', 'editor', 'producer'}
+ROUND_SHARE_REVIEW_ROLES = {'comment', 'editor', 'producer'}
 ROUND_SHARE_EDIT_ROLES = {'editor', 'producer'}
 ROUND_SHARE_PRODUCE_ROLES = {'producer'}
 
@@ -248,6 +249,13 @@ def _can_edit_round(round_obj):
         return True
     share = _current_user_round_share(round_obj)
     return bool(share and share.role in ROUND_SHARE_EDIT_ROLES)
+
+
+def _can_review_round(round_obj):
+    if _can_operate_owned_round(round_obj):
+        return True
+    share = _current_user_round_share(round_obj)
+    return bool(share and share.role in ROUND_SHARE_REVIEW_ROLES)
 
 
 def _can_produce_round(round_obj):
@@ -726,7 +734,9 @@ def update_round_songs(round_id):
 @login_required
 def update_round_review(round_id):
     """Update human review state for a round."""
-    rnd = _get_editable_round_or_404(round_id)
+    rnd = _get_visible_round_or_404(round_id)
+    if not _can_review_round(rnd):
+        abort(403)
     status = (request.form.get('review_status') or '').strip().lower()
     notes = (request.form.get('review_notes') or '').strip() or None
     if status not in {'draft', 'reviewed', 'approved', 'blocked', 'rejected'}:
@@ -829,7 +839,7 @@ def add_round_share(round_id):
     user_query = (request.form.get('user_query') or '').strip()
     role = (request.form.get('role') or 'viewer').strip().lower()
     if role not in ROUND_SHARE_VALID_ROLES:
-        flash('Share role must be viewer, editor, or producer.', 'error')
+        flash('Share role must be viewer, comment, editor, or producer.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
     if not user_query:
         flash('Enter a username or email address to share with.', 'error')

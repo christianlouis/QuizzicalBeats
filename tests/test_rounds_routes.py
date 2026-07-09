@@ -782,6 +782,46 @@ class TestRoundDetailRoute:
         with app.app_context():
             assert db.session.get(Round, round_id).name == 'Editor Updated Round'
 
+    def test_shared_commenter_can_review_but_not_edit_or_produce(self, app, client):
+        """Comment shares can leave review feedback without production rights."""
+        _login(app, client, username='comment_owner', email='comment_owner@example.com')
+        _login(app, client, username='comment_user', email='comment_user@example.com')
+        song_id = _create_song(app, title='Comment Role Song')
+        owner_id = _user_id(app, 'comment_owner')
+        commenter_id = _user_id(app, 'comment_user')
+        client.get('/users/logout')
+        _login(app, client, username='comment_user', email='comment_user@example.com')
+        round_id = _create_round(app, [song_id], name='Comment Shared Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=commenter_id, role='comment'))
+            db.session.commit()
+
+        detail = client.get(f'/rounds/{round_id}')
+        review = client.post(
+            f'/rounds/{round_id}/review',
+            data={'review_status': 'blocked', 'review_notes': 'Preview missing.'},
+        )
+        edit = client.post(f'/rounds/{round_id}/update-name', data={'round_name': 'Blocked Edit'})
+        mp3 = client.post(
+            f'/rounds/round/{round_id}/mp3',
+            headers={'X-Requested-With': 'XMLHttpRequest'},
+        )
+        schedule = client.post(f'/rounds/{round_id}/schedule-email')
+
+        assert detail.status_code == 200
+        assert review.status_code == 302
+        assert edit.status_code == 403
+        assert mp3.status_code == 403
+        assert schedule.status_code == 403
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            assert round_.name == 'Comment Shared Round'
+            assert round_.review_status == 'blocked'
+            assert round_.review_notes == 'Preview missing.'
+
     def test_shared_editor_cannot_produce_assets_or_delete_round(self, app, client):
         """Editor shares should not grant production, delivery, export, or delete rights."""
         _login(app, client, username='producer_block_owner', email='producer_block_owner@example.com')

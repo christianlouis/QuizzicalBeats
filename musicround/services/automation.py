@@ -98,7 +98,7 @@ ROUND_DELIVERABLE_REVIEW_STATUSES = {"approved", "sent"}
 DEFAULT_USER_TIMEZONE = "Europe/Berlin"
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
-ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
+ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 _FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
 _FIND_SONGS_CACHE_LOCK = RLock()
@@ -2131,7 +2131,7 @@ def share_round(
 ) -> dict[str, Any]:
     """Grant a user access to a round for future collaboration workflows."""
     if role not in ROUND_SHARE_ROLES:
-        raise AutomationError("role must be viewer, editor, or producer.")
+        raise AutomationError("role must be viewer, comment, editor, or producer.")
 
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
