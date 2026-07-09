@@ -470,7 +470,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 - [x] Producer role for shared asset generation and delivery without owner-only admin powers
 - [x] Comment-only collaboration role for review feedback without edit/production rights
 - [x] Delegated collaboration admin role for share and public-link management
-- [ ] User invitations via email/username UI
+- [x] User invitations via case-insensitive email/username UI and MCP automation
 - [ ] Presence indicators
 - [x] Revision history for name, song-list, review, share, and public-link changes
 - [x] Public sharing links with system-setting guard and optional expiration

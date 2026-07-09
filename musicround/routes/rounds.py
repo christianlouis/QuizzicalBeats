@@ -903,26 +903,18 @@ def add_round_share(round_id):
     if role not in ROUND_SHARE_VALID_ROLES:
         flash('Share role must be viewer, comment, editor, producer, or admin.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
-    if not user_query:
-        flash('Enter a username or email address to share with.', 'error')
-        return redirect(url_for('rounds.round_detail', round_id=round_id))
-
-    target_user = User.query.filter(
-        or_(User.username == user_query, User.email == user_query)
-    ).first()
-    if not target_user:
-        flash('No quizmaster found for that username or email address.', 'error')
-        return redirect(url_for('rounds.round_detail', round_id=round_id))
-    if rnd.user_id == target_user.id:
-        flash('Round owners already have full access.', 'error')
-        return redirect(url_for('rounds.round_detail', round_id=round_id))
 
     try:
-        automation.share_round(round_id, target_user.id, role=role, actor_user_id=current_user.id)
+        result = automation.invite_round_collaborator(
+            round_id,
+            user_query,
+            role=role,
+            actor_user_id=current_user.id,
+        )
     except AutomationError as exc:
         flash(str(exc), 'error')
     else:
-        flash(f'Round shared with {target_user.username} as {role}.', 'success')
+        flash(f"Round shared with {result['matched_user']['username']} as {role}.", 'success')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 

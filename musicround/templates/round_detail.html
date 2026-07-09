@@ -88,7 +88,7 @@
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
             <div class="flex-1">
                 <h2 class="text-2xl font-bold text-navy-800 font-montserrat mb-2">Sharing</h2>
-                <p class="text-sm text-gray-600 mb-4">Give another quizmaster read-only, edit, or production access to this round.</p>
+                <p class="text-sm text-gray-600 mb-4">Invite an existing quizmaster by username or email and choose how much access they get.</p>
                 {% if round_shares %}
                 <div class="space-y-2">
                     {% for share in round_shares %}
@@ -123,7 +123,7 @@
             <form id="round-share-form" method="POST" action="{{ url_for('rounds.add_round_share', round_id=round.id) }}" class="lg:w-96 border border-gray-200 rounded-md p-4 bg-gray-50">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="mb-3">
-                    <label class="block text-sm font-medium text-gray-700 mb-1" for="share_user_query">Username or email</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="share_user_query">Quizmaster username or email</label>
                     <input id="share_user_query" name="user_query" type="text" class="px-3 py-2 border border-gray-300 rounded-md w-full" placeholder="quizmaster@example.com">
                 </div>
                 <div class="mb-4">
@@ -137,7 +137,7 @@
                     </select>
                 </div>
                 <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">
-                    <i class="fas fa-user-plus mr-2"></i>Share Round
+                    <i class="fas fa-user-plus mr-2"></i>Invite Quizmaster
                 </button>
             </form>
             {% endif %}

@@ -23,6 +23,7 @@ import requests
 from flask import current_app
 from flask_login import login_user, logout_user
 from pydub import AudioSegment
+from sqlalchemy import func
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, selectinload
@@ -1160,6 +1161,22 @@ def _find_user(user_id: int | None = None) -> User:
     )
 
 
+def _find_user_by_query(user_query: str) -> User:
+    normalized_query = (user_query or "").strip()
+    if not normalized_query:
+        raise AutomationError("Enter a username or email address to share with.")
+    lowered_query = normalized_query.lower()
+    user = User.query.filter(
+        or_(
+            func.lower(User.username) == lowered_query,
+            func.lower(User.email) == lowered_query,
+        )
+    ).first()
+    if not user:
+        raise AutomationError("No quizmaster found for that username or email address.")
+    return user
+
+
 def _parse_external_id(service_name: str, item_type: str, value: str) -> str:
     service = service_name.lower()
     item = item_type.lower()
@@ -2230,6 +2247,24 @@ def share_round(
         "access_event": _round_access_event_summary(event),
         "round": _round_summary(round_obj),
     }
+
+
+def invite_round_collaborator(
+    round_id: int,
+    user_query: str,
+    role: str = "viewer",
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Grant a round share by resolving an existing quizmaster username or email."""
+    user = _find_user_by_query(user_query)
+    result = share_round(
+        round_id,
+        user.id,
+        role=role,
+        actor_user_id=actor_user_id,
+    )
+    result["matched_user"] = _user_summary(user)
+    return result
 
 
 def list_round_shares(round_id: int) -> dict[str, Any]:

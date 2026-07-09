@@ -406,6 +406,23 @@ def share_round(
 
 
 @mcp.tool()
+def invite_round_collaborator(
+    round_id: int,
+    user_query: str,
+    role: str = "viewer",
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Share a round with an existing quizmaster by username or email."""
+    return _with_app_context(
+        automation.invite_round_collaborator,
+        round_id=round_id,
+        user_query=user_query,
+        role=role,
+        actor_user_id=actor_user_id,
+    )
+
+
+@mcp.tool()
 def list_round_shares(round_id: int) -> dict[str, Any]:
     """List explicit share grants for a round."""
     return _with_app_context(automation.list_round_shares, round_id=round_id)

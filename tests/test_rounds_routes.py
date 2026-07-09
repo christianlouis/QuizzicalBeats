@@ -1016,11 +1016,12 @@ class TestRoundDetailRoute:
 
         add_response = client.post(
             f'/rounds/{round_id}/shares',
-            data={'user_query': 'share_target_ui', 'role': 'editor'},
+            data={'user_query': '  SHARE_TARGET_UI@EXAMPLE.COM  ', 'role': 'editor'},
             follow_redirects=True,
         )
 
         assert add_response.status_code == 200
+        assert b'Invite Quizmaster' in add_response.data
         assert b'share_target_ui' in add_response.data
         assert b'share_target_ui@example.com' in add_response.data
         assert b'Editor' in add_response.data
@@ -1057,6 +1058,34 @@ class TestRoundDetailRoute:
             assert revoke_event.actor_user_id == owner_id
             assert revoke_event.role == 'editor'
             assert db.session.get(Round, round_id).visibility == 'private'
+
+    def test_round_share_form_shows_invite_errors(self, app, client):
+        """Share form should surface service-backed invitation validation."""
+        _login(app, client, username='invite_error_owner', email='invite_error_owner@example.com')
+        song_id = _create_song(app, title='Invite Error Song')
+        owner_id = _user_id(app, 'invite_error_owner')
+        round_id = _create_round(app, [song_id], name='Invite Error Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'private'
+            db.session.commit()
+
+        empty_response = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': '  ', 'role': 'viewer'},
+            follow_redirects=True,
+        )
+        missing_response = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': 'missing@example.com', 'role': 'viewer'},
+            follow_redirects=True,
+        )
+
+        assert empty_response.status_code == 200
+        assert b'Enter a username or email address to share with.' in empty_response.data
+        assert missing_response.status_code == 200
+        assert b'No quizmaster found for that username or email address.' in missing_response.data
 
     def test_shared_editor_cannot_manage_round_shares(self, app, client):
         """Edit access should not grant share administration."""

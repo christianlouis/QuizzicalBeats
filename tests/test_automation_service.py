@@ -835,6 +835,46 @@ class TestRoundAutomation:
             assert admin_share["share"]["role"] == "admin"
             assert RoundAccessEvent.query.count() == 5
 
+    def test_invite_round_collaborator_resolves_username_or_email(self, app):
+        with app.app_context():
+            owner = _create_user(username="inviteowner", email="inviteowner@example.test")
+            target = _create_user(username="InviteTarget", email="InviteTarget@Example.test")
+            song = _create_song(title="Invite Shared", artist="A")
+            round_id = automation.create_round(
+                name="Invite Me",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+
+            invited = automation.invite_round_collaborator(
+                round_id,
+                "  invitetarget@example.test  ",
+                role="viewer",
+                actor_user_id=owner.id,
+            )
+            updated = automation.invite_round_collaborator(
+                round_id,
+                "invitetarget",
+                role="comment",
+                actor_user_id=owner.id,
+            )
+
+            assert invited["created"] is True
+            assert invited["matched_user"]["id"] == target.id
+            assert invited["share"]["role"] == "viewer"
+            assert updated["created"] is False
+            assert updated["share"]["role"] == "comment"
+            assert RoundShare.query.filter_by(round_id=round_id, user_id=target.id).count() == 1
+            assert RoundAccessEvent.query.count() == 2
+
+            with pytest.raises(automation.AutomationError, match="Enter a username"):
+                automation.invite_round_collaborator(round_id, "  ", actor_user_id=owner.id)
+            with pytest.raises(automation.AutomationError, match="No quizmaster found"):
+                automation.invite_round_collaborator(round_id, "missing@example.test", actor_user_id=owner.id)
+            with pytest.raises(automation.AutomationError, match="owner already has access"):
+                automation.invite_round_collaborator(round_id, owner.email, actor_user_id=owner.id)
+
     def test_share_round_rejects_invalid_actor_user_id(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")

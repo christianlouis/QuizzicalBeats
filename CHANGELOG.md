@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added username/email collaborator invitation automation for round sharing,
+  including a browser-backed form path and MCP tool for agents.
 - Added basic round comment threads in the browser and MCP automation so
   collaborators can leave standalone comments without overwriting review notes.
 - Added round revision-history events for name changes, song-list updates, and
