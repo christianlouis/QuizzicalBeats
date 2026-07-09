@@ -51,6 +51,12 @@ for generated MP3 and PDF files. Unsupported `ROUND_ARTIFACT_STORAGE_BACKEND`
 values are treated as unhealthy so delivery does not continue against an
 unknown storage target.
 
+The storage payload also includes backend capabilities. For the current
+`filesystem` backend, `ok=true` means the directories are writable and safe for
+generation, scheduling, and delivery. It does not mean the deployment is fully
+host-loss tolerant: `capabilities.ha_blocking=true` remains visible until round
+artifacts move to shared or object storage.
+
 For filesystem storage, the health payload includes:
 
 - Directory name

@@ -123,6 +123,13 @@ preflight, and health diagnostics warn when a full URI is masking complete
 split PostgreSQL configuration so the managed-database cutover does not silently
 keep using the old `/data` SQLite target.
 
+`ROUND_ARTIFACT_STORAGE_BACKEND=filesystem` is the only supported generated
+round artifact backend today. It is valid for single-writer deployments and is
+health-checked before MP3/PDF generation, scheduling, and email delivery. The
+health payload also reports storage capabilities: filesystem storage supports
+direct file paths but remains HA-blocking for multi-replica web deployments
+until MP3/PDF artifacts move to shared or object storage.
+
 ### Response Compression
 
 ```bash

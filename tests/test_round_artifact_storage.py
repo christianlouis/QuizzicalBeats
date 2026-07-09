@@ -8,6 +8,7 @@ from musicround.helpers.storage_health import (
     check_round_artifact_storage,
     round_artifact_path,
     round_artifact_store,
+    round_artifact_storage_capabilities,
     round_mp3_path,
     round_pdf_path,
 )
@@ -41,10 +42,34 @@ def test_artifact_storage_health_reports_backend(app):
 
         assert health["ok"] is True
         assert health["backend"] == "filesystem"
+        assert health["capabilities"]["supported"] is True
+        assert health["capabilities"]["ha_blocking"] is True
         assert {check["label"] for check in health["checks"]} == {
             "Round MP3 directory",
             "Round PDF directory",
         }
+
+
+def test_filesystem_artifact_storage_capabilities_report_ha_warning(app):
+    with app.app_context():
+        capabilities = round_artifact_storage_capabilities()
+
+        assert capabilities["backend"] == "filesystem"
+        assert capabilities["supported_backends"] == ["filesystem"]
+        assert capabilities["artifact_kinds"] == ["mp3", "pdf"]
+        assert capabilities["supports_direct_file_paths"] is True
+        assert capabilities["supports_cloud_storage"] is False
+        assert capabilities["supports_background_sync"] is False
+        assert capabilities["supports_shared_multi_replica"] is False
+        assert capabilities["mcp_asset_responses_stable"] is True
+        assert capabilities["ha_blocking"] is True
+        assert capabilities["configured_paths"] == {
+            "mp3": app.config["ROUND_MP3_DIR"],
+            "pdf": app.config["ROUND_PDF_DIR"],
+        }
+        assert capabilities["warnings"][0]["code"] == (
+            "filesystem_artifacts_block_multi_replica_ha"
+        )
 
 
 def test_artifact_storage_fails_closed_for_unsupported_backend(app):
@@ -55,6 +80,8 @@ def test_artifact_storage_fails_closed_for_unsupported_backend(app):
 
         assert health["ok"] is False
         assert health["backend"] == "s3"
+        assert health["capabilities"]["supported"] is False
+        assert health["capabilities"]["ha_blocking"] is False
         assert health["issues"][0]["code"] == "artifact_storage_backend_unsupported"
         with pytest.raises(RuntimeError, match="Unsupported ROUND_ARTIFACT_STORAGE_BACKEND"):
             round_artifact_store()

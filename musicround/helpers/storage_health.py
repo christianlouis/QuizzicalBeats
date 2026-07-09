@@ -9,6 +9,7 @@ from typing import Any
 from flask import current_app
 
 ROUND_ARTIFACT_KINDS = {"mp3", "pdf"}
+SUPPORTED_ROUND_ARTIFACT_BACKENDS = {"filesystem"}
 
 
 class FilesystemRoundArtifactStore:
@@ -59,7 +60,7 @@ class FilesystemRoundArtifactStore:
 def round_artifact_store() -> FilesystemRoundArtifactStore:
     """Return the configured generated-round artifact store."""
     backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
-    if backend != "filesystem":
+    if backend not in SUPPORTED_ROUND_ARTIFACT_BACKENDS:
         raise RuntimeError(
             f"Unsupported ROUND_ARTIFACT_STORAGE_BACKEND={backend!r}. "
             "Only 'filesystem' is available in this deployment."
@@ -90,6 +91,58 @@ def round_mp3_path(round_id: int) -> str:
 def round_pdf_path(round_id: int) -> str:
     """Return the resolved PDF artifact path for a round."""
     return round_artifact_path("pdf", round_id)
+
+
+def round_artifact_storage_capabilities() -> dict[str, Any]:
+    """Return backend-neutral capabilities for generated round artifact storage."""
+    backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
+    supported = backend in SUPPORTED_ROUND_ARTIFACT_BACKENDS
+    capabilities: dict[str, Any] = {
+        "backend": backend,
+        "supported": supported,
+        "supported_backends": sorted(SUPPORTED_ROUND_ARTIFACT_BACKENDS),
+        "artifact_kinds": sorted(ROUND_ARTIFACT_KINDS),
+        "supports_direct_file_paths": backend == "filesystem",
+        "supports_cloud_storage": False,
+        "supports_background_sync": False,
+        "supports_shared_multi_replica": False,
+        "mcp_asset_responses_stable": supported,
+        "ha_blocking": backend == "filesystem",
+        "configured_paths": {},
+        "warnings": [],
+    }
+    if backend == "filesystem":
+        capabilities["configured_paths"] = {
+            "mp3": round_mp3_dir(),
+            "pdf": round_pdf_dir(),
+        }
+        capabilities["warnings"].append(
+            {
+                "code": "filesystem_artifacts_block_multi_replica_ha",
+                "severity": "warning",
+                "message": (
+                    "Generated MP3/PDF artifacts still use local filesystem paths; "
+                    "use shared or object storage before treating web replicas as stateless."
+                ),
+                "hint": (
+                    "Keep one web replica or move ROUND_ARTIFACT_STORAGE_BACKEND "
+                    "to a shared/object backend once one is configured."
+                ),
+            }
+        )
+    elif not supported:
+        capabilities["warnings"].append(
+            {
+                "code": "artifact_storage_backend_unsupported",
+                "severity": "error",
+                "message": f"Unsupported round artifact storage backend: {backend}",
+                "hint": (
+                    "Set ROUND_ARTIFACT_STORAGE_BACKEND=filesystem or install a "
+                    "supported artifact backend."
+                ),
+            }
+        )
+    return capabilities
 
 
 def _check_writable_directory(path: str, label: str, create: bool = False) -> dict[str, Any]:
@@ -155,7 +208,8 @@ def check_round_artifact_storage(
 ) -> dict[str, Any]:
     """Check directories required for round artifacts."""
     backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
-    if backend != "filesystem":
+    capabilities = round_artifact_storage_capabilities()
+    if backend not in SUPPORTED_ROUND_ARTIFACT_BACKENDS:
         hint = (
             "Set ROUND_ARTIFACT_STORAGE_BACKEND=filesystem or install a "
             "supported artifact backend."
@@ -163,6 +217,7 @@ def check_round_artifact_storage(
         return {
             "ok": False,
             "backend": backend,
+            "capabilities": capabilities,
             "checks": [],
             "issues": [
                 {
@@ -211,6 +266,7 @@ def check_round_artifact_storage(
     return {
         "ok": not issues,
         "backend": backend,
+        "capabilities": capabilities,
         "checks": checks,
         "issues": issues,
         "hints": [issue["details"]["hint"] for issue in issues],

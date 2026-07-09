@@ -103,6 +103,11 @@ class TestSystemHealthRoute:
         assert data['status'] == 'ok'
         assert data['services']['database']['status'] == 'ok'
         assert data['services']['artifact_storage']['backend'] == 'filesystem'
+        assert data['services']['artifact_storage']['capabilities']['ha_blocking'] is True
+        assert (
+            data['services']['artifact_storage']['capabilities']['warnings'][0]['code']
+            == 'filesystem_artifacts_block_multi_replica_ha'
+        )
         assert data['services']['import_queue']['initialized'] is True
         assert 'password' not in json.dumps(data).lower()
         assert 'token' not in json.dumps(data).lower()
