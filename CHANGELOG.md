@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added round revision-history events for name changes, song-list updates, and
+  review status changes so collaboration audit history now covers common round
+  edits in addition to shares and public-link lifecycle changes.
 - Added a delegated round collaboration admin role so owners can let trusted
   quizmasters manage shares, public links, and access history without granting
   global app admin or owner-only delete rights.

@@ -1421,6 +1421,16 @@ class TestRoundUpdateName:
         with app.app_context():
             round_ = Round.query.get(round_id)
             assert round_.name == 'Updated Name'
+            event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='round_name_updated',
+            ).one()
+            details = json.loads(event.details)
+            assert event.actor_user_id is not None
+            assert details == {
+                'previous_name': 'Original Name',
+                'new_name': 'Updated Name',
+            }
 
     def test_update_round_name_empty(self, app, client):
         """Test updating a round's name to empty clears the name."""
@@ -1438,6 +1448,14 @@ class TestRoundUpdateName:
         with app.app_context():
             round_ = Round.query.get(round_id)
             assert round_.name is None
+            event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='round_name_updated',
+            ).one()
+            assert json.loads(event.details) == {
+                'previous_name': 'Has Name',
+                'new_name': None,
+            }
 
 
 class TestRoundUpdateSongs:
@@ -1459,6 +1477,11 @@ class TestRoundUpdateSongs:
             follow_redirects=True,
         )
         assert response.status_code == 200
+        with app.app_context():
+            assert RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='round_songs_updated',
+            ).count() == 0
 
     def test_update_round_songs_new_order(self, app, client):
         """Test updating song order changes the round."""
@@ -1478,6 +1501,16 @@ class TestRoundUpdateSongs:
         with app.app_context():
             round_ = Round.query.get(round_id)
             assert round_.songs == new_order
+            event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='round_songs_updated',
+            ).one()
+            assert json.loads(event.details) == {
+                'previous_song_ids': [s1, s2],
+                'new_song_ids': [s2, s1],
+                'previous_count': 2,
+                'new_count': 2,
+            }
 
 
 class TestRoundDelete:

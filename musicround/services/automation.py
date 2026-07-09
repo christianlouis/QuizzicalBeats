@@ -2073,9 +2073,12 @@ def update_round_review_status(
         raise AutomationError(f"Round {round_id} was not found.")
     reviewer = _find_user(reviewer_user_id) if reviewer_user_id is not None else None
     status = _validate_round_review_status(review_status, allow_system_status=False)
+    previous_status = round_obj.review_status
+    previous_notes = round_obj.review_notes
+    next_notes = (notes or "").strip() or None
 
     round_obj.review_status = status
-    round_obj.review_notes = (notes or "").strip() or None
+    round_obj.review_notes = next_notes
     if status == "approved":
         round_obj.approved_at = datetime.utcnow()
         round_obj.approved_by_id = reviewer.id if reviewer else None
@@ -2083,6 +2086,20 @@ def update_round_review_status(
         round_obj.approved_at = None
         round_obj.approved_by_id = None
     round_obj.updated_at = datetime.utcnow()
+    if previous_status != status or previous_notes != next_notes:
+        _record_round_access_event(
+            round_obj,
+            "review_status_updated",
+            actor_user_id=reviewer.id if reviewer else None,
+            details=json.dumps(
+                {
+                    "previous_status": previous_status,
+                    "new_status": status,
+                    "notes_changed": previous_notes != next_notes,
+                },
+                sort_keys=True,
+            ),
+        )
     db.session.commit()
     result = {
         "updated": True,

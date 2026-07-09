@@ -703,9 +703,20 @@ def update_round_name(round_id):
     """Update the name of a round"""
     rnd = _get_editable_round_or_404(round_id)
     round_name = request.form.get('round_name', '').strip()
-    
-    # Update the round name
-    rnd.name = round_name if round_name else None
+    previous_name = rnd.name
+    next_name = round_name if round_name else None
+
+    rnd.name = next_name
+    if previous_name != next_name:
+        db.session.add(RoundAccessEvent(
+            round_id=rnd.id,
+            actor_user_id=current_user.id,
+            action='round_name_updated',
+            details=json.dumps({
+                'previous_name': previous_name,
+                'new_name': next_name,
+            }, sort_keys=True),
+        ))
     db.session.commit()
     
     flash('Round name updated successfully', 'success')
@@ -721,9 +732,21 @@ def update_round_songs(round_id):
     if song_order:
         # Only reset the flags if the song order has actually changed
         if rnd.songs != song_order:
+            previous_song_ids = rnd.song_id_list
             rnd.songs = song_order
             # Reset the MP3 and PDF generated flags when the song order changes
             rnd.reset_generated_status()
+            db.session.add(RoundAccessEvent(
+                round_id=rnd.id,
+                actor_user_id=current_user.id,
+                action='round_songs_updated',
+                details=json.dumps({
+                    'previous_song_ids': previous_song_ids,
+                    'new_song_ids': rnd.song_id_list,
+                    'previous_count': len(previous_song_ids),
+                    'new_count': len(rnd.song_id_list),
+                }, sort_keys=True),
+            ))
             db.session.commit()
             flash('Round songs updated successfully', 'success')
         else:

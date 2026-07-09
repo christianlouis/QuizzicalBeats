@@ -2465,6 +2465,16 @@ class TestAssetInspection:
             assert result["updated"] is True
             assert "review_payload" not in result
             assert result["round"]["review_status"] == "reviewed"
+            event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action="review_status_updated",
+            ).one()
+            assert event.actor_user_id == user.id
+            assert json.loads(event.details) == {
+                "previous_status": "draft",
+                "new_status": "reviewed",
+                "notes_changed": True,
+            }
 
     def test_update_round_review_status_can_return_payload_when_requested(self, app):
         with app.app_context():
