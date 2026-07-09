@@ -385,6 +385,18 @@ def main():
                         "Application backup supported: "
                         f"{result['application_backup_supported']}"
                     )
+                    database_backup = result.get("database_backup") or {}
+                    print(
+                        "Native database backup required: "
+                        f"{database_backup.get('required', False)}"
+                    )
+                    if database_backup.get("strategy"):
+                        print(f"Database backup strategy: {database_backup['strategy']}")
+                    commands = database_backup.get("recommended_commands") or []
+                    if commands:
+                        print("Recommended database backup commands:")
+                        for command in commands:
+                            print(f"- {command}")
                     for issue in result["issues"]:
                         print(f"- {issue['severity']}: {issue['code']}")
                         print(f"  {issue['message']}")

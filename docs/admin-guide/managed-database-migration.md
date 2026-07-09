@@ -283,6 +283,10 @@ one replica until `/data` artifact storage is externalized.
    still cover local media/config artifacts, but it is not the managed database
    backup.
 
+   Inspect the `database_backup` section in the JSON output for the
+   credential-safe PostgreSQL backup strategy, expected `PG*` environment key
+   names, and command templates for native dumps or CloudNativePG snapshots.
+
 ## Rollback
 
 1. Disable `DATABASE_REQUIRE_MANAGED` in the ConfigMap only if emergency

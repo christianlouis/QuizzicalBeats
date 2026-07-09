@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backends can replace direct `/data` filesystem access incrementally.
 - Added the configured round artifact storage backend to service-health and
   `/healthz` payloads so operators and agents can verify the active backend.
+- Added credential-safe native database backup planning to backup-readiness
+  JSON and CLI output for PostgreSQL and other managed SQL deployments.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the
   current GitHub issue state so agents can distinguish the remaining
   milestone-scale work from the old bug-slice backlog.

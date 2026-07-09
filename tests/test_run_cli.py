@@ -187,6 +187,8 @@ def test_backup_readiness_command_outputs_json_for_sqlite(app, monkeypatch, caps
     assert exit_code == 0
     assert payload["ok"] is True
     assert payload["application_backup_supported"] is True
+    assert payload["database_backup"]["required"] is False
+    assert payload["database_backup"]["strategy"] == "application_zip"
     assert payload["recommended_scheduler_command"] == "python /app/run.py backup create --auto"
     assert str(db_path) not in output
 
@@ -214,6 +216,13 @@ def test_backup_readiness_command_blocks_managed_database_without_secret_leak(
     assert exit_code == 1
     assert payload["ok"] is False
     assert payload["issues"][0]["code"] == "managed_database_requires_external_backup"
+    assert payload["database_backup"]["required"] is True
+    assert payload["database_backup"]["strategy"] == "postgresql_native"
+    assert "PGPASSWORD" in payload["database_backup"]["credential_env_keys"]
+    assert any(
+        "pg_dump" in command
+        for command in payload["database_backup"]["recommended_commands"]
+    )
     assert payload["recommended_scheduler_command"] is None
     assert "redaction-fixture" not in output
     assert "postgresql://" not in output

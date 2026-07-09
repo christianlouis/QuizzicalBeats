@@ -31,6 +31,60 @@ BACKUP_SQLITE_MEMORY_MESSAGE = (
     "Application backup and restore require a SQLite file database. "
     "In-memory databases cannot be backed up."
 )
+POSTGRES_BACKUP_ENV_KEYS = ("PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD")
+
+
+def _database_backup_plan(application_backup):
+    """Return a credential-safe native database backup plan."""
+    backend = application_backup["database_backend"]
+    if application_backup["supported"]:
+        return {
+            "required": False,
+            "backend": backend,
+            "strategy": "application_zip",
+            "credential_env_keys": [],
+            "recommended_commands": ["python /app/run.py backup create --auto"],
+            "verification_commands": ["python /app/run.py backup readiness --json"],
+            "notes": [
+                "The built-in application ZIP backup is valid for this SQLite deployment.",
+            ],
+        }
+
+    if backend == "postgresql":
+        return {
+            "required": True,
+            "backend": backend,
+            "strategy": "postgresql_native",
+            "credential_env_keys": list(POSTGRES_BACKUP_ENV_KEYS),
+            "recommended_commands": [
+                (
+                    "pg_dump --format=custom --no-owner --no-acl "
+                    "--file=/backups/quizzicalbeats-$(date +%Y%m%d%H%M%S).dump "
+                    "--host=\"$PGHOST\" --username=\"$PGUSER\" \"$PGDATABASE\""
+                ),
+                "kubectl cnpg backup <cluster-name> --namespace <namespace>",
+            ],
+            "verification_commands": [
+                "pg_restore --list /backups/<dump-file>.dump",
+                "kubectl cnpg status <cluster-name> --namespace <namespace>",
+            ],
+            "notes": [
+                "Provide PGPASSWORD through the authorized runtime environment, not in command text.",
+                "Prefer managed snapshots or CloudNativePG backups for HA deployments.",
+            ],
+        }
+
+    return {
+        "required": backend not in ("sqlite", "unconfigured"),
+        "backend": backend,
+        "strategy": "provider_native",
+        "credential_env_keys": [],
+        "recommended_commands": [],
+        "verification_commands": [],
+        "notes": [
+            "Use native backup and restore tooling for the configured database backend.",
+        ],
+    }
 
 
 def _safe_backup_error_message(action):
@@ -705,6 +759,7 @@ def backup_readiness_report():
     database and treat this app-level path as media/config-only infrastructure.
     """
     application_backup = _application_backup_support()
+    database_backup = _database_backup_plan(application_backup)
     db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
     issues = []
     config_error = current_app.config.get("BACKUP_READINESS_CONFIG_ERROR")
@@ -754,6 +809,7 @@ def backup_readiness_report():
         "database_backend": application_backup["database_backend"],
         "database_host": application_backup["host"],
         "database_name": application_backup["database"],
+        "database_backup": database_backup,
         "backup_location": backup_dir(),
         "issues": issues,
         "next_action": (

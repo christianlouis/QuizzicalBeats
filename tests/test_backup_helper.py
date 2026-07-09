@@ -604,6 +604,11 @@ class TestBackupReadinessReport:
         assert result["application_backup_supported"] is True
         assert result["issues"] == []
         assert result["recommended_scheduler_command"] == "python /app/run.py backup create --auto"
+        assert result["database_backup"]["required"] is False
+        assert result["database_backup"]["strategy"] == "application_zip"
+        assert result["database_backup"]["recommended_commands"] == [
+            "python /app/run.py backup create --auto"
+        ]
 
     def test_backup_readiness_blocks_managed_database_without_secret_leak(self, app):
         from musicround.helpers.backup_helper import backup_readiness_report
@@ -623,6 +628,18 @@ class TestBackupReadinessReport:
         assert result["recommended_scheduler_command"] is None
         assert result["database_host"] == "postgres.example"
         assert result["database_name"] == "quizzicalbeats"
+        assert result["database_backup"]["required"] is True
+        assert result["database_backup"]["strategy"] == "postgresql_native"
+        assert result["database_backup"]["credential_env_keys"] == [
+            "PGHOST",
+            "PGDATABASE",
+            "PGUSER",
+            "PGPASSWORD",
+        ]
+        assert any(
+            "pg_dump" in command
+            for command in result["database_backup"]["recommended_commands"]
+        )
         assert "redaction-fixture" not in serialized
         assert "postgresql://" not in serialized
 

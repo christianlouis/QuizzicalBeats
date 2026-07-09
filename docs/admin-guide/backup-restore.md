@@ -107,6 +107,11 @@ connection strings. In that setup, use provider/native database snapshots or
 dumps for the database, and do not treat `backup create --auto` as the HA
 database backup.
 
+The JSON readiness payload also includes a `database_backup` section. For
+PostgreSQL it lists the expected credential environment key names and safe
+`pg_dump`/managed-snapshot command templates without embedding host, user,
+database, or password values.
+
 ## Backup Verification
 
 Ensure your backups are valid:
