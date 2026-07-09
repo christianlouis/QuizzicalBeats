@@ -565,6 +565,59 @@ class TestRoundAutomation:
             with pytest.raises(automation.AutomationError, match="already in round"):
                 automation.add_round_song(round_id, song.id)
 
+    def test_shared_editor_permissions_apply_to_service_round_edits(self, app):
+        with app.app_context():
+            owner = _create_user(username="editowner", email="editowner@example.test")
+            editor = _create_user(username="editeditor", email="editeditor@example.test")
+            producer = _create_user(username="editproducer", email="editproducer@example.test")
+            viewer = _create_user(username="editviewer", email="editviewer@example.test")
+            commenter = _create_user(username="editcommenter", email="editcommenter@example.test")
+            admin = _create_user(username="editadmin", email="editadmin@example.test")
+            admin.is_admin = True
+            song_one = _create_song(title="Edit One", artist="A")
+            song_two = _create_song(title="Edit Two", artist="B")
+            addition = _create_song(title="Edit Addition", artist="C")
+            replacement = _create_song(title="Edit Replacement", artist="D")
+            round_id = automation.create_round(
+                name="Editable",
+                round_type="manual",
+                song_ids=[song_one.id, song_two.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            automation.share_round(round_id, editor.id, role="editor", actor_user_id=owner.id)
+            automation.share_round(round_id, producer.id, role="producer", actor_user_id=owner.id)
+            automation.share_round(round_id, viewer.id, role="viewer", actor_user_id=owner.id)
+            automation.share_round(round_id, commenter.id, role="comment", actor_user_id=owner.id)
+
+            renamed = automation.rename_round(round_id, "Editor Name", actor_user_id=editor.id)
+            added = automation.add_round_song(round_id, addition.id, actor_user_id=producer.id)
+            replaced = automation.replace_round_song(
+                round_id,
+                position=2,
+                replacement_song_id=replacement.id,
+                actor_user_id=admin.id,
+            )
+
+            with pytest.raises(automation.AutomationError, match="Only round editors"):
+                automation.rename_round(round_id, "Viewer Name", actor_user_id=viewer.id)
+            with pytest.raises(automation.AutomationError, match="Only round editors"):
+                automation.add_round_song(round_id, song_one.id, actor_user_id=commenter.id)
+
+            assert renamed["round"]["name"] == "Editor Name"
+            assert added["round"]["song_ids"] == [song_one.id, song_two.id, addition.id]
+            assert replaced["round"]["song_ids"] == [song_one.id, replacement.id, addition.id]
+            name_event = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action="round_name_updated",
+            ).one()
+            song_events = RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action="round_songs_updated",
+            ).order_by(RoundAccessEvent.id.asc()).all()
+            assert name_event.actor_user_id == editor.id
+            assert [event.actor_user_id for event in song_events] == [producer.id, admin.id]
+            assert len(song_events) == 2
+
     def test_suggest_replacement_songs_prefers_similar_unused_candidates(self, app):
         with app.app_context():
             original = _create_song(

@@ -101,6 +101,7 @@ DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ADMIN_ROLES = {"admin"}
 ROUND_COMMENT_ROLES = {"comment", "editor", "producer", "admin"}
+ROUND_EDIT_ROLES = {"editor", "producer", "admin"}
 ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer", "admin"}
 ROUND_PRESENCE_ACTION = "presence_seen"
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
@@ -892,6 +893,19 @@ def _validate_round_commenter(round_obj: Round, actor_user_id: int | None) -> in
     if share and share.role in ROUND_COMMENT_ROLES:
         return actor_id
     raise AutomationError("Only round commenters can add comments.")
+
+
+def _validate_round_editor(round_obj: Round, actor_user_id: int | None) -> int | None:
+    actor_id = _validate_round_access_actor(actor_user_id)
+    if actor_id is None:
+        return None
+    actor = db.session.get(User, actor_id)
+    if actor and (actor.is_admin or round_obj.user_id in (None, actor.id)):
+        return actor.id
+    share = RoundShare.query.filter_by(round_id=round_obj.id, user_id=actor_id).first()
+    if share and share.role in ROUND_EDIT_ROLES:
+        return actor_id
+    raise AutomationError("Only round editors can update this round.")
 
 
 def _public_round_links_enabled() -> bool:
@@ -2058,12 +2072,29 @@ def create_round(
     return {"round": _round_summary(round_obj)}
 
 
-def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
+def rename_round(
+    round_id: int,
+    name: str | None,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
     """Rename a persisted round."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
-    round_obj.name = name.strip() if name and name.strip() else None
+    actor_id = _validate_round_editor(round_obj, actor_user_id)
+    previous_name = round_obj.name
+    next_name = name.strip() if name and name.strip() else None
+    round_obj.name = next_name
+    if previous_name != next_name:
+        _record_round_access_event(
+            round_obj,
+            "round_name_updated",
+            actor_user_id=actor_id,
+            details=json.dumps({
+                "previous_name": previous_name,
+                "new_name": next_name,
+            }, sort_keys=True),
+        )
     db.session.commit()
     return {"round": _round_summary(round_obj)}
 
@@ -2951,13 +2982,16 @@ def replace_round_song(
     replacement_song_id: int,
     inspect_after: bool = False,
     user_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Replace one song at a 1-based round position and mark generated assets stale."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
+    actor_id = _validate_round_editor(round_obj, actor_user_id)
 
     song_ids, index = _song_position(round_obj, position)
+    previous_song_ids = list(song_ids)
     replacement = db.session.get(Song, replacement_song_id)
     if not replacement:
         raise AutomationError(f"Song {replacement_song_id} was not found.")
@@ -2974,6 +3008,17 @@ def replace_round_song(
         _record_song_added_to_round(replacement)
         round_obj.reset_generated_status()
         round_obj.updated_at = datetime.utcnow()
+        _record_round_access_event(
+            round_obj,
+            "round_songs_updated",
+            actor_user_id=actor_id,
+            details=json.dumps({
+                "previous_song_ids": previous_song_ids,
+                "new_song_ids": song_ids,
+                "previous_count": len(previous_song_ids),
+                "new_count": len(song_ids),
+            }, sort_keys=True),
+        )
     db.session.commit()
 
     result: dict[str, Any] = {
@@ -2994,17 +3039,20 @@ def add_round_song(
     position: int | None = None,
     inspect_after: bool = False,
     user_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Add one song to a round at a 1-based position or append it."""
     round_obj = db.session.get(Round, round_id)
     if not round_obj:
         raise AutomationError(f"Round {round_id} was not found.")
+    actor_id = _validate_round_editor(round_obj, actor_user_id)
 
     song = db.session.get(Song, song_id)
     if not song:
         raise AutomationError(f"Song {song_id} was not found.")
 
     song_ids = _round_song_ids(round_obj)
+    previous_song_ids = list(song_ids)
     if song.id in song_ids:
         raise AutomationError(f"Song {song.id} is already in round {round_id}.")
 
@@ -3020,6 +3068,17 @@ def add_round_song(
     _record_song_added_to_round(song)
     round_obj.reset_generated_status()
     round_obj.updated_at = datetime.utcnow()
+    _record_round_access_event(
+        round_obj,
+        "round_songs_updated",
+        actor_user_id=actor_id,
+        details=json.dumps({
+            "previous_song_ids": previous_song_ids,
+            "new_song_ids": song_ids,
+            "previous_count": len(previous_song_ids),
+            "new_count": len(song_ids),
+        }, sort_keys=True),
+    )
     db.session.commit()
 
     result: dict[str, Any] = {

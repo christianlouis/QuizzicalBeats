@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added shared editor enforcement for MCP round rename/add/replace operations,
+  including revision-history events for service-level edits.
 - Added basic round presence indicators so recently active collaborators are
   visible in the browser and available to MCP agents without polluting audit logs.
 - Added username/email collaborator invitation automation for round sharing,

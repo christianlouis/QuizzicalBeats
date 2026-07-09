@@ -340,9 +340,18 @@ def compile_round(
 
 
 @mcp.tool()
-def rename_round(round_id: int, name: str | None) -> dict[str, Any]:
+def rename_round(
+    round_id: int,
+    name: str | None,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
     """Set or clear the display name for a round."""
-    return _with_app_context(automation.rename_round, round_id=round_id, name=name)
+    return _with_app_context(
+        automation.rename_round,
+        round_id=round_id,
+        name=name,
+        actor_user_id=actor_user_id,
+    )
 
 
 @mcp.tool()
@@ -693,6 +702,7 @@ def replace_round_song(
     replacement_song_id: int,
     inspect_after: bool = False,
     user_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Replace one song at a 1-based round position and invalidate generated assets."""
     return _with_app_context(
@@ -702,6 +712,7 @@ def replace_round_song(
         replacement_song_id=replacement_song_id,
         inspect_after=inspect_after,
         user_id=user_id,
+        actor_user_id=actor_user_id,
     )
 
 
@@ -733,6 +744,7 @@ def add_round_song(
     position: int | None = None,
     inspect_after: bool = False,
     user_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Add one song to a round at a 1-based position or append it."""
     return _with_app_context(
@@ -742,6 +754,7 @@ def add_round_song(
         position=position,
         inspect_after=inspect_after,
         user_id=user_id,
+        actor_user_id=actor_user_id,
     )
 
 
