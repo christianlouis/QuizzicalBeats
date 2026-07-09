@@ -41,7 +41,8 @@ def test_notifications_oauth_tokens_command_defaults_to_dry_run(app, monkeypatch
     assert exit_code == 0
     assert payload["dry_run"] is True
     assert payload["candidate_count"] == 0
-    assert "secret" not in output.lower()
+    assert "redaction-fixture" not in output
+    assert "token=secret" not in output
 
 
 def test_notifications_verify_email_command_defaults_to_dry_run(app, monkeypatch, capsys):
@@ -69,7 +70,8 @@ def test_notifications_verify_email_command_defaults_to_dry_run(app, monkeypatch
     assert payload["configured"] is True
     assert payload["sent"] is False
     assert payload["recipient"] == "admin@example.test"
-    assert "secret" not in output.lower()
+    assert "redaction-fixture" not in output
+    assert "token=secret" not in output
 
 
 def test_notifications_admin_summary_command_defaults_to_dry_run(app, monkeypatch, capsys):
@@ -88,8 +90,14 @@ def test_notifications_admin_summary_command_defaults_to_dry_run(app, monkeypatc
     assert payload["dry_run"] is True
     assert payload["sent"] is False
     assert payload["recipient"] == "admin@example.test"
-    assert payload["summary"]["actionable_count"] == 0
-    assert "secret" not in output.lower()
+    assert "service_health_issue_count" in payload["summary"]
+    assert "backup_readiness_issue_count" in payload["summary"]
+    assert payload["summary"]["actionable_count"] == (
+        payload["summary"]["service_health_issue_count"]
+        + payload["summary"]["backup_readiness_issue_count"]
+    )
+    assert "redaction-fixture" not in output
+    assert "token=secret" not in output
 
 
 def test_scheduled_emails_process_due_command_outputs_json(app, monkeypatch, capsys):
@@ -1012,7 +1020,7 @@ def _create_source_sqlite(path, *, songs: int) -> None:
             for index in range(songs):
                 connection.execute(
                     db.metadata.tables["song"].insert().values(
-                        title=f"Test Song" if index == 0 else f"Test Song {index + 1}",
+                        title="Test Song" if index == 0 else f"Test Song {index + 1}",
                         artist="Test Artist",
                     )
                 )

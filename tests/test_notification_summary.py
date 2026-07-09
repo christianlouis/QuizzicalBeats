@@ -59,7 +59,11 @@ def test_notification_admin_summary_counts_actionable_items(app):
         )
         db.session.commit()
 
-        summary = notification_admin_summary(now=now, window_hours=24)
+        summary = notification_admin_summary(
+            now=now,
+            window_hours=24,
+            include_operational_health=False,
+        )
 
     assert summary['oauth_token_candidate_count'] == 1
     assert summary['failed_round_export_count'] == 1
@@ -75,7 +79,10 @@ def test_send_notification_admin_summary_dry_run_does_not_send(app):
         app.config['MAIL_RECIPIENT'] = 'admin@example.test'
 
         with patch('musicround.helpers.notification_summary.send_email') as mock_send:
-            result = send_notification_admin_summary(dry_run=True)
+            result = send_notification_admin_summary(
+                dry_run=True,
+                include_operational_health=False,
+            )
 
     assert result['dry_run'] is True
     assert result['recipient'] == 'admin@example.test'
@@ -89,10 +96,73 @@ def test_send_notification_admin_summary_sends_when_requested(app):
 
         with patch('musicround.helpers.notification_summary.send_email') as mock_send:
             mock_send.return_value = (True, 'sent')
-            result = send_notification_admin_summary(dry_run=False)
+            result = send_notification_admin_summary(
+                dry_run=False,
+                include_operational_health=False,
+            )
 
     assert result['sent'] is True
     mock_send.assert_called_once()
     kwargs = mock_send.call_args.kwargs
     assert kwargs['recipient'] == 'admin@example.test'
     assert kwargs['subject'] == 'Quizzical Beats notification summary'
+
+
+def test_notification_admin_summary_includes_operational_health(app):
+    with app.app_context():
+        health_payload = {
+            "ok": False,
+            "status": "error",
+            "services": {
+                "database": {
+                    "issues": [
+                        {
+                            "code": "database_unavailable",
+                            "severity": "error",
+                            "message": "Database health probe failed.",
+                            "details": {
+                                "hint": "Check database connectivity.",
+                                "secret": "redaction-fixture",
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+        backup_payload = {
+            "ok": False,
+            "status": "error",
+            "issues": [
+                {
+                    "code": "managed_database_requires_external_backup",
+                    "severity": "error",
+                    "message": "Application backup and restore only support SQLite.",
+                    "hint": "Use managed database snapshots.",
+                }
+            ],
+        }
+
+        with patch(
+            'musicround.helpers.notification_summary._safe_operational_health',
+            return_value={
+                "service_health": health_payload,
+                "backup_readiness": backup_payload,
+            },
+        ):
+            with patch(
+                'musicround.helpers.notification_summary.send_email'
+            ) as mock_send:
+                mock_send.return_value = (True, 'sent')
+                result = send_notification_admin_summary(dry_run=False)
+
+    summary = result['summary']
+    assert summary['service_health_issue_count'] == 1
+    assert summary['backup_readiness_issue_count'] == 1
+    assert summary['actionable_count'] == 2
+    assert summary['service_health_issues'][0]['service'] == 'database'
+    assert "redaction-fixture" not in str(summary)
+    body = mock_send.call_args.kwargs['body_text']
+    assert "Service health issues: 1" in body
+    assert "Backup readiness issues: 1" in body
+    assert "managed_database_requires_external_backup" in body
+    assert "redaction-fixture" not in body

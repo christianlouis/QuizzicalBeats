@@ -1,6 +1,6 @@
 # Agentic Backlog Status
 
-Last updated: July 8, 2026
+Last updated: July 9, 2026
 
 This page keeps the GitHub issue backlog aligned with what is actually present
 in the codebase. It is meant for coding agents before they pick the next local
@@ -21,10 +21,10 @@ issue after verification or continue with the remaining follow-up.
 
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
-| #126 Move production database configuration off SQLite `/data` | Operational / partial | Managed DB config, migration CLI, credential-safe cutover plan CLI, Kubernetes manifest audit, direct scheduled-email CLI, MCP config diagnostics, runbook, Compose managed-db profile, warnings when `SQLALCHEMY_DATABASE_URI` masks complete split PG* secrets, ExternalSecret DB-key/store-name/store-kind/owner checks, split-PG completeness checks, direct DB-env override blockers, scheduled-email web-pod exec blockers, and manifest blockers for ConfigMap/literal/raw-Secret `PGPASSWORD` or database URI values | Live Kubernetes secret/config cutover and scheduled-email smoke remain. |
 | #12 Remove SQLite/RWO singleton | Operational / partial | Same as #126, plus app config hardening, manifest audit warnings for single replicas, Recreate strategy, RWO PVCs, `/data` mounts, RWO multi-workload mount blockers, same-node backup affinity, app-backup CronJobs under managed SQL, overlapping CronJobs, missing topology spread/PDB coverage, missing readiness/liveness probes, missing CPU/memory requests/limits, ConfigMap/literal/raw-Secret DB secret blockers, ExternalSecret DB-key/store-name/store-kind/owner checks, split-PG completeness checks, direct DB-env override blockers, and backup readiness CLI that fails closed on managed SQL | Requires managed DB cutover, stateless replicas, and backup replacement. |
 | #17/#48/#49 Repair and clean broken round emails | Operational / partial | Quality gate, batch package audit, and repair tooling exist; MP3 duration drift below the default 30s tolerance is non-blocking | Needs live QB/Gmail inspection and cleanup, not repo-only code. |
-| #33 Alert Amplifier notifications | Partial | Global import-job email toggle, completed/dead-letter status emails, per-user profile opt-outs, dry-run/send CLI for Spotify/Dropbox token warnings, quality-gate repair emails for blocked rounds, SMTP verification CLI, and admin notification digest | Optional push channels and any future in-product digest UI remain. |
+| #33 Alert Amplifier notifications | Partial | Global import-job email toggle, completed/dead-letter status emails, per-user profile opt-outs, dry-run/send CLI for Spotify/Dropbox token warnings, quality-gate repair emails for blocked rounds, SMTP verification CLI, and admin notification digest with service-health and backup-readiness findings | Optional push channels and any future in-product digest UI remain. |
+| #37 Deployment Dynamo CI/CD and maintenance | Ready to close | PR/push CI, Docker build/publish/sign workflow, public `/healthz`, deployment-smoke CLI, SMTP verification CLI, backup-readiness CLI, and admin digest coverage for service-health and backup-readiness alerts | Verify the admin digest in production, then close with evidence. |
 
 ## Recently Closed From This Crosswalk
 
@@ -50,6 +50,7 @@ issue after verification or continue with the remaining follow-up.
 - #74 Reviewable TTS script records and generation handoff
 - #75 Chart and festival seed source registry
 - #79 Round ownership and sharing roles
+- #126 Move production database configuration off SQLite `/data`
 
 ## Next Local Work Blocks
 

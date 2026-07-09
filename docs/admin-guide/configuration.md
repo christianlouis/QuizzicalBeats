@@ -251,6 +251,11 @@ Send the digest to `MAIL_RECIPIENT`, or override the target with `--recipient`:
 python run.py notifications admin-summary --send
 ```
 
+The admin digest includes failed round email exports, dead-letter import jobs,
+OAuth reconnect warnings, public service-health issues, and backup-readiness
+findings such as managed SQL deployments that still need native database
+snapshots or dumps.
+
 When a round fails the package quality gate during email delivery or scheduling,
 Quizzical Beats sends the owning quizmaster a repair email with the generated
 quality report and repair hints. Users can disable these blocked-round emails
