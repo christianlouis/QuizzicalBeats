@@ -829,6 +829,12 @@ class TestRoundAutomation:
             assert comment_share["share"]["role"] == "comment"
             assert RoundAccessEvent.query.count() == 4
 
+            admin_share = automation.share_round(round_id, viewer.id, role="admin", actor_user_id=owner.id)
+
+            assert admin_share["created"] is False
+            assert admin_share["share"]["role"] == "admin"
+            assert RoundAccessEvent.query.count() == 5
+
     def test_share_round_rejects_invalid_actor_user_id(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")
@@ -918,6 +924,7 @@ class TestRoundAutomation:
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")
             viewer = _create_user(username="viewer", email="viewer@example.test")
+            round_admin = _create_user(username="roundadmin", email="roundadmin@example.test")
             admin = _create_user(username="admin", email="admin@example.test")
             admin.is_admin = True
             song = _create_song(title="Shared", artist="A")
@@ -928,21 +935,28 @@ class TestRoundAutomation:
                 user_id=owner.id,
             )["round"]["id"]
             automation.share_round(round_id, viewer.id, actor_user_id=owner.id)
+            automation.share_round(round_id, round_admin.id, role="admin", actor_user_id=owner.id)
 
             owner_events = automation.list_round_access_events(round_id, requester_user_id=owner.id)
+            delegated_admin_events = automation.list_round_access_events(
+                round_id,
+                requester_user_id=round_admin.id,
+            )
             admin_events = automation.list_round_access_events(round_id, requester_user_id=admin.id)
             with pytest.raises(automation.AutomationError, match="owner or an admin"):
                 automation.list_round_access_events(round_id, requester_user_id=viewer.id)
             with pytest.raises(automation.AutomationError, match="limit must be an integer"):
                 automation.list_round_access_events(round_id, limit="many", requester_user_id=owner.id)
 
-            assert owner_events["count"] == 1
-            assert admin_events["count"] == 1
+            assert owner_events["count"] == 2
+            assert delegated_admin_events["count"] == 2
+            assert admin_events["count"] == 2
 
     def test_round_public_link_lifecycle_requires_enabled_setting_and_manager(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")
             viewer = _create_user(username="viewer", email="viewer@example.test")
+            round_admin = _create_user(username="publicroundadmin", email="publicroundadmin@example.test")
             admin = _create_user(username="admin", email="admin@example.test")
             admin.is_admin = True
             song = _create_song(title="Public Song", artist="Artist", genre="Pop", year=1999)
@@ -959,11 +973,12 @@ class TestRoundAutomation:
             SystemSetting.set("enable_public_rounds", "true")
             with pytest.raises(automation.AutomationError, match="owner or an admin"):
                 automation.enable_round_public_link(round_id, actor_user_id=viewer.id)
+            automation.share_round(round_id, round_admin.id, role="admin", actor_user_id=owner.id)
 
             expires_at = datetime.utcnow() + timedelta(days=2)
             enabled = automation.enable_round_public_link(
                 round_id,
-                actor_user_id=owner.id,
+                actor_user_id=round_admin.id,
                 expires_at=expires_at.isoformat(),
             )
             public = automation.get_public_round(enabled["public_token"])
@@ -999,6 +1014,7 @@ class TestRoundAutomation:
                 for event in RoundAccessEvent.query.order_by(RoundAccessEvent.id).all()
             ]
             assert actions == [
+                "share_created",
                 "public_link_enabled",
                 "public_link_refreshed",
                 "public_link_disabled",

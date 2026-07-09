@@ -46,10 +46,11 @@ ROUND_QUALITY_SESSION_REPORT_MAX_CHARS = 2000
 ROUND_MP3_STATUS_EXISTS = 'exists'
 ROUND_MP3_STATUS_GENERATED = 'generated'
 ROUND_MP3_STATUS_REGENERATED = 'regenerated'
-ROUND_SHARE_VALID_ROLES = {'viewer', 'comment', 'editor', 'producer'}
-ROUND_SHARE_REVIEW_ROLES = {'comment', 'editor', 'producer'}
-ROUND_SHARE_EDIT_ROLES = {'editor', 'producer'}
-ROUND_SHARE_PRODUCE_ROLES = {'producer'}
+ROUND_SHARE_VALID_ROLES = {'viewer', 'comment', 'editor', 'producer', 'admin'}
+ROUND_SHARE_REVIEW_ROLES = {'comment', 'editor', 'producer', 'admin'}
+ROUND_SHARE_EDIT_ROLES = {'editor', 'producer', 'admin'}
+ROUND_SHARE_PRODUCE_ROLES = {'producer', 'admin'}
+ROUND_SHARE_MANAGE_ROLES = {'admin'}
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -272,7 +273,10 @@ def _can_delete_round(round_obj):
 def _can_manage_round_shares(round_obj):
     if current_user.is_admin:
         return True
-    return bool(round_obj.user_id and round_obj.user_id == current_user.id)
+    if round_obj.user_id and round_obj.user_id == current_user.id:
+        return True
+    share = _current_user_round_share(round_obj)
+    return bool(share and share.role in ROUND_SHARE_MANAGE_ROLES)
 
 
 def _get_visible_round_or_404(round_id):
@@ -839,7 +843,7 @@ def add_round_share(round_id):
     user_query = (request.form.get('user_query') or '').strip()
     role = (request.form.get('role') or 'viewer').strip().lower()
     if role not in ROUND_SHARE_VALID_ROLES:
-        flash('Share role must be viewer, comment, editor, or producer.', 'error')
+        flash('Share role must be viewer, comment, editor, producer, or admin.', 'error')
         return redirect(url_for('rounds.round_detail', round_id=round_id))
     if not user_query:
         flash('Enter a username or email address to share with.', 'error')

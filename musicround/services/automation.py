@@ -98,7 +98,8 @@ ROUND_DELIVERABLE_REVIEW_STATUSES = {"approved", "sent"}
 DEFAULT_USER_TIMEZONE = "Europe/Berlin"
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
-ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer"}
+ROUND_SHARE_ADMIN_ROLES = {"admin"}
+ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer", "admin"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 _FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
 _FIND_SONGS_CACHE_LOCK = RLock()
@@ -815,6 +816,9 @@ def _validate_round_access_requester(round_obj: Round, requester_user_id: int | 
     requester = _find_user(requester_user_id)
     if requester.is_admin or round_obj.user_id == requester.id:
         return
+    share = RoundShare.query.filter_by(round_id=round_obj.id, user_id=requester.id).first()
+    if share and share.role in ROUND_SHARE_ADMIN_ROLES:
+        return
     raise AutomationError("Only the round owner or an admin can view round access events.")
 
 
@@ -825,6 +829,9 @@ def _validate_round_manager(round_obj: Round, actor_user_id: int | None) -> int 
     actor = db.session.get(User, actor_id)
     if actor and (actor.is_admin or round_obj.user_id == actor.id):
         return actor.id
+    share = RoundShare.query.filter_by(round_id=round_obj.id, user_id=actor_id).first()
+    if share and share.role in ROUND_SHARE_ADMIN_ROLES:
+        return actor_id
     raise AutomationError("Only the round owner or an admin can manage public links.")
 
 
@@ -2131,7 +2138,7 @@ def share_round(
 ) -> dict[str, Any]:
     """Grant a user access to a round for future collaboration workflows."""
     if role not in ROUND_SHARE_ROLES:
-        raise AutomationError("role must be viewer, comment, editor, or producer.")
+        raise AutomationError("role must be viewer, comment, editor, producer, or admin.")
 
     round_obj = db.session.get(Round, round_id)
     if not round_obj:

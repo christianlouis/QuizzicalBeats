@@ -100,7 +100,7 @@
                             {% endif %}
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'producer' %}bg-purple-100 text-purple-800{% elif share.role == 'editor' %}bg-blue-100 text-blue-800{% elif share.role == 'comment' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full {% if share.role == 'admin' %}bg-red-100 text-red-800{% elif share.role == 'producer' %}bg-purple-100 text-purple-800{% elif share.role == 'editor' %}bg-blue-100 text-blue-800{% elif share.role == 'comment' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
                                 {{ share.role|capitalize }}
                             </span>
                             {% if can_manage_shares %}
@@ -133,6 +133,7 @@
                         <option value="comment">Comment</option>
                         <option value="editor">Editor</option>
                         <option value="producer">Producer</option>
+                        <option value="admin">Admin</option>
                     </select>
                 </div>
                 <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors font-semibold">

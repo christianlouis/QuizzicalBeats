@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a delegated round collaboration admin role so owners can let trusted
+  quizmasters manage shares, public links, and access history without granting
+  global app admin or owner-only delete rights.
 - Added a comment-only round collaboration role so shared quizmasters can review
   rounds and leave status notes without edit, asset-generation, delivery, or
   share-management permissions.

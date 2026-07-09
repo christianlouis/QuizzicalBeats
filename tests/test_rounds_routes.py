@@ -1043,6 +1043,67 @@ class TestRoundDetailRoute:
         assert b'share_admin_editor@example.com' not in detail.data
         assert blocked.status_code == 403
 
+    def test_shared_admin_can_manage_shares_and_public_link_but_not_delete(self, app, client):
+        """Delegated round admins can manage collaboration without owning deletion."""
+        _login(app, client, username='delegated_owner', email='delegated_owner@example.com')
+        _login(app, client, username='delegated_admin', email='delegated_admin@example.com')
+        _login(app, client, username='delegated_target', email='delegated_target@example.com')
+        song_id = _create_song(app, title='Delegated Admin Song')
+        owner_id = _user_id(app, 'delegated_owner')
+        admin_id = _user_id(app, 'delegated_admin')
+        target_id = _user_id(app, 'delegated_target')
+        client.get('/users/logout')
+        _login(app, client, username='delegated_admin', email='delegated_admin@example.com')
+        round_id = _create_round(app, [song_id], name='Delegated Admin Round')
+        with app.app_context():
+            SystemSetting.set('enable_public_rounds', 'true')
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=admin_id, role='admin'))
+            db.session.commit()
+
+        detail = client.get(f'/rounds/{round_id}')
+        add_share = client.post(
+            f'/rounds/{round_id}/shares',
+            data={'user_query': 'delegated_target', 'role': 'comment'},
+            follow_redirects=True,
+        )
+        enable_public = client.post(
+            f'/rounds/{round_id}/public-link',
+            data={'action': 'enable'},
+            follow_redirects=True,
+        )
+        delete = client.post(f'/rounds/{round_id}/delete')
+
+        assert detail.status_code == 200
+        assert b'id="round-share-form"' in detail.data
+        assert b'Access History' in detail.data
+        assert b'Admin' in detail.data
+        assert add_share.status_code == 200
+        assert b'Delegated_target' not in add_share.data
+        assert b'delegated_target' in add_share.data
+        assert enable_public.status_code == 200
+        assert b'Public round link enabled.' in enable_public.data
+        assert delete.status_code == 403
+        with app.app_context():
+            target_share = RoundShare.query.filter_by(round_id=round_id, user_id=target_id).one()
+            round_ = db.session.get(Round, round_id)
+            assert target_share.role == 'comment'
+            assert round_.public_token
+            assert round_.name == 'Delegated Admin Round'
+
+        revoke_share = client.post(
+            f'/rounds/{round_id}/shares/{target_id}/delete',
+            follow_redirects=True,
+        )
+
+        assert revoke_share.status_code == 200
+        assert b'Round share removed.' in revoke_share.data
+        with app.app_context():
+            assert RoundShare.query.filter_by(round_id=round_id, user_id=target_id).count() == 0
+            assert db.session.get(Round, round_id) is not None
+
     def test_round_owner_can_enable_and_disable_public_readonly_link(self, app, client):
         """Owners can publish and revoke a token-based read-only round link."""
         _login(app, client, username='public_owner', email='public_owner@example.com')
