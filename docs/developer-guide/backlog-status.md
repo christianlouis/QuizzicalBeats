@@ -23,10 +23,10 @@ issue after verification or continue with the remaining follow-up.
 
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
-| #12 Remove SQLite/RWO singleton | Operational / partial | Production no longer uses SQLite as the application database, CNPG PostgreSQL is live, SQLite rows were migrated, Web/MCP/scheduled email use PostgreSQL, rollout strategy avoids RWO replacement deadlocks, backup readiness fails closed for managed SQL, artifact storage capabilities flag filesystem storage as HA-blocking, and storage inventory is visible in service health | Generated MP3/PDF artifacts still depend on `/data` RWO storage, web is still one replica, and database-native backup/snapshot handling still needs validation before the host-loss HA acceptance criteria can close. |
+| #12 Remove SQLite/RWO singleton | Operational / partial | Production no longer uses SQLite as the application database, CNPG PostgreSQL is live, SQLite rows were migrated, Web/MCP/scheduled email use PostgreSQL, rollout strategy avoids RWO replacement deadlocks, backup readiness fails closed for managed SQL, artifact storage capabilities flag filesystem storage as HA-blocking, and storage inventory is visible in service health/admin health | Generated MP3/PDF artifacts still depend on `/data` RWO storage, web is still one replica, and database-native backup/snapshot handling still needs validation before the host-loss HA acceptance criteria can close. |
 | #32 External Music Data and chart ingestion | Milestone / open | Seed-source registry, candidate previewing, idempotent default seed sources, and MCP helpers exist | Scheduled ingestion, normalization into planning metadata, review UI, and source-rate-limit governance remain. |
 | #33 Alert Amplifier notifications | Milestone / mostly complete | Import-job status emails, per-user notification preferences, OAuth token warning email CLI, quality-gate repair emails, SMTP verification CLI, and admin digest with service-health and backup-readiness findings exist | Optional push channels and any future in-product digest UI remain. |
-| #34 Storage Sanctuary multi-provider storage | Milestone / open | Storage health checks gate MP3/PDF generation and delivery; filesystem paths are configurable through `ROUND_MP3_DIR`, `ROUND_PDF_DIR`, and `DATA_DIR`; service health exposes backend capabilities, HA-blocking warnings, and generated artifact inventory totals | Add object/cloud backend support, backup export storage, admin sync controls, and stable MCP asset responses independent of the backend. |
+| #34 Storage Sanctuary multi-provider storage | Milestone / open | Storage health checks gate MP3/PDF generation and delivery; filesystem paths are configurable through `ROUND_MP3_DIR`, `ROUND_PDF_DIR`, and `DATA_DIR`; service health and admin health expose backend capabilities, HA-blocking warnings, and generated artifact inventory totals | Add object/cloud backend support, backup export storage, admin sync controls, and stable MCP asset responses independent of the backend. |
 | #35 Collaboration Core shared rounds | Milestone / partial | Round ownership, viewer/editor/producer grants, public read-only links, route-level edit checks, and sharing audit events exist | Comment/admin roles, invitations, presence, revision history, and comment threads remain. |
 
 ## Recently Closed From This Crosswalk
@@ -63,6 +63,7 @@ issue after verification or continue with the remaining follow-up.
 - #213 Silence SQLite-only migration errors on PostgreSQL startup
 - #217 Expose artifact storage HA capabilities in health payload
 - #218 Expose generated artifact inventory in service health
+- #219 Surface artifact storage readiness on admin system health
 
 ## Next Local Work Blocks
 

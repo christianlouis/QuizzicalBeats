@@ -1719,7 +1719,7 @@ def system_health():
     import sqlite3
     from datetime import datetime
     from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
-    from musicround.helpers.storage_health import round_mp3_dir, round_pdf_dir
+    from musicround.helpers.service_health import artifact_storage_service_health
     from musicround.models import Song, Round, User, db
     from musicround.version import VERSION_INFO
     
@@ -1759,15 +1759,27 @@ def system_health():
         }
     
     # Check storage status
-    storage_status = {"color": "green", "message": "All storage locations are accessible and writable."}
+    artifact_health = artifact_storage_service_health()
+    artifact_capabilities = artifact_health.get("capabilities", {})
+    artifact_inventory = artifact_health.get("inventory", {})
+    if artifact_health.get("status") == "error":
+        storage_status = {
+            "color": "red",
+            "message": "Round artifact storage is not ready. Check storage health details.",
+        }
+    elif artifact_capabilities.get("ha_blocking"):
+        storage_status = {
+            "color": "yellow",
+            "message": "Storage is writable, but generated artifacts still block multi-replica HA.",
+        }
+    else:
+        storage_status = {"color": "green", "message": "All storage locations are accessible and writable."}
     storage_stats = []
     
     # Check important directories
     dirs_to_check = [
         {"path": app_data_dir(), "name": "Data Directory"},
         {"path": backup_dir(), "name": "Backups Directory"},
-        {"path": round_mp3_dir(), "name": "Round MP3 Directory"},
-        {"path": round_pdf_dir(), "name": "Round PDF Directory"},
         {"path": os.path.join(current_app.root_path, 'static'), "name": "Static Files"}
     ]
     
@@ -1808,6 +1820,20 @@ def system_health():
                 storage_status = {"color": "yellow", "message": f"Directory not found: {dir_name}"}
         
         storage_stats.append(dir_stat)
+
+    for kind, label in (("mp3", "Round MP3 Artifacts"), ("pdf", "Round PDF Artifacts")):
+        item = (artifact_inventory.get("artifacts") or {}).get(kind) or {}
+        total_bytes = int(item.get("total_bytes") or 0)
+        storage_stats.append(
+            {
+                "name": label,
+                "path": f"{artifact_health.get('backend', 'unknown')} backend",
+                "writable": bool(item.get("ok", False) and artifact_health.get("ok")),
+                "file_count": item.get("file_count", 0),
+                "size": f"{total_bytes / (1024 * 1024):.2f} MB",
+                "status_label": "Healthy" if item.get("ok") else "Inventory warning",
+            }
+        )
     
     # Check API services status
     api_status = {"color": "green", "message": "All API services are available."}
@@ -1892,7 +1918,12 @@ def system_health():
     
     # Get last backup timestamp
     from musicround.helpers.backup_helper import list_backups
-    backups = list_backups()
+    try:
+        backups = list_backups()
+    except Exception as e:
+        current_app.logger.error(f"Error checking backup status: {str(e)}")
+        backups = []
+        database_stats["last_backup"] = "Unavailable"
     if backups:
         latest_backup = backups[0]
         timestamp = latest_backup.get('timestamp')
@@ -1904,7 +1935,7 @@ def system_health():
                 database_stats["last_backup"] = "Unknown format"
         else:
             database_stats["last_backup"] = "Unknown"
-    else:
+    elif "last_backup" not in database_stats:
         database_stats["last_backup"] = "Never"
     
     return render_template(
@@ -1915,6 +1946,7 @@ def system_health():
         memory_status=memory_status,
         database_stats=database_stats,
         storage_stats=storage_stats,
+        artifact_storage=artifact_health,
         service_stats=service_stats,
         system_info=system_info,
         version_info=VERSION_INFO

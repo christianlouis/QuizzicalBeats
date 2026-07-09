@@ -274,6 +274,38 @@ class TestSystemHealthRoute:
         response = client.get('/users/system-health')
         assert response.status_code in (200, 302, 500)  # may fail if admin_required checks roles
 
+    def test_system_health_renders_artifact_storage_inventory(self, app, client):
+        """Admin system health should use backend-neutral artifact storage inventory."""
+        from musicround.helpers.storage_health import round_artifact_store
+
+        _create_user(app, 'health_inventory_admin', 'healthinventory@example.com', is_admin=True)
+        with app.app_context():
+            user = User.query.filter_by(username='health_inventory_admin').one()
+            admin_role = Role.query.filter_by(name='admin').first()
+            if admin_role is None:
+                admin_role = Role(name='admin', description='Admin')
+                db.session.add(admin_role)
+                db.session.flush()
+            if admin_role not in user.roles:
+                user.roles.append(admin_role)
+            store = round_artifact_store()
+            store.write_bytes("mp3", 201, b"mp3-bytes")
+            store.write_bytes("pdf", 201, b"pdf-bytes")
+            db.session.commit()
+        _login(app, client, 'health_inventory_admin')
+
+        response = client.get('/users/system-health')
+
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Artifact Backend' in body
+        assert 'filesystem' in body
+        assert 'Round MP3 Artifacts' in body
+        assert 'Round PDF Artifacts' in body
+        assert 'Filesystem artifacts block multi-replica HA' in body
+        assert 'round_201.mp3' not in body
+        assert 'round_201.pdf' not in body
+
     def test_system_health_database_error_hides_exception_details(self, app, client, monkeypatch):
         """System-health should not render database exception details."""
         from musicround.helpers import backup_helper

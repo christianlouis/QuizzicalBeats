@@ -127,6 +127,26 @@
     <!-- Storage Details -->
     <div class="mb-8">
         <h3 class="text-xl font-semibold mb-4 text-navy-700">Storage Information</h3>
+        {% if artifact_storage %}
+        <div class="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="border rounded-lg p-4 bg-gray-50">
+                <div class="text-xs uppercase text-gray-500 font-semibold">Artifact Backend</div>
+                <div class="text-lg font-semibold text-navy-800">{{ artifact_storage.backend }}</div>
+            </div>
+            <div class="border rounded-lg p-4 bg-gray-50">
+                <div class="text-xs uppercase text-gray-500 font-semibold">Artifact Files</div>
+                <div class="text-lg font-semibold text-navy-800">{{ artifact_storage.inventory.total_file_count }}</div>
+            </div>
+            <div class="border rounded-lg p-4 bg-gray-50">
+                <div class="text-xs uppercase text-gray-500 font-semibold">HA Readiness</div>
+                {% if artifact_storage.capabilities.ha_blocking %}
+                    <div class="text-sm font-semibold text-yellow-700">Filesystem artifacts block multi-replica HA</div>
+                {% else %}
+                    <div class="text-sm font-semibold text-green-700">Artifact backend is not marked HA-blocking</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
         <div class="overflow-x-auto border rounded-lg">
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
@@ -152,11 +172,11 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             {% if dir.writable %}
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                    Writable
+                                    {{ dir.status_label or 'Writable' }}
                                 </span>
                             {% else %}
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                                    Not Writable
+                                    {{ dir.status_label or 'Not Writable' }}
                                 </span>
                             {% endif %}
                         </td>
