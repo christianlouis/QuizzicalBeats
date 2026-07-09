@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Marked the Collaboration Core roadmap milestone complete now that browser and
+  MCP shared-round editing, roles, invitations, presence, public links, audit
+  history, and comments are implemented.
 - Added shared editor enforcement for MCP round rename/add/replace operations,
   including revision-history events for service-level edits.
 - Added basic round presence indicators so recently active collaborators are

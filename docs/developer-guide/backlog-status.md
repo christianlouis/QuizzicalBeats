@@ -27,7 +27,6 @@ issue after verification or continue with the remaining follow-up.
 | #32 External Music Data and chart ingestion | Milestone / open | Seed-source registry, candidate previewing, idempotent default seed sources, Spotify Top 10,000 HTML candidate parsing, and MCP helpers exist | Scheduled ingestion, normalization into planning metadata, review UI, and source-rate-limit governance remain. |
 | #33 Alert Amplifier notifications | Milestone / mostly complete | Import-job status emails, per-user notification preferences, OAuth token warning email CLI, quality-gate repair emails, SMTP verification CLI, and admin digest with service-health and backup-readiness findings exist | Optional push channels and any future in-product digest UI remain. |
 | #34 Storage Sanctuary multi-provider storage | Milestone / open | Storage health checks gate MP3/PDF generation and delivery; filesystem paths are configurable through `ROUND_MP3_DIR`, `ROUND_PDF_DIR`, and `DATA_DIR`; service health, admin health, and `run.py storage readiness` expose backend capabilities, HA-blocking warnings, and generated artifact inventory totals | Add object/cloud backend support, backup export storage, admin sync controls, and stable MCP asset responses independent of the backend. |
-| #35 Collaboration Core shared rounds | Milestone / partial | Round ownership, viewer/editor/producer grants, public read-only links, route-level edit checks, and sharing audit events exist | Comment/admin roles, invitations, presence, revision history, and comment threads remain. |
 
 ## Recently Closed From This Crosswalk
 
@@ -65,6 +64,7 @@ issue after verification or continue with the remaining follow-up.
 - #218 Expose generated artifact inventory in service health
 - #219 Surface artifact storage readiness on admin system health
 - #220 Add artifact storage readiness CLI for agents and operators
+- #35 Collaboration Core shared rounds
 
 ## Next Local Work Blocks
 
@@ -74,5 +74,5 @@ issue after verification or continue with the remaining follow-up.
    database-native backup or snapshot path.
 3. For #33, either implement optional push channels or split them into a future
    explicitly optional issue so the notification milestone can close cleanly.
-4. For #35, add invitation UX or revision/audit history as the next
-   browser-verifiable collaboration slice.
+4. For #34/#12, add shared artifact storage rollout docs and validation once
+   an object-storage backend is configured.
