@@ -87,6 +87,31 @@ class FakeSpotifyClient:
         raise AssertionError(f'Unexpected Spotify path: {path}')
 
 
+class FakeSpotifyIsrcFallbackClient:
+    """Spotify client stub for ISRC fallback persistence."""
+
+    token = None
+
+    def get(self, path, token=None):
+        if path == 'tracks/spotify-isrc-fallback':
+            return FakeSpotifyResponse({
+                'id': 'spotify-isrc-fallback',
+                'name': 'Fallback ISRC Track',
+                'artists': [{'name': 'Reliable Artist'}],
+                'album': {
+                    'name': 'Reliable Album',
+                    'release_date': '2001-01-01',
+                    'images': [{'url': 'https://example.com/isrc-cover.jpg'}],
+                },
+                'external_ids': {'isrc': 'USRC17607839'},
+                'preview_url': 'https://example.com/isrc-preview.mp3',
+                'popularity': 72,
+            })
+        if path == 'audio-features/spotify-isrc-fallback':
+            return FakeSpotifyResponse({})
+        raise AssertionError(f'Unexpected Spotify path: {path}')
+
+
 class FakeSpotifyPlaylistClient:
     """Spotify client stub for playlist position mapping."""
 
@@ -309,6 +334,30 @@ class TestImportHelperSpotifyTokens:
             song = Song.query.filter_by(spotify_id='spotify-track-1').one_or_none()
             assert song is not None
             assert song.title == 'Fallback Track'
+
+    def test_spotify_track_import_preserves_isrc_when_metadata_enrichment_is_empty(self, app, monkeypatch):
+        """Spotify external_ids.isrc must survive the basic fallback import path."""
+        spotify = FakeSpotifyIsrcFallbackClient()
+        monkeypatch.setattr(
+            'musicround.helpers.import_helper.get_song_metadata_by_isrc',
+            lambda *_args, **_kwargs: {},
+        )
+
+        with app.test_request_context():
+            response = ImportHelper.import_item(
+                'spotify',
+                'track',
+                'spotify-isrc-fallback',
+                oauth_spotify=spotify,
+                spotify_token='manual-token',
+            )
+
+        assert response['imported_count'] == 1
+        with app.app_context():
+            song = Song.query.filter_by(spotify_id='spotify-isrc-fallback').one_or_none()
+            assert song is not None
+            assert song.title == 'Fallback ISRC Track'
+            assert song.isrc == 'USRC17607839'
 
     def test_spotify_track_import_uses_system_fallback_token(self, app):
         """System fallback tokens must work when no user token exists."""

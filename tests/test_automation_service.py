@@ -75,6 +75,16 @@ def _approve_round(round_id, reviewer=None):
     return round_obj
 
 
+class DeezerIsrcStub:
+    def __init__(self, tracks):
+        self.tracks = tracks
+        self.calls = []
+
+    def get_track(self, track_id):
+        self.calls.append(track_id)
+        return self.tracks.get(int(track_id))
+
+
 class TestSongAutomation:
     """Tests for catalog lookup and mutation."""
 
@@ -228,6 +238,71 @@ class TestSongAutomation:
             song = Song.query.first()
             assert song.title == "New Title"
             assert sorted(tag.name for tag in song.tags) == ["classic", "warmup"]
+
+    def test_isrc_catalog_status_reports_missing_provider_coverage(self, app):
+        with app.app_context():
+            _create_song(title="Known", artist="A", isrc="USRC17607839", deezer_id=1)
+            missing = _create_song(title="Missing", artist="B", deezer_id=2)
+
+            result = automation.isrc_catalog_status(limit_examples=5)
+
+            assert result["total"] == 2
+            assert result["with_isrc"] == 1
+            assert result["missing_isrc"] == 1
+            assert result["missing_with_deezer_id"] == 1
+            assert result["examples"][0]["id"] == missing.id
+
+    def test_backfill_song_isrc_dry_run_and_update_from_deezer(self, app):
+        with app.app_context():
+            song = _create_song(title="Needs ISRC", artist="A", deezer_id=123)
+            app.config["deezer"] = DeezerIsrcStub({123: {"id": 123, "isrc": "US-RC1-76-07839"}})
+
+            dry_run = automation.backfill_song_isrc(provider="deezer", limit=1, dry_run=True)
+
+            assert dry_run["processed_count"] == 1
+            assert dry_run["resolved_count"] == 1
+            assert dry_run["updated_count"] == 0
+            assert dry_run["results"][0]["resolved_isrc"] == "USRC17607839"
+            assert db.session.get(Song, song.id).isrc is None
+
+            updated = automation.backfill_song_isrc(provider="deezer", limit=1, dry_run=False)
+
+            assert updated["updated_count"] == 1
+            assert updated["remaining_missing_isrc"] == 0
+            assert db.session.get(Song, song.id).isrc == "USRC17607839"
+
+    def test_backfill_song_isrc_skips_invalid_provider_values(self, app):
+        with app.app_context():
+            song = _create_song(title="Bad ISRC", artist="A", deezer_id=124)
+            app.config["deezer"] = DeezerIsrcStub({124: {"id": 124, "isrc": "not-a-real-code"}})
+
+            result = automation.backfill_song_isrc(provider="deezer", limit=1, dry_run=False)
+
+            assert result["updated_count"] == 0
+            assert result["skipped_count"] == 1
+            assert result["results"][0]["attempts"][0]["status"] == "deezer_isrc_missing_or_invalid"
+            assert db.session.get(Song, song.id).isrc is None
+
+    def test_export_song_isrc_catalog_returns_csv(self, app):
+        with app.app_context():
+            _create_song(
+                title="Exported",
+                artist="A",
+                album_name="Album",
+                year=1999,
+                isrc="USRC17607839",
+                spotify_id="spotify-a",
+                deezer_id=100,
+                source="deezer",
+            )
+
+            result = automation.export_song_isrc_catalog(limit=10)
+
+            assert result["row_count"] == 1
+            assert result["truncated"] is False
+            assert "id,artist,title,album_name,year,isrc,source,spotify_id,deezer_id" in result["csv"]
+            assert "USRC17607839" in result["csv"]
+            assert "spotify-a" in result["csv"]
 
 
 class TestRoundAutomation:
@@ -3390,10 +3465,11 @@ class TestAgentPlanningAutomation:
             assert second["updated_count"] == second["count"]
             assert "Billboard Hot 100" in names
             assert "Offizielle Deutsche Charts Singles" in names
+            assert "Spotify Top 10,000 Songs by Popularity" in names
             assert "Graspop Metal Meeting Line-Up" in names
             assert "Wacken Open Air Line-Up" in names
             assert {"chart", "festival"}.issubset(source_types)
-            assert {"billboard", "graspop", "wacken"}.issubset(providers)
+            assert {"billboard", "spotify-annas-archive", "graspop", "wacken"}.issubset(providers)
             assert SeedSource.query.count() == first["count"]
 
     def test_fetch_seed_source_candidates_from_manual_text_records_read_only_run(self, app):
@@ -3448,6 +3524,47 @@ class TestAgentPlanningAutomation:
                 "Sabrina Carpenter",
             ]
             assert result["ready_for_import"] is True
+
+    def test_fetch_seed_source_candidates_reads_spotify_top_10k_html(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Spotify Top 10,000 Songs by Popularity",
+                source_type="chart",
+                provider="spotify-annas-archive",
+                url="https://example.test/spotify-top-10k.html",
+            )["seed_source"]
+
+            response = type("Response", (), {})()
+            response.status_code = 200
+            response.headers = {"content-type": "text/html; charset=utf-8"}
+            response.text = """
+                <table>
+                  <tbody>
+                    <tr>
+                      <td class="rank">1</td>
+                      <td class="track-name">Die With A Smile<br><span class="id-text">2plbrEY59IikOBgBGLjaoe</td>
+                      <td class="artist-names">Lady Gaga<br><span class="id-text">1HY2Jd0NmPuamShAr6KMms</span><br>Bruno Mars<br><span class="id-text">0du5cEVh5yTK9QJze8zA0C</span></td>
+                      <td class="album-name">Die With A Smile<br><span class="id-text">10FLjwfpbxLmW8c25Xyc2N</span></td>
+                      <td class="popularity">100</td>
+                      <td class="isrc">USUM72409273</td>
+                    </tr>
+                  </tbody>
+                </table>
+            """
+
+            with patch("musicround.services.automation.requests.get", return_value=response):
+                result = automation.fetch_seed_source_candidates(source["id"], limit=10)
+
+            assert result["count"] == 1
+            candidate = result["candidates"][0]
+            assert candidate["title"] == "Die With A Smile"
+            assert candidate["artist"] == "Lady Gaga / Bruno Mars"
+            assert candidate["spotify_id"] == "2plbrEY59IikOBgBGLjaoe"
+            assert candidate["isrc"] == "USUM72409273"
+            assert candidate["source_rank"] == 1
+            assert candidate["popularity"] == 100
+            assert candidate["album_name"] == "Die With A Smile"
+            assert candidate["needs_review"] is False
 
     def test_fetch_seed_source_candidates_hides_provider_fetch_error_body(self, app):
         with app.app_context():

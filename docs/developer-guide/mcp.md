@@ -37,6 +37,9 @@ The MCP server exposes these tools:
 | --- | --- |
 | `find_songs` | Search the existing Quizzical Beats catalog before adding duplicates. |
 | `add_song` | Add or update a catalog song, including platform IDs and tags. |
+| `isrc_catalog_status` | Report catalog ISRC coverage, missing-provider counts, and example rows. |
+| `backfill_song_isrc` | Fill missing ISRC values from Spotify or Deezer track metadata, with dry-run support. |
+| `export_song_isrc_catalog` | Export catalog song IDs, ISRCs, and provider IDs as CSV text. |
 | `datastore_schema` | Describe all mapped datastore object types, columns, and primary keys. |
 | `database_configuration_summary` | Report credential-safe database backend, managed-DB guard, and PG* readiness for cutover checks. |
 | `database_cutover_plan` | Return credential-safe managed database cutover steps and the next blocked or ready action. |
@@ -130,32 +133,40 @@ explicitly set.
    with constraints, review notes, recent usage, and selection/rejection
    guidance so an agent can explain why candidates were accepted or skipped.
 3. Search with `find_songs` to avoid duplicates.
-4. Add missing tracks with `add_song` or import platform content with
+4. Audit identifier coverage with `isrc_catalog_status` when duplicate matching
+   or cross-provider reconciliation matters. Use `backfill_song_isrc` first
+   with `dry_run=true`, then rerun with `dry_run=false` in small batches. Use
+   `export_song_isrc_catalog` when a CSV handoff or external audit is needed.
+5. Discover external candidates with `list_seed_sources` and
+   `fetch_seed_source_candidates`. The default registry includes charts,
+   festival pages, and the Spotify Top 10,000 popularity snapshot; candidate
+   fetches are review-only and do not import songs.
+6. Add missing tracks with `add_song` or import platform content with
    `import_catalog_item`.
    For pasted lists, run `parse_text_playlist` first, then
    `resolve_text_playlist`; use `create_round_from_text_playlist` only after
    every row resolves.
-5. Create the round with `compile_round` or `create_round_from_playlist`.
+7. Create the round with `compile_round` or `create_round_from_playlist`.
    Playlist imports return `needs_more_songs` instead of creating a partial
    round when fewer than the requested eight tracks resolve. Spotify playlist
    imports include `resolved_positions` with playlist position, Spotify track
    ID, artist, title, QB song ID, status, and failure reason so agents can
    repair specific positions.
-6. Link the plan to the generated round with `link_planned_quiz_round`.
-7. Generate PDF and MP3 files with `generate_round_assets` or
+8. Link the plan to the generated round with `link_planned_quiz_round`.
+9. Generate PDF and MP3 files with `generate_round_assets` or
    `generate_round_assets_batch`; send the returned `review_url_path` to the
    quizmaster when a human should inspect the bundle preview page before
    scheduling or delivery.
-8. Inspect the generated files and previews with `inspect_round_package`, then
+10. Inspect the generated files and previews with `inspect_round_package`, then
    call `round_review_payload` to review songs, preview status, usage warnings,
    generated audio scripts, asset status, and repair hints.
-9. Mark the round `approved` with `update_round_review_status` before delivery.
+11. Mark the round `approved` with `update_round_review_status` before delivery.
    `send_round_email` and `schedule_round_email` refuse draft, blocked,
    rejected, or merely reviewed rounds unless an admin-level workflow passes an
    explicit override.
-10. Send the completed bundle with `send_round_email`; it reruns the package
+12. Send the completed bundle with `send_round_email`; it reruns the package
    checks and refuses to send if previews or generated assets look wrong.
-11. For several blocked rounds, call `round_repair_plan_batch`, apply only the
+13. For several blocked rounds, call `round_repair_plan_batch`, apply only the
    explicit `replace_round_song` / `add_round_song` actions selected from each
    plan, regenerate assets with `generate_round_assets_batch`, then rerun
    `inspect_round_package_batch`.

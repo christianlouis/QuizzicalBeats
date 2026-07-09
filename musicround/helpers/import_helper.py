@@ -152,6 +152,7 @@ class ImportHelper:
 
         song = Song(
             spotify_id=track_info.get('id'),
+            isrc=track_info.get('external_ids', {}).get('isrc'),
             title=track_info.get('name'),
             artist=artist_names,
             album_name=track_info.get('album', {}).get('name'),

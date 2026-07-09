@@ -117,6 +117,47 @@ def add_song(
 
 
 @mcp.tool()
+def isrc_catalog_status(limit_examples: int = 10) -> dict[str, Any]:
+    """Return ISRC coverage and example missing rows from the song catalog."""
+    return _with_app_context(
+        automation.isrc_catalog_status,
+        limit_examples=limit_examples,
+    )
+
+
+@mcp.tool()
+def backfill_song_isrc(
+    provider: str = "auto",
+    limit: int = 100,
+    dry_run: bool = True,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Backfill missing song ISRCs from Spotify or Deezer track metadata."""
+    return _with_app_context(
+        automation.backfill_song_isrc,
+        provider=provider,
+        limit=limit,
+        dry_run=dry_run,
+        song_ids=song_ids,
+    )
+
+
+@mcp.tool()
+def export_song_isrc_catalog(
+    missing_only: bool = False,
+    limit: int = 50000,
+    include_provider_ids: bool = True,
+) -> dict[str, Any]:
+    """Export catalog ISRC/provider identifiers as CSV text."""
+    return _with_app_context(
+        automation.export_song_isrc_catalog,
+        missing_only=missing_only,
+        limit=limit,
+        include_provider_ids=include_provider_ids,
+    )
+
+
+@mcp.tool()
 def datastore_schema() -> dict[str, Any]:
     """Describe every datastore object type available to generic CRUD tools."""
     return _with_app_context(automation.datastore_schema)

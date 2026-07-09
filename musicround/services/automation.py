@@ -9,6 +9,8 @@ import json
 import math
 import secrets
 import tempfile
+from html import unescape
+from io import StringIO
 from copy import deepcopy
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
@@ -88,6 +90,7 @@ AUTOMATION_SEED_SOURCE_FETCH_ERROR = "Seed source fetch failed. Check the server
 SEARCH_CACHE_TTL_SECONDS = 60.0
 SEARCH_CACHE_MAX_ENTRIES = 128
 SEARCH_RELEVANCE_CANDIDATE_LIMIT = 1000
+ISRC_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
 
 ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
 ROUND_MANUAL_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected"}
@@ -153,6 +156,18 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 60,
         "notes": "Streaming chart entry point for current-popularity research.",
+    },
+    {
+        "name": "Spotify Top 10,000 Songs by Popularity",
+        "source_type": "chart",
+        "provider": "spotify-annas-archive",
+        "url": "https://annas-archive.pk/blog/spotify/spotify-top-10k-songs-table.html",
+        "cadence": "snapshot",
+        "priority": 70,
+        "notes": (
+            "Large popularity-ranked Spotify snapshot for mainstream candidate "
+            "discovery. Review candidates before importing."
+        ),
     },
     {
         "name": "Wacken Open Air Line-Up",
@@ -359,6 +374,290 @@ def _candidate_platform_ids(song: Song) -> dict[str, Any]:
         "spotify": song.spotify_id,
         "deezer": song.deezer_id,
         "isrc": song.isrc,
+    }
+
+
+def _normalize_provider_isrc(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9]", "", str(value)).upper()
+    if ISRC_PATTERN.fullmatch(normalized):
+        return normalized
+    return None
+
+
+def _song_missing_isrc_condition() -> Any:
+    return or_(Song.isrc.is_(None), db.func.trim(Song.isrc) == "")
+
+
+def isrc_catalog_status(limit_examples: int = 10) -> dict[str, Any]:
+    """Return ISRC coverage and example rows for catalog maintenance."""
+    if limit_examples < 0 or limit_examples > 100:
+        raise AutomationError("limit_examples must be between 0 and 100.")
+
+    missing_condition = _song_missing_isrc_condition()
+    total = Song.query.count()
+    missing = Song.query.filter(missing_condition).count()
+    with_isrc = total - missing
+    missing_with_spotify = (
+        Song.query
+        .filter(missing_condition, Song.spotify_id.isnot(None))
+        .count()
+    )
+    missing_with_deezer = (
+        Song.query
+        .filter(missing_condition, Song.deezer_id.isnot(None))
+        .count()
+    )
+    missing_without_provider_id = (
+        Song.query
+        .filter(
+            missing_condition,
+            Song.spotify_id.is_(None),
+            Song.deezer_id.is_(None),
+        )
+        .count()
+    )
+    examples = (
+        Song.query
+        .filter(missing_condition)
+        .order_by(Song.id.asc())
+        .limit(limit_examples)
+        .all()
+    )
+    return {
+        "total": total,
+        "with_isrc": with_isrc,
+        "missing_isrc": missing,
+        "coverage_percent": round((with_isrc / total * 100), 2) if total else 100.0,
+        "missing_with_spotify_id": missing_with_spotify,
+        "missing_with_deezer_id": missing_with_deezer,
+        "missing_without_provider_id": missing_without_provider_id,
+        "examples": [_song_summary(song) for song in examples],
+        "hints": [
+            "Run backfill_song_isrc with dry_run=true first.",
+            "Use provider='deezer' when most missing rows have Deezer IDs.",
+            "Use export_song_isrc_catalog to audit or hand off the catalog state.",
+        ],
+    }
+
+
+def _extract_deezer_isrc(song: Song) -> tuple[str | None, str]:
+    if not song.deezer_id:
+        return None, "missing_deezer_id"
+    deezer_client = current_app.config.get("deezer")
+    if not deezer_client:
+        return None, "deezer_client_missing"
+    try:
+        if hasattr(deezer_client, "get_track"):
+            track = deezer_client.get_track(song.deezer_id)
+        else:
+            track = deezer_client._make_request(f"track/{song.deezer_id}")
+    except Exception:
+        current_app.logger.warning(
+            "Deezer ISRC lookup failed for song %s.",
+            song.id,
+            exc_info=True,
+        )
+        return None, "deezer_lookup_failed"
+    if not track or track.get("error"):
+        return None, "deezer_track_not_found"
+    isrc = _normalize_provider_isrc(track.get("isrc"))
+    if not isrc:
+        return None, "deezer_isrc_missing_or_invalid"
+    return isrc, "resolved"
+
+
+def _extract_spotify_isrc(song: Song) -> tuple[str | None, str]:
+    if not song.spotify_id:
+        return None, "missing_spotify_id"
+    token = ImportHelper._resolve_spotify_auth_token()
+    access_token = token.get("access_token") if token else None
+    if not access_token:
+        return None, "spotify_token_missing"
+    try:
+        response = requests.get(
+            f"https://api.spotify.com/v1/tracks/{song.spotify_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        current_app.logger.warning(
+            "Spotify ISRC lookup failed for song %s.",
+            song.id,
+            exc_info=True,
+        )
+        return None, "spotify_lookup_failed"
+    if response.status_code == 404:
+        return None, "spotify_track_not_found"
+    if response.status_code >= 400:
+        current_app.logger.warning(
+            "Spotify ISRC lookup for song %s returned HTTP %s.",
+            song.id,
+            response.status_code,
+        )
+        return None, f"spotify_http_{response.status_code}"
+    try:
+        track = response.json()
+    except ValueError:
+        return None, "spotify_invalid_json"
+    isrc = _normalize_provider_isrc((track.get("external_ids") or {}).get("isrc"))
+    if not isrc:
+        return None, "spotify_isrc_missing_or_invalid"
+    return isrc, "resolved"
+
+
+def backfill_song_isrc(
+    provider: str = "auto",
+    limit: int = 100,
+    dry_run: bool = True,
+    song_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Backfill missing Song.isrc values from provider track metadata."""
+    normalized_provider = (provider or "auto").strip().lower()
+    if normalized_provider not in {"auto", "deezer", "spotify"}:
+        raise AutomationError("provider must be one of: auto, deezer, spotify.")
+    if limit < 1 or limit > 5000:
+        raise AutomationError("limit must be between 1 and 5000.")
+
+    missing_condition = _song_missing_isrc_condition()
+    query = Song.query.filter(missing_condition)
+    if song_ids:
+        clean_ids = []
+        for song_id in song_ids:
+            try:
+                clean_ids.append(int(song_id))
+            except (TypeError, ValueError):
+                raise AutomationError("song_ids must contain integer IDs.") from None
+        query = query.filter(Song.id.in_(clean_ids))
+
+    songs = query.order_by(Song.id.asc()).limit(limit).all()
+    results: list[dict[str, Any]] = []
+    updated_count = 0
+    resolved_count = 0
+    skipped_count = 0
+
+    for song in songs:
+        providers = [normalized_provider]
+        if normalized_provider == "auto":
+            providers = []
+            if song.deezer_id:
+                providers.append("deezer")
+            if song.spotify_id:
+                providers.append("spotify")
+            if not providers:
+                providers = ["deezer", "spotify"]
+
+        attempts: list[dict[str, Any]] = []
+        resolved_isrc = None
+        resolved_provider = None
+        for provider_name in providers:
+            if provider_name == "deezer":
+                isrc, status = _extract_deezer_isrc(song)
+            else:
+                isrc, status = _extract_spotify_isrc(song)
+            attempts.append({
+                "provider": provider_name,
+                "status": status,
+                "isrc": isrc,
+            })
+            if isrc:
+                resolved_isrc = isrc
+                resolved_provider = provider_name
+                break
+
+        if resolved_isrc:
+            resolved_count += 1
+            status = "resolved"
+            if not dry_run:
+                song.isrc = resolved_isrc
+                updated_count += 1
+                status = "updated"
+        else:
+            skipped_count += 1
+            status = "unresolved"
+
+        results.append({
+            "song": _song_summary(song),
+            "status": status,
+            "resolved_isrc": resolved_isrc,
+            "resolved_provider": resolved_provider,
+            "attempts": attempts,
+        })
+
+    if not dry_run and updated_count:
+        db.session.commit()
+
+    return {
+        "dry_run": dry_run,
+        "provider": normalized_provider,
+        "limit": limit,
+        "processed_count": len(songs),
+        "resolved_count": resolved_count,
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "results": results,
+        "remaining_missing_isrc": Song.query.filter(missing_condition).count(),
+        "hints": [
+            (
+                "Repeat with a higher limit until remaining_missing_isrc "
+                "reaches zero or providers stop resolving."
+            ),
+            "Keep dry_run=true for inspection; set dry_run=false to write resolved ISRCs.",
+        ],
+    }
+
+
+def export_song_isrc_catalog(
+    missing_only: bool = False,
+    limit: int = 50000,
+    include_provider_ids: bool = True,
+) -> dict[str, Any]:
+    """Return a CSV export of catalog ISRC/provider identifiers."""
+    if limit < 1 or limit > 100000:
+        raise AutomationError("limit must be between 1 and 100000.")
+
+    query = Song.query
+    if missing_only:
+        query = query.filter(_song_missing_isrc_condition())
+    total = query.count()
+    songs = (
+        query
+        .order_by(Song.artist.asc(), Song.title.asc(), Song.id.asc())
+        .limit(limit + 1)
+        .all()
+    )
+    truncated = len(songs) > limit
+    songs = songs[:limit]
+
+    output = StringIO()
+    fieldnames = ["id", "artist", "title", "album_name", "year", "isrc", "source"]
+    if include_provider_ids:
+        fieldnames.extend(["spotify_id", "deezer_id"])
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for song in songs:
+        row = {
+            "id": song.id,
+            "artist": song.artist,
+            "title": song.title,
+            "album_name": song.album_name,
+            "year": song.year,
+            "isrc": song.isrc,
+            "source": song.source,
+        }
+        if include_provider_ids:
+            row["spotify_id"] = song.spotify_id
+            row["deezer_id"] = song.deezer_id
+        writer.writerow(row)
+
+    return {
+        "row_count": len(songs),
+        "total_matching_rows": total,
+        "truncated": truncated,
+        "missing_only": missing_only,
+        "include_provider_ids": include_provider_ids,
+        "csv": output.getvalue(),
     }
 
 
@@ -2142,6 +2441,80 @@ def _seed_source_candidates_from_json_payload(
     return candidates
 
 
+def _strip_html_fragment(value: str) -> str:
+    text = re.sub(r"<br\s*/?>", " ", value, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _seed_source_candidates_from_spotify_top_html(
+    text: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Parse Anna's Archive Spotify popularity table into reviewable rows."""
+    if "track-name" not in text or "artist-names" not in text:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    row_pattern = re.compile(r"<tr\b[^>]*>(.*?)</tr>", flags=re.IGNORECASE | re.DOTALL)
+    cell_pattern = re.compile(
+        r'<td\b[^>]*class="([^"]*)"[^>]*>(.*?)</td>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for row_index, row_match in enumerate(row_pattern.finditer(text), start=1):
+        if len(candidates) >= limit:
+            break
+        cells = {
+            class_name: cell_html
+            for class_name, cell_html in cell_pattern.findall(row_match.group(1))
+        }
+        track_html = cells.get("track-name")
+        artist_html = cells.get("artist-names")
+        if not track_html or not artist_html:
+            continue
+
+        spotify_id_match = re.search(r'<span[^>]*class="id-text"[^>]*>([^<\s]+)', track_html)
+        title = _strip_html_fragment(re.split(r"<br\s*/?>", track_html, maxsplit=1, flags=re.IGNORECASE)[0])
+        artist_parts = re.split(r"<br\s*/?>", artist_html, flags=re.IGNORECASE)
+        artists = [
+            _strip_html_fragment(part)
+            for part in artist_parts
+            if "id-text" not in part and _strip_html_fragment(part)
+        ]
+        candidate = _playlist_candidate(
+            row_index,
+            _strip_html_fragment(f"{' / '.join(artists)} - {title}"),
+            title,
+            " / ".join(artists),
+        )
+        if not candidate:
+            continue
+
+        rank = _strip_html_fragment(cells.get("rank", ""))
+        popularity = _strip_html_fragment(cells.get("popularity", ""))
+        isrc = _normalize_provider_isrc(_strip_html_fragment(cells.get("isrc", "")))
+        album_name = _strip_html_fragment(
+            re.split(
+                r"<br\s*/?>",
+                cells.get("album-name", ""),
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+        )
+        candidate.update(
+            {
+                "source_rank": int(rank) if rank.isdigit() else None,
+                "spotify_id": spotify_id_match.group(1) if spotify_id_match else None,
+                "isrc": isrc,
+                "popularity": int(popularity) if popularity.isdigit() else None,
+                "album_name": album_name or None,
+            }
+        )
+        candidates.append(candidate)
+    return candidates
+
+
 def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) -> dict[str, Any]:
     content_type = (content_type or "").casefold()
     if "json" in content_type or text.lstrip().startswith(("{", "[")):
@@ -2158,6 +2531,20 @@ def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) 
                 "low_confidence": low_confidence,
                 "ready_for_import": bool(candidates) and not low_confidence,
                 "hints": ["Review source candidates before importing songs."],
+            }
+    if "html" in content_type or "<table" in text.casefold():
+        candidates = _seed_source_candidates_from_spotify_top_html(text, limit)
+        if candidates:
+            return {
+                "count": len(candidates),
+                "candidates": candidates,
+                "low_confidence_count": 0,
+                "low_confidence": [],
+                "ready_for_import": True,
+                "hints": [
+                    "Review source candidates before importing songs.",
+                    "Spotify IDs and ISRCs are source hints; provider import still verifies metadata.",
+                ],
             }
     return parse_text_playlist(text, limit=limit)
 

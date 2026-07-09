@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaling web replicas.
 - Added per-user scheduling timezones, defaulting to `Europe/Berlin`, so MCP
   and browser scheduled-email requests treat naive local times consistently.
+- Added MCP catalog ISRC coverage, CSV export, and provider backfill tools so
+  agents can audit and repair missing track identifiers before round planning.
+- Added the Spotify Top 10,000 popularity snapshot as a default seed source and
+  parser-backed candidate feed with Spotify IDs, ISRCs, ranks, and popularity.
 - Added credential-safe native database backup planning to backup-readiness
   JSON and CLI output for PostgreSQL and other managed SQL deployments.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the
