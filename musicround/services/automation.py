@@ -102,6 +102,7 @@ MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ADMIN_ROLES = {"admin"}
 ROUND_COMMENT_ROLES = {"comment", "editor", "producer", "admin"}
 ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer", "admin"}
+ROUND_PRESENCE_ACTION = "presence_seen"
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 _FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
 _FIND_SONGS_CACHE_LOCK = RLock()
@@ -731,6 +732,20 @@ def _round_comment_summary(event: RoundAccessEvent) -> dict[str, Any]:
         "created_at": _datetime_payload(event.created_at),
         "actor_user_id": event.actor_user_id,
         "actor": _user_summary(event.actor),
+    }
+
+
+def _round_presence_summary(event: RoundAccessEvent) -> dict[str, Any]:
+    try:
+        details = json.loads(event.details or "{}")
+    except (TypeError, json.JSONDecodeError):
+        details = {}
+    return {
+        "round_id": event.round_id,
+        "user_id": event.actor_user_id,
+        "user": _user_summary(event.actor),
+        "seen_at": _datetime_payload(event.created_at),
+        "source": details.get("source") or "unknown",
     }
 
 
@@ -2334,6 +2349,7 @@ def list_round_access_events(
     normalized_limit = max(1, min(requested_limit, 200))
     events = (
         RoundAccessEvent.query.filter_by(round_id=round_id)
+        .filter(RoundAccessEvent.action != ROUND_PRESENCE_ACTION)
         .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
         .limit(normalized_limit)
         .all()
@@ -2342,6 +2358,77 @@ def list_round_access_events(
         "round_id": round_id,
         "count": len(events),
         "events": [_round_access_event_summary(event) for event in events],
+    }
+
+
+def record_round_presence(
+    round_id: int,
+    user_id: int,
+    source: str = "mcp",
+) -> dict[str, Any]:
+    """Record that a visible quizmaster recently viewed a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    user = _find_user(user_id)
+    _validate_round_comment_reader(round_obj, user.id)
+    normalized_source = (source or "mcp").strip()[:40] or "mcp"
+    event = (
+        RoundAccessEvent.query.filter_by(
+            round_id=round_id,
+            actor_user_id=user.id,
+            action=ROUND_PRESENCE_ACTION,
+        )
+        .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
+        .first()
+    )
+    if event:
+        event.created_at = datetime.utcnow()
+        event.details = json.dumps({"source": normalized_source}, sort_keys=True)
+    else:
+        event = RoundAccessEvent(
+            round_id=round_id,
+            actor_user_id=user.id,
+            action=ROUND_PRESENCE_ACTION,
+            details=json.dumps({"source": normalized_source}, sort_keys=True),
+        )
+        db.session.add(event)
+    db.session.commit()
+    return {"presence": _round_presence_summary(event)}
+
+
+def list_round_presence(
+    round_id: int,
+    requester_user_id: int | None,
+    active_within_minutes: int = 5,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List quizmasters recently active on a visible round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    _validate_round_comment_reader(round_obj, requester_user_id)
+    try:
+        minutes = int(active_within_minutes or 5)
+        requested_limit = int(limit or 20)
+    except (TypeError, ValueError) as exc:
+        raise AutomationError("active_within_minutes and limit must be integers.") from exc
+    normalized_minutes = max(1, min(minutes, 1440))
+    normalized_limit = max(1, min(requested_limit, 100))
+    since = datetime.utcnow() - timedelta(minutes=normalized_minutes)
+    events = (
+        RoundAccessEvent.query.filter_by(round_id=round_id, action=ROUND_PRESENCE_ACTION)
+        .filter(RoundAccessEvent.created_at >= since)
+        .options(joinedload(RoundAccessEvent.actor))
+        .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
+        .limit(normalized_limit)
+        .all()
+    )
+    return {
+        "round_id": round_id,
+        "active_within_minutes": normalized_minutes,
+        "count": len(events),
+        "presence": [_round_presence_summary(event) for event in events],
     }
 
 

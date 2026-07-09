@@ -1027,6 +1027,50 @@ class TestRoundAutomation:
             assert delegated_admin_events["count"] == 2
             assert admin_events["count"] == 2
 
+    def test_round_presence_records_recent_visible_users_without_audit_noise(self, app):
+        with app.app_context():
+            owner = _create_user(username="presenceowner", email="presenceowner@example.test")
+            viewer = _create_user(username="presenceviewer", email="presenceviewer@example.test")
+            outsider = _create_user(username="presenceoutsider", email="presenceoutsider@example.test")
+            song = _create_song(title="Presence", artist="A")
+            round_id = automation.create_round(
+                name="Presence Round",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            automation.share_round(round_id, viewer.id, role="viewer", actor_user_id=owner.id)
+
+            owner_presence = automation.record_round_presence(round_id, owner.id, source="browser")
+            viewer_presence = automation.record_round_presence(round_id, viewer.id, source="mcp")
+            viewer_update = automation.record_round_presence(round_id, viewer.id, source="browser")
+            listed = automation.list_round_presence(round_id, requester_user_id=viewer.id)
+            access_events = automation.list_round_access_events(round_id, requester_user_id=owner.id)
+
+            with pytest.raises(automation.AutomationError, match="visible collaborators"):
+                automation.record_round_presence(round_id, outsider.id, source="browser")
+            with pytest.raises(automation.AutomationError, match="must be integers"):
+                automation.list_round_presence(
+                    round_id,
+                    requester_user_id=owner.id,
+                    active_within_minutes="soon",
+                )
+
+            assert owner_presence["presence"]["user"]["username"] == "presenceowner"
+            assert viewer_presence["presence"]["source"] == "mcp"
+            assert viewer_update["presence"]["source"] == "browser"
+            assert listed["count"] == 2
+            assert {item["user"]["username"] for item in listed["presence"]} == {
+                "presenceowner",
+                "presenceviewer",
+            }
+            assert RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action=automation.ROUND_PRESENCE_ACTION,
+            ).count() == 2
+            assert access_events["count"] == 1
+            assert access_events["events"][0]["action"] == "share_created"
+
     def test_round_public_link_lifecycle_requires_enabled_setting_and_manager(self, app):
         with app.app_context():
             owner = _create_user(username="owner", email="owner@example.test")

@@ -623,10 +623,16 @@ def round_detail(round_id):
         )
 
         can_manage_shares = _can_manage_round_shares(rnd)
+        automation.record_round_presence(rnd.id, current_user.id, source='browser')
+        round_presence = automation.list_round_presence(
+            rnd.id,
+            requester_user_id=current_user.id,
+        )["presence"]
         round_access_events = []
         if can_manage_shares:
             round_access_events = (
                 RoundAccessEvent.query.filter_by(round_id=rnd.id)
+                .filter(RoundAccessEvent.action != automation.ROUND_PRESENCE_ACTION)
                 .options(
                     joinedload(RoundAccessEvent.actor),
                     joinedload(RoundAccessEvent.target_user),
@@ -654,6 +660,7 @@ def round_detail(round_id):
             can_comment=_can_comment_round(rnd),
             round_access_events=round_access_events,
             round_comments=round_comments,
+            round_presence=round_presence,
             public_rounds_enabled=SystemSetting.get('enable_public_rounds', 'false') == 'true',
         )
     else:

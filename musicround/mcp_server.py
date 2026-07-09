@@ -457,6 +457,38 @@ def list_round_access_events(
 
 
 @mcp.tool()
+def record_round_presence(
+    round_id: int,
+    user_id: int,
+    source: str = "mcp",
+) -> dict[str, Any]:
+    """Record that a quizmaster is currently working with a visible round."""
+    return _with_app_context(
+        automation.record_round_presence,
+        round_id=round_id,
+        user_id=user_id,
+        source=source,
+    )
+
+
+@mcp.tool()
+def list_round_presence(
+    round_id: int,
+    requester_user_id: int,
+    active_within_minutes: int = 5,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List quizmasters recently active on a visible round."""
+    return _with_app_context(
+        automation.list_round_presence,
+        round_id=round_id,
+        requester_user_id=requester_user_id,
+        active_within_minutes=active_within_minutes,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def add_round_comment(
     round_id: int,
     comment: str,

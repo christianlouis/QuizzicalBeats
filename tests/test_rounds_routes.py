@@ -1025,8 +1025,11 @@ class TestRoundDetailRoute:
         assert b'share_target_ui' in add_response.data
         assert b'share_target_ui@example.com' in add_response.data
         assert b'Editor' in add_response.data
+        assert b'Recently Active' in add_response.data
+        assert b'share_owner_ui' in add_response.data
         assert b'Access History' in add_response.data
         assert b'Share Created' in add_response.data
+        assert b'Presence Seen' not in add_response.data
         assert b'by share_owner_ui' in add_response.data
         with app.app_context():
             share = RoundShare.query.filter_by(round_id=round_id, user_id=target_id).one()
@@ -1039,6 +1042,11 @@ class TestRoundDetailRoute:
             assert share_event.actor_user_id == owner_id
             assert share_event.role == 'editor'
             assert db.session.get(Round, round_id).visibility == 'shared'
+            assert RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                actor_user_id=owner_id,
+                action='presence_seen',
+            ).count() == 1
 
         delete_response = client.post(
             f'/rounds/{round_id}/shares/{target_id}/delete',

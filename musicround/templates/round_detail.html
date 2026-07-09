@@ -118,6 +118,21 @@
                 {% else %}
                 <p class="text-sm text-gray-500">This round is not shared with other quizmasters.</p>
                 {% endif %}
+                <div class="mt-4">
+                    <h3 class="text-sm font-semibold text-navy-800 mb-2">Recently Active</h3>
+                    {% if round_presence %}
+                    <div class="flex flex-wrap gap-2">
+                        {% for presence in round_presence %}
+                        <span class="inline-flex items-center px-2 py-1 rounded-full bg-green-50 text-green-800 text-xs font-semibold">
+                            <span class="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
+                            {{ presence.user.username if presence.user else 'Unknown quizmaster' }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-sm text-gray-500">No recent collaborators.</p>
+                    {% endif %}
+                </div>
             </div>
             {% if can_manage_shares %}
             <form id="round-share-form" method="POST" action="{{ url_for('rounds.add_round_share', round_id=round.id) }}" class="lg:w-96 border border-gray-200 rounded-md p-4 bg-gray-50">

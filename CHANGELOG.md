@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added basic round presence indicators so recently active collaborators are
+  visible in the browser and available to MCP agents without polluting audit logs.
 - Added username/email collaborator invitation automation for round sharing,
   including a browser-backed form path and MCP tool for agents.
 - Added basic round comment threads in the browser and MCP automation so
