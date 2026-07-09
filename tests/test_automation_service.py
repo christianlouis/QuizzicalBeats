@@ -856,6 +856,41 @@ class TestRoundAutomation:
 
             assert RoundAccessEvent.query.count() == 1
 
+    def test_round_comments_require_comment_access(self, app):
+        with app.app_context():
+            owner = _create_user(username="commentowner", email="commentowner@example.test")
+            commenter = _create_user(username="commenter", email="commenter@example.test")
+            viewer = _create_user(username="readonly", email="readonly@example.test")
+            outsider = _create_user(username="outsider", email="outsider@example.test")
+            song = _create_song(title="Threaded", artist="A")
+            round_id = automation.create_round(
+                name="Commentable",
+                round_type="manual",
+                song_ids=[song.id],
+                user_id=owner.id,
+            )["round"]["id"]
+            automation.share_round(round_id, commenter.id, role="comment", actor_user_id=owner.id)
+            automation.share_round(round_id, viewer.id, role="viewer", actor_user_id=owner.id)
+
+            created = automation.add_round_comment(
+                round_id,
+                "Needs a punchier intro.",
+                actor_user_id=commenter.id,
+            )
+            comments_for_viewer = automation.list_round_comments(round_id, requester_user_id=viewer.id)
+            with pytest.raises(automation.AutomationError, match="Only round commenters"):
+                automation.add_round_comment(round_id, "Read-only note", actor_user_id=viewer.id)
+            with pytest.raises(automation.AutomationError, match="visible collaborators"):
+                automation.list_round_comments(round_id, requester_user_id=outsider.id)
+            with pytest.raises(automation.AutomationError, match="Comment text is required"):
+                automation.add_round_comment(round_id, "  ", actor_user_id=commenter.id)
+
+            assert created["created"] is True
+            assert created["comment"]["comment"] == "Needs a punchier intro."
+            assert created["comment"]["actor"]["username"] == "commenter"
+            assert comments_for_viewer["count"] == 1
+            assert comments_for_viewer["comments"][0]["comment"] == "Needs a punchier intro."
+
     def test_database_configuration_summary_warns_for_legacy_sqlite(self, app):
         """MCP database diagnostics should flag legacy SQLite without leaking paths."""
         with app.app_context():

@@ -180,6 +180,38 @@
             {% endif %}
         </div>
         {% endif %}
+        <div class="mt-6 border-t border-gray-200 pt-4">
+            <h3 class="text-lg font-semibold text-navy-800 mb-3">Comments</h3>
+            {% if round_comments %}
+            <div class="space-y-2 mb-4">
+                {% for comment in round_comments %}
+                <div class="border border-gray-200 rounded-md p-3 text-sm">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-1 mb-2">
+                        <span class="font-semibold text-gray-900">
+                            {{ comment.actor.username if comment.actor else 'System' }}
+                        </span>
+                        <span class="text-gray-500">
+                            {{ comment.created_at[:16].replace('T', ' ') if comment.created_at else 'unknown time' }}
+                        </span>
+                    </div>
+                    <p class="text-gray-700 whitespace-pre-line">{{ comment.comment }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500 mb-4">No comments yet.</p>
+            {% endif %}
+            {% if can_comment %}
+            <form method="POST" action="{{ url_for('rounds.add_round_comment', round_id=round.id) }}" class="space-y-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <label class="block text-sm font-medium text-gray-700" for="round_comment">Add comment</label>
+                <textarea id="round_comment" name="comment" rows="3" maxlength="2000" class="px-3 py-2 border border-gray-300 rounded-md w-full" placeholder="Leave a note for the other quizmasters."></textarea>
+                <button type="submit" class="inline-flex items-center px-3 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-md text-sm font-semibold">
+                    <i class="fas fa-comment mr-2"></i>Add Comment
+                </button>
+            </form>
+            {% endif %}
+        </div>
         {% if can_manage_shares %}
         <div class="mt-6 border-t border-gray-200 pt-4">
             <h3 class="text-lg font-semibold text-navy-800 mb-3">Access History</h3>

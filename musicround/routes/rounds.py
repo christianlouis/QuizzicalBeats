@@ -51,6 +51,7 @@ ROUND_SHARE_REVIEW_ROLES = {'comment', 'editor', 'producer', 'admin'}
 ROUND_SHARE_EDIT_ROLES = {'editor', 'producer', 'admin'}
 ROUND_SHARE_PRODUCE_ROLES = {'producer', 'admin'}
 ROUND_SHARE_MANAGE_ROLES = {'admin'}
+ROUND_SHARE_COMMENT_ROLES = {'comment', 'editor', 'producer', 'admin'}
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -257,6 +258,13 @@ def _can_review_round(round_obj):
         return True
     share = _current_user_round_share(round_obj)
     return bool(share and share.role in ROUND_SHARE_REVIEW_ROLES)
+
+
+def _can_comment_round(round_obj):
+    if _can_operate_owned_round(round_obj):
+        return True
+    share = _current_user_round_share(round_obj)
+    return bool(share and share.role in ROUND_SHARE_COMMENT_ROLES)
 
 
 def _can_produce_round(round_obj):
@@ -627,6 +635,10 @@ def round_detail(round_id):
                 .limit(10)
                 .all()
             )
+        round_comments = automation.list_round_comments(
+            rnd.id,
+            requester_user_id=current_user.id,
+        )["comments"]
 
         return render_template(
             'round_detail.html',
@@ -639,7 +651,9 @@ def round_detail(round_id):
             scheduled_exports=scheduled_exports,
             round_shares=round_shares,
             can_manage_shares=can_manage_shares,
+            can_comment=_can_comment_round(rnd),
             round_access_events=round_access_events,
+            round_comments=round_comments,
             public_rounds_enabled=SystemSetting.get('enable_public_rounds', 'false') == 'true',
         )
     else:
@@ -784,6 +798,27 @@ def update_round_review(round_id):
             'approved_at': rnd.approved_at.isoformat() if rnd.approved_at else None,
         })
     flash('Round review status updated', 'success')
+    return redirect(url_for('rounds.round_detail', round_id=round_id))
+
+
+@rounds_bp.route('/<int:round_id>/comments', methods=['POST'])
+@login_required
+def add_round_comment(round_id):
+    """Add a collaborator comment to a round."""
+    rnd = _get_visible_round_or_404(round_id)
+    if not _can_comment_round(rnd):
+        abort(403)
+    comment = (request.form.get('comment') or '').strip()
+    try:
+        automation.add_round_comment(
+            round_id,
+            comment,
+            actor_user_id=current_user.id,
+        )
+    except AutomationError as exc:
+        flash(str(exc), 'error')
+    else:
+        flash('Round comment added.', 'success')
     return redirect(url_for('rounds.round_detail', round_id=round_id))
 
 

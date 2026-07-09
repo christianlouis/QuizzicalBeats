@@ -25,7 +25,7 @@ from flask_login import login_user, logout_user
 from pydub import AudioSegment
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from musicround import db
 from musicround.helpers.database_config import (
@@ -99,6 +99,7 @@ DEFAULT_USER_TIMEZONE = "Europe/Berlin"
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ADMIN_ROLES = {"admin"}
+ROUND_COMMENT_ROLES = {"comment", "editor", "producer", "admin"}
 ROUND_SHARE_ROLES = {"viewer", "comment", "editor", "producer", "admin"}
 MP3_DURATION_MISSING_SLOT_FACTOR = 0.75
 _FIND_SONGS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
@@ -717,6 +718,21 @@ def _round_access_event_summary(event: RoundAccessEvent) -> dict[str, Any]:
     }
 
 
+def _round_comment_summary(event: RoundAccessEvent) -> dict[str, Any]:
+    try:
+        details = json.loads(event.details or "{}")
+    except (TypeError, json.JSONDecodeError):
+        details = {}
+    return {
+        "id": event.id,
+        "round_id": event.round_id,
+        "comment": (details.get("comment") or "").strip(),
+        "created_at": _datetime_payload(event.created_at),
+        "actor_user_id": event.actor_user_id,
+        "actor": _user_summary(event.actor),
+    }
+
+
 def database_configuration_summary() -> dict[str, Any]:
     """Return credential-safe database readiness details for agent workflows."""
     db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI")
@@ -833,6 +849,33 @@ def _validate_round_manager(round_obj: Round, actor_user_id: int | None) -> int 
     if share and share.role in ROUND_SHARE_ADMIN_ROLES:
         return actor_id
     raise AutomationError("Only the round owner or an admin can manage public links.")
+
+
+def _validate_round_comment_reader(round_obj: Round, requester_user_id: int | None) -> None:
+    if requester_user_id is None:
+        return
+    requester = _find_user(requester_user_id)
+    if requester.is_admin or round_obj.user_id in (None, requester.id):
+        return
+    if round_obj.visibility == "public":
+        return
+    share = RoundShare.query.filter_by(round_id=round_obj.id, user_id=requester.id).first()
+    if share:
+        return
+    raise AutomationError("Only visible collaborators can view round comments.")
+
+
+def _validate_round_commenter(round_obj: Round, actor_user_id: int | None) -> int | None:
+    actor_id = _validate_round_access_actor(actor_user_id)
+    if actor_id is None:
+        return None
+    actor = db.session.get(User, actor_id)
+    if actor and (actor.is_admin or round_obj.user_id in (None, actor.id)):
+        return actor.id
+    share = RoundShare.query.filter_by(round_id=round_obj.id, user_id=actor_id).first()
+    if share and share.role in ROUND_COMMENT_ROLES:
+        return actor_id
+    raise AutomationError("Only round commenters can add comments.")
 
 
 def _public_round_links_enabled() -> bool:
@@ -2264,6 +2307,64 @@ def list_round_access_events(
         "round_id": round_id,
         "count": len(events),
         "events": [_round_access_event_summary(event) for event in events],
+    }
+
+
+def add_round_comment(
+    round_id: int,
+    comment: str,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Add a lightweight collaborator comment to a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    actor_id = _validate_round_commenter(round_obj, actor_user_id)
+    normalized_comment = (comment or "").strip()
+    if not normalized_comment:
+        raise AutomationError("Comment text is required.")
+    if len(normalized_comment) > 2000:
+        raise AutomationError("Comment text must be 2000 characters or fewer.")
+    event = _record_round_access_event(
+        round_obj,
+        "comment_added",
+        actor_user_id=actor_id,
+        details=json.dumps({"comment": normalized_comment}, sort_keys=True),
+    )
+    db.session.commit()
+    return {
+        "created": True,
+        "comment": _round_comment_summary(event),
+    }
+
+
+def list_round_comments(
+    round_id: int,
+    limit: int = 50,
+    requester_user_id: int | None = None,
+) -> dict[str, Any]:
+    """List collaborator comments for a round."""
+    round_obj = db.session.get(Round, round_id)
+    if not round_obj:
+        raise AutomationError(f"Round {round_id} was not found.")
+    _validate_round_comment_reader(round_obj, requester_user_id)
+    try:
+        requested_limit = int(limit or 50)
+    except (TypeError, ValueError) as exc:
+        raise AutomationError("limit must be an integer.") from exc
+    normalized_limit = max(1, min(requested_limit, 200))
+    events = (
+        RoundAccessEvent.query.filter_by(round_id=round_id, action="comment_added")
+        .options(joinedload(RoundAccessEvent.actor))
+        .order_by(RoundAccessEvent.created_at.desc(), RoundAccessEvent.id.desc())
+        .limit(normalized_limit)
+        .all()
+    )
+    comments = [_round_comment_summary(event) for event in events]
+    return {
+        "round_id": round_id,
+        "count": len(comments),
+        "comments": comments,
     }
 
 

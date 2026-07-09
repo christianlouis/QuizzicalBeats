@@ -804,6 +804,11 @@ class TestRoundDetailRoute:
             f'/rounds/{round_id}/review',
             data={'review_status': 'blocked', 'review_notes': 'Preview missing.'},
         )
+        comment = client.post(
+            f'/rounds/{round_id}/comments',
+            data={'comment': 'Replace the second preview.'},
+            follow_redirects=True,
+        )
         edit = client.post(f'/rounds/{round_id}/update-name', data={'round_name': 'Blocked Edit'})
         mp3 = client.post(
             f'/rounds/round/{round_id}/mp3',
@@ -813,6 +818,8 @@ class TestRoundDetailRoute:
 
         assert detail.status_code == 200
         assert review.status_code == 302
+        assert comment.status_code == 200
+        assert b'Replace the second preview.' in comment.data
         assert edit.status_code == 403
         assert mp3.status_code == 403
         assert schedule.status_code == 403
@@ -821,6 +828,45 @@ class TestRoundDetailRoute:
             assert round_.name == 'Comment Shared Round'
             assert round_.review_status == 'blocked'
             assert round_.review_notes == 'Preview missing.'
+            assert RoundAccessEvent.query.filter_by(
+                round_id=round_id,
+                action='comment_added',
+                actor_user_id=commenter_id,
+            ).count() == 1
+
+    def test_shared_viewer_can_read_but_not_add_round_comments(self, app, client):
+        """Viewer shares can read the comment thread but cannot add comments."""
+        _login(app, client, username='comment_view_owner', email='comment_view_owner@example.com')
+        _login(app, client, username='comment_viewer', email='comment_viewer@example.com')
+        song_id = _create_song(app, title='Comment Viewer Song')
+        owner_id = _user_id(app, 'comment_view_owner')
+        viewer_id = _user_id(app, 'comment_viewer')
+        round_id = _create_round(app, [song_id], name='Viewer Comment Round')
+        with app.app_context():
+            round_ = db.session.get(Round, round_id)
+            round_.user_id = owner_id
+            round_.visibility = 'shared'
+            db.session.add(RoundShare(round_id=round_id, user_id=viewer_id, role='viewer'))
+            db.session.add(RoundAccessEvent(
+                round_id=round_id,
+                actor_user_id=owner_id,
+                action='comment_added',
+                details=json.dumps({'comment': 'Owner note'}),
+            ))
+            db.session.commit()
+
+        client.get('/users/logout')
+        _login(app, client, username='comment_viewer', email='comment_viewer@example.com')
+        detail = client.get(f'/rounds/{round_id}')
+        blocked = client.post(
+            f'/rounds/{round_id}/comments',
+            data={'comment': 'Trying to write'},
+        )
+
+        assert detail.status_code == 200
+        assert b'Owner note' in detail.data
+        assert b'Add Comment' not in detail.data
+        assert blocked.status_code == 403
 
     def test_shared_editor_cannot_produce_assets_or_delete_round(self, app, client):
         """Editor shares should not grant production, delivery, export, or delete rights."""

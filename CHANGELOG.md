@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added basic round comment threads in the browser and MCP automation so
+  collaborators can leave standalone comments without overwriting review notes.
 - Added round revision-history events for name changes, song-list updates, and
   review status changes so collaboration audit history now covers common round
   edits in addition to shares and public-link lifecycle changes.

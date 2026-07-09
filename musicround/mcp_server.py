@@ -440,6 +440,36 @@ def list_round_access_events(
 
 
 @mcp.tool()
+def add_round_comment(
+    round_id: int,
+    comment: str,
+    actor_user_id: int,
+) -> dict[str, Any]:
+    """Add a collaborator comment to a round."""
+    return _with_app_context(
+        automation.add_round_comment,
+        round_id=round_id,
+        comment=comment,
+        actor_user_id=actor_user_id,
+    )
+
+
+@mcp.tool()
+def list_round_comments(
+    round_id: int,
+    requester_user_id: int,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List collaborator comments for a round."""
+    return _with_app_context(
+        automation.list_round_comments,
+        round_id=round_id,
+        requester_user_id=requester_user_id,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def enable_round_public_link(
     round_id: int,
     expires_at: str | None = None,
