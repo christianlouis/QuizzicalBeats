@@ -6,6 +6,7 @@ import time  # Add missing import
 from functools import wraps
 from secrets import compare_digest
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, session, jsonify, g
 from flask_login import login_user, current_user, logout_user, login_required  # Ensure flask_login is imported
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -733,6 +734,9 @@ def edit_profile():
         first_name = request.form.get('first_name')
         last_name = request.form.get('last_name')
         dropbox_export_path = request.form.get('dropbox_export_path', '/QuizzicalBeats').strip()
+        timezone_name = (
+            request.form.get('timezone') or 'Europe/Berlin'
+        ).strip() or 'Europe/Berlin'
         preferences.import_job_email_notifications = (
             request.form.get('import_job_email_notifications') == 'on'
         )
@@ -742,6 +746,12 @@ def edit_profile():
         preferences.round_blocked_email_notifications = (
             request.form.get('round_blocked_email_notifications') == 'on'
         )
+        try:
+            ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            flash('Please choose a valid timezone such as Europe/Berlin', 'danger')
+            return render_template('users/edit_profile.html', preferences=preferences)
+        preferences.timezone = timezone_name
         
         # Check if username or email already exists and belongs to another user
         if username != current_user.username and User.query.filter_by(username=username).first():

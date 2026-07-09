@@ -196,6 +196,7 @@ class TestUserPreferencesModel:
         assert fetched.banned_artists is None
         assert fetched.banned_songs is None
         assert fetched.repeat_cooldown_weeks == 12
+        assert fetched.timezone == 'Europe/Berlin'
         assert fetched.enable_intro is True
         assert fetched.theme == 'light'
         assert fetched.import_job_email_notifications is True

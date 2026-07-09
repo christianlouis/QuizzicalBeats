@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `run.py storage readiness` so agents and operators can fail closed on
   unhealthy generated-artifact storage or HA-blocking filesystem storage before
   scaling web replicas.
+- Added per-user scheduling timezones, defaulting to `Europe/Berlin`, so MCP
+  and browser scheduled-email requests treat naive local times consistently.
 - Added credential-safe native database backup planning to backup-readiness
   JSON and CLI output for PostgreSQL and other managed SQL deployments.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the

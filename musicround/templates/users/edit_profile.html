@@ -77,6 +77,18 @@
             </div>
         </div>
 
+        <div class="mb-6">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="timezone">
+                Timezone
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                   id="timezone" name="timezone" type="text" placeholder="Europe/Berlin"
+                   value="{{ preferences.timezone or 'Europe/Berlin' }}">
+            <p class="text-xs text-gray-500 mt-1">
+                Used for scheduled round emails when no explicit UTC offset is provided.
+            </p>
+        </div>
+
         <div class="mb-6 border-t border-gray-200 pt-4">
             <h3 class="text-md font-semibold mb-3 text-navy-700">Email Notifications</h3>
             <label class="flex items-start gap-3 text-sm text-gray-700" for="import_job_email_notifications">

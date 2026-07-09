@@ -161,10 +161,12 @@ explicitly set.
    `inspect_round_package_batch`.
    To defer delivery, call `schedule_round_email` with an ISO timestamp such as
    `2026-07-09T19:00:00+02:00`; it generates PDF/MP3 and must pass the package
-   gate before it creates the scheduled send. The timestamp must be in the
-   future. Set `replace_existing=true` for correction runs so only the latest
-   pending email remains scheduled. Then run `process_due_scheduled_round_emails`
-   from a scheduler.
+   gate before it creates the scheduled send. If you omit the UTC offset, the
+   timestamp is interpreted in the user's timezone, defaulting to
+   `Europe/Berlin`. The timestamp must be in the future. Set
+   `replace_existing=true` for correction runs so only the latest pending email
+   remains scheduled. Then run `process_due_scheduled_round_emails` from a
+   scheduler.
 
 When `inspect_round_package`, `round_repair_report`, or `send_round_email`
 returns `needs_substitution`, read the failed `preview_checks` position or the

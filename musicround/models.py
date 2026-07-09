@@ -39,6 +39,7 @@ class UserPreferences(db.Model):
     banned_artists = db.Column(db.Text, nullable=True)
     banned_songs = db.Column(db.Text, nullable=True)
     repeat_cooldown_weeks = db.Column(db.Integer, default=12, nullable=False)
+    timezone = db.Column(db.String(64), default='Europe/Berlin', nullable=False)
     enable_intro = db.Column(db.Boolean, default=True)
     theme = db.Column(db.String(16), default='light')
     import_job_email_notifications = db.Column(db.Boolean, default=True, nullable=False)

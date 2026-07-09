@@ -92,6 +92,7 @@ The `UserPreferences` table stores user-specific settings.
 | id                   | Integer      | Primary key                                      |
 | user_id              | Integer      | Foreign key to User                              |
 | default_tts_service  | String(32)   | Default text-to-speech service (polly, etc.)     |
+| timezone             | String(64)   | User timezone for scheduling, default `Europe/Berlin` |
 | enable_intro         | Boolean      | Whether to enable intro sound                    |
 | theme                | String(16)   | UI theme preference (light, dark)                |
 | import_job_email_notifications | Boolean | Whether import completion/repair emails are enabled for the user |

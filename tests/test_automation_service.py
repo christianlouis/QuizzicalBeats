@@ -2096,7 +2096,10 @@ class TestAssetInspection:
             with (
                 patch(
                     "musicround.services.automation.generate_round_assets",
-                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                    return_value={
+                        "pdf": {"path": "/tmp/round.pdf"},
+                        "mp3": {"path": "/tmp/round.mp3"},
+                    },
                 ),
                 patch(
                     "musicround.services.automation.inspect_round_package",
@@ -2117,6 +2120,77 @@ class TestAssetInspection:
             assert export.destination == user.email
             assert export.subject == "Scheduled subject"
             assert result["export"]["scheduled_for"] == f"{scheduled_at.isoformat()}Z"
+
+    def test_schedule_round_email_interprets_naive_time_in_user_timezone(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            db.session.add(UserPreferences(user_id=user.id, timezone="Europe/Berlin"))
+            song = _create_song(title="Berlin Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Berlin Scheduled Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={
+                        "pdf": {"path": "/tmp/round.pdf"},
+                        "mp3": {"path": "/tmp/round.mp3"},
+                    },
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                result = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2099-07-09T19:00",
+                    user_id=user.id,
+                )
+
+            export = RoundExport.query.get(result["export"]["id"])
+            assert export.scheduled_for == datetime(2099, 7, 9, 17, 0)
+            assert result["export"]["scheduled_for"] == "2099-07-09T17:00:00Z"
+            assert result["timezone"] == "Europe/Berlin"
+
+    def test_schedule_round_email_keeps_explicit_offset_absolute(self, app):
+        with app.app_context():
+            _configure_mail(app)
+            user = _create_user()
+            db.session.add(UserPreferences(user_id=user.id, timezone="America/New_York"))
+            song = _create_song(title="Offset Scheduled", artist="Artist")
+            round_id = automation.create_round(
+                name="Offset Scheduled Round",
+                round_type="manual",
+                song_ids=[song.id],
+            )["round"]["id"]
+            _approve_round(round_id, reviewer=user)
+
+            with (
+                patch(
+                    "musicround.services.automation.generate_round_assets",
+                    return_value={"pdf": {"path": "/tmp/round.pdf"}, "mp3": {"path": "/tmp/round.mp3"}},
+                ),
+                patch(
+                    "musicround.services.automation.inspect_round_package",
+                    return_value={"ok": True, "status": "ok"},
+                ),
+            ):
+                result = automation.schedule_round_email(
+                    round_id,
+                    scheduled_for="2099-07-09T19:00:00+02:00",
+                    user_id=user.id,
+                )
+
+            export = RoundExport.query.get(result["export"]["id"])
+            assert export.scheduled_for == datetime(2099, 7, 9, 17, 0)
+            assert result["export"]["scheduled_for"] == "2099-07-09T17:00:00Z"
+            assert result["timezone"] == "America/New_York"
 
     def test_schedule_round_email_blocks_draft_before_generation(self, app):
         with app.app_context():
@@ -3414,6 +3488,7 @@ class TestAgentPlanningAutomation:
                 banned_artists="Banned Artist",
                 banned_songs="Banned Song",
                 repeat_cooldown_weeks=16,
+                timezone="Europe/Berlin",
                 enable_intro=True,
                 theme="dark",
             )
@@ -3429,6 +3504,7 @@ class TestAgentPlanningAutomation:
             assert result["preferences"]["tone"] == "dry, seasonal, pub-friendly"
             assert result["preferences"]["tts_voice"] == "Rachel"
             assert result["preferences"]["email_recipient"] == "host@example.test"
+            assert result["preferences"]["timezone"] == "Europe/Berlin"
             assert result["preferences"]["preferred_genres"] == ["Rock", "Pop"]
             assert result["preferences"]["preferred_decades"] == ["1980s", "1990s"]
             assert result["preferences"]["banned_artists"] == ["Banned Artist"]

@@ -725,16 +725,19 @@ def test_add_quizmaster_profile_preferences_to_legacy_database(tmp_path):
         "banned_artists",
         "banned_songs",
         "repeat_cooldown_weeks",
+        "timezone",
     }.issubset(columns)
     with sqlite3.connect(database_path) as conn:
         row = conn.execute(
-            "SELECT default_language, tone, repeat_cooldown_weeks "
+            "SELECT default_language, tone, repeat_cooldown_weeks, timezone "
             "FROM user_preferences WHERE id = 1"
         ).fetchone()
     assert row[0] == "de"
     assert row[1] == "warm, concise, lightly humorous"
     assert row[2] == 12
+    assert row[3] == "Europe/Berlin"
     assert "default_language" in UserPreferences.__table__.columns.keys()
+    assert "timezone" in UserPreferences.__table__.columns.keys()
 
 
 def test_round_songs_comment_matches_storage_behavior():

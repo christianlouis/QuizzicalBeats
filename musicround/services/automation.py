@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from time import monotonic
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from flask import current_app
@@ -91,6 +92,7 @@ SEARCH_RELEVANCE_CANDIDATE_LIMIT = 1000
 ROUND_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected", "sent"}
 ROUND_MANUAL_REVIEW_STATUSES = {"draft", "reviewed", "approved", "blocked", "rejected"}
 ROUND_DELIVERABLE_REVIEW_STATUSES = {"approved", "sent"}
+DEFAULT_USER_TIMEZONE = "Europe/Berlin"
 DEFAULT_MP3_DURATION_TOLERANCE_SECONDS = 30.0
 MIN_MP3_DURATION_MISMATCH_BLOCK_SECONDS = 40.0
 ROUND_SHARE_ROLES = {"viewer", "editor", "producer"}
@@ -4948,6 +4950,7 @@ def _quizmaster_preferences_payload(user: User) -> dict[str, Any]:
             "email_recipient": user.email,
             "enable_intro": True,
             "theme": "light",
+            "timezone": DEFAULT_USER_TIMEZONE,
             "preferred_genres": [],
             "preferred_decades": [],
             "banned_artists": [],
@@ -4966,6 +4969,7 @@ def _quizmaster_preferences_payload(user: User) -> dict[str, Any]:
         "email_recipient": preferences.email_recipient or user.email,
         "enable_intro": preferences.enable_intro,
         "theme": preferences.theme or "light",
+        "timezone": preferences.timezone or DEFAULT_USER_TIMEZONE,
         "preferred_genres": _preferences_text_list(preferences.preferred_genres),
         "preferred_decades": _preferences_text_list(preferences.preferred_decades),
         "banned_artists": _preferences_text_list(preferences.banned_artists),
@@ -5792,7 +5796,24 @@ def generate_tts_from_script(
     return {"script": _audio_script_summary(script), "generated": generated}
 
 
-def _parse_datetime_utc(value: str | datetime) -> datetime:
+def _timezone_or_default(timezone_name: str | None) -> ZoneInfo:
+    name = (timezone_name or DEFAULT_USER_TIMEZONE).strip() or DEFAULT_USER_TIMEZONE
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo(DEFAULT_USER_TIMEZONE)
+
+
+def _user_timezone_name(user: User | None) -> str:
+    if user is None or user.preferences is None:
+        return DEFAULT_USER_TIMEZONE
+    return user.preferences.timezone or DEFAULT_USER_TIMEZONE
+
+
+def _parse_datetime_utc(
+    value: str | datetime,
+    default_timezone: str | None = None,
+) -> datetime:
     if isinstance(value, datetime):
         parsed = value
     else:
@@ -5802,7 +5823,14 @@ def _parse_datetime_utc(value: str | datetime) -> datetime:
         parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo:
         return parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
+    if default_timezone is None:
+        return parsed
+    local_timezone = _timezone_or_default(default_timezone)
+    return (
+        parsed.replace(tzinfo=local_timezone)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
 
 
 def _datetime_payload(value: datetime | None) -> str | None:
@@ -5917,7 +5945,11 @@ def schedule_round_email(
     if not target:
         raise AutomationError("No recipient was provided and the selected user has no email.")
 
-    scheduled_at = _parse_datetime_utc(scheduled_for)
+    schedule_timezone = _user_timezone_name(user)
+    scheduled_at = _parse_datetime_utc(
+        scheduled_for,
+        default_timezone=schedule_timezone,
+    )
     if scheduled_at <= datetime.utcnow():
         raise AutomationError(
             "Scheduled delivery time must be in the future.",
@@ -5926,6 +5958,7 @@ def schedule_round_email(
                 "status": "schedule_in_past",
                 "recipient": target,
                 "scheduled_for": _datetime_payload(scheduled_at),
+                "timezone": schedule_timezone,
                 "hints": ["Choose a future delivery time before scheduling the round email."],
             },
         )
@@ -5939,6 +5972,7 @@ def schedule_round_email(
                 "status": "email_unhealthy",
                 "recipient": target,
                 "scheduled_for": _datetime_payload(scheduled_at),
+                "timezone": schedule_timezone,
                 "service_health": {"email": email_health},
                 "hints": [issue["message"] for issue in email_health["issues"]],
             },
@@ -5961,6 +5995,7 @@ def schedule_round_email(
                 "status": quality["status"],
                 "recipient": target,
                 "scheduled_for": _datetime_payload(scheduled_at),
+                "timezone": schedule_timezone,
                 "assets": assets,
                 "quality": quality,
                 "report": report,
@@ -6001,6 +6036,7 @@ def schedule_round_email(
     return {
         "scheduled": True,
         "export": _round_export_summary(export),
+        "timezone": schedule_timezone,
         "replaced_exports": replaced_exports,
         "assets": assets,
         "quality": quality,

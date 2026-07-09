@@ -15,6 +15,7 @@ PROFILE_COLUMNS = {
     "banned_artists": "TEXT",
     "banned_songs": "TEXT",
     "repeat_cooldown_weeks": "INTEGER DEFAULT 12 NOT NULL",
+    "timezone": "VARCHAR(64) DEFAULT 'Europe/Berlin' NOT NULL",
 }
 
 
@@ -45,7 +46,8 @@ def run_migration():
                     "UPDATE user_preferences "
                     "SET default_language = COALESCE(default_language, 'de'), "
                     "tone = COALESCE(tone, 'warm, concise, lightly humorous'), "
-                    "repeat_cooldown_weeks = COALESCE(repeat_cooldown_weeks, 12)"
+                    "repeat_cooldown_weeks = COALESCE(repeat_cooldown_weeks, 12), "
+                    "timezone = COALESCE(timezone, 'Europe/Berlin')"
                 )
             )
             conn.commit()
