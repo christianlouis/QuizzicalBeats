@@ -62,6 +62,17 @@ file counts and byte totals. It intentionally reports totals only, not artifact
 filenames, so the public-safe health endpoint can support sync and capacity
 checks without leaking individual round asset names.
 
+Agents and operators can run the same storage gate without opening the browser:
+
+```bash
+python run.py storage readiness --json
+```
+
+The command exits non-zero when the configured storage is unhealthy or when the
+current filesystem backend is writable but still blocks multi-replica HA. Use
+`--allow-ha-blocking` only for an intentionally single-writer deployment; remove
+that flag before scaling web replicas.
+
 For filesystem storage, the health payload includes:
 
 - Directory name

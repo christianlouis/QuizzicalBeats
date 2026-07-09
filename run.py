@@ -42,6 +42,13 @@ def _create_backup_readiness_cli_app():
     return app
 
 
+def _create_storage_readiness_cli_app():
+    """Create a minimal app for artifact storage diagnostics."""
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    return app
+
+
 def _configured_database_uri_without_fallback(app):
     """Resolve explicit database config without creating the local fallback."""
     from musicround.helpers.database_config import database_uri_from_postgres_env
@@ -163,6 +170,24 @@ def main():
     health_parser = subparsers.add_parser('health', help='Health diagnostics')
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
     health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
+
+    storage_parser = subparsers.add_parser('storage', help='Artifact storage diagnostics')
+    storage_subparsers = storage_parser.add_subparsers(dest='storage_action', help='Storage action to perform')
+    storage_readiness_parser = storage_subparsers.add_parser(
+        'readiness',
+        help='Check generated round artifact storage readiness',
+    )
+    storage_readiness_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable public-safe storage readiness diagnostics',
+    )
+    storage_readiness_parser.add_argument(
+        '--allow-ha-blocking',
+        action='store_true',
+        help='Allow filesystem-style artifact storage for single-writer deployments',
+    )
 
     scheduled_emails_parser = subparsers.add_parser(
         'scheduled-emails',
@@ -631,6 +656,28 @@ def main():
             payload = application_health_payload()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
+    elif args.command == 'storage':
+        app = _create_storage_readiness_cli_app()
+        with app.app_context():
+            from musicround.helpers.storage_health import round_artifact_storage_readiness
+
+            result = round_artifact_storage_readiness(
+                allow_ha_blocking=args.allow_ha_blocking
+            )
+            if args.json_output:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"Artifact storage readiness: {result['status']}")
+                print(f"Backend: {result['backend']}")
+                print(f"Writable: {result['writable_ok']}")
+                print(f"HA ready: {result['ha_ready']}")
+                inventory = result.get("inventory") or {}
+                print(f"Artifact files: {inventory.get('total_file_count', 0)}")
+                for issue in result["issues"]:
+                    print(f"- {issue['severity']}: {issue['code']}")
+                    print(f"  {issue['message']}")
+                print(f"Next action: {result['next_action']}")
+            return 0 if result["ok"] else 1
     elif args.command == 'scheduled-emails':
         if args.scheduled_emails_action == 'process-due':
             with contextlib.redirect_stdout(sys.stderr):

@@ -379,3 +379,55 @@ def storage_error_response() -> dict[str, Any]:
         "storage": health,
         "hint": "; ".join(health["hints"]),
     }
+
+
+def round_artifact_storage_readiness(allow_ha_blocking: bool = False) -> dict[str, Any]:
+    """Return operator readiness for generated round artifact storage."""
+    health = check_round_artifact_storage()
+    capabilities = health.get("capabilities") or {}
+    ha_blocking = bool(capabilities.get("ha_blocking"))
+    issues = list(health.get("issues") or [])
+    ha_ready = bool(health.get("ok")) and not ha_blocking
+
+    if ha_blocking:
+        issues.append(
+            {
+                "code": "artifact_storage_ha_blocking",
+                "severity": "warning",
+                "message": (
+                    "Generated round artifacts still use a backend that blocks "
+                    "multi-replica HA."
+                ),
+                "details": {
+                    "hint": (
+                        "Use --allow-ha-blocking for single-writer deployments, "
+                        "or move artifacts to shared/object storage before "
+                        "scaling web replicas."
+                    )
+                },
+            }
+        )
+
+    ok = bool(health.get("ok")) and (allow_ha_blocking or ha_ready)
+    if not health.get("ok"):
+        status = "error"
+        next_action = "Fix artifact storage health before generating or delivering rounds."
+    elif ha_blocking and not allow_ha_blocking:
+        status = "warning"
+        next_action = "Keep one web replica or move generated artifacts to shared/object storage."
+    else:
+        status = "ok"
+        next_action = "Artifact storage is ready for the selected deployment mode."
+
+    return {
+        "ok": ok,
+        "status": status,
+        "allow_ha_blocking": allow_ha_blocking,
+        "writable_ok": bool(health.get("ok")),
+        "ha_ready": ha_ready,
+        "backend": health.get("backend"),
+        "capabilities": capabilities,
+        "inventory": health.get("inventory", {}),
+        "issues": issues,
+        "next_action": next_action,
+    }

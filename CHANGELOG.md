@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the admin system-health page to use shared artifact storage health,
   capabilities, and inventory data so operators see the same HA warning and
   artifact totals as agents.
+- Added `run.py storage readiness` so agents and operators can fail closed on
+  unhealthy generated-artifact storage or HA-blocking filesystem storage before
+  scaling web replicas.
 - Added credential-safe native database backup planning to backup-readiness
   JSON and CLI output for PostgreSQL and other managed SQL deployments.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the

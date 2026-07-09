@@ -26,6 +26,68 @@ def test_health_check_command_outputs_public_safe_json(app, monkeypatch, capsys)
     assert "token" not in output.lower()
 
 
+def test_storage_readiness_command_blocks_ha_by_default(app, monkeypatch, capsys):
+    """Storage readiness should fail when the active backend still blocks HA."""
+    import run
+
+    monkeypatch.setattr(run, "_create_storage_readiness_cli_app", lambda: app)
+    monkeypatch.setattr(sys, "argv", ["run.py", "storage", "readiness", "--json"])
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["status"] == "warning"
+    assert payload["writable_ok"] is True
+    assert payload["ha_ready"] is False
+    assert payload["allow_ha_blocking"] is False
+    assert any(
+        issue["code"] == "artifact_storage_ha_blocking"
+        for issue in payload["issues"]
+    )
+    assert "password" not in output.lower()
+    assert "token" not in output.lower()
+    assert ".mp3" not in output.lower()
+    assert ".pdf" not in output.lower()
+
+
+def test_storage_readiness_command_allows_single_writer_filesystem(
+    app,
+    monkeypatch,
+    capsys,
+):
+    """Operators can explicitly allow filesystem storage for one-writer deploys."""
+    import run
+
+    monkeypatch.setattr(run, "_create_storage_readiness_cli_app", lambda: app)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "storage",
+            "readiness",
+            "--json",
+            "--allow-ha-blocking",
+        ],
+    )
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["status"] == "ok"
+    assert payload["writable_ok"] is True
+    assert payload["ha_ready"] is False
+    assert payload["allow_ha_blocking"] is True
+    assert "password" not in output.lower()
+    assert "token" not in output.lower()
+
+
 def test_notifications_oauth_tokens_command_defaults_to_dry_run(app, monkeypatch, capsys):
     """OAuth token notification CLI previews by default."""
     import run
