@@ -108,6 +108,11 @@ class TestSystemHealthRoute:
             data['services']['artifact_storage']['capabilities']['warnings'][0]['code']
             == 'filesystem_artifacts_block_multi_replica_ha'
         )
+        inventory = data['services']['artifact_storage']['inventory']
+        assert inventory['backend'] == 'filesystem'
+        assert 'total_file_count' in inventory
+        assert 'total_bytes' in inventory
+        assert 'round_' not in json.dumps(inventory)
         assert data['services']['import_queue']['initialized'] is True
         assert 'password' not in json.dumps(data).lower()
         assert 'token' not in json.dumps(data).lower()

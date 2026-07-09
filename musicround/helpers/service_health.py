@@ -124,6 +124,7 @@ def artifact_storage_service_health(
         "ok": storage["ok"],
         "backend": storage.get("backend", "filesystem"),
         "capabilities": storage.get("capabilities", {}),
+        "inventory": storage.get("inventory", {}),
         "checks": storage["checks"],
         "issues": issues,
         "hints": storage["hints"],

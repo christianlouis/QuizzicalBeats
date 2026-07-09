@@ -56,6 +56,31 @@ class FilesystemRoundArtifactStore:
         os.remove(path)
         return True
 
+    def inventory(self, kind: str) -> dict[str, Any]:
+        if kind not in ROUND_ARTIFACT_KINDS:
+            raise ValueError(f"Unsupported round artifact kind: {kind}")
+        directory = self.directory(kind)
+        result: dict[str, Any] = {
+            "kind": kind,
+            "file_count": 0,
+            "total_bytes": 0,
+            "ok": True,
+            "error": None,
+        }
+        try:
+            for name in os.listdir(directory):
+                path = os.path.join(directory, name)
+                if not os.path.isfile(path):
+                    continue
+                if not name.startswith("round_") or not name.endswith(f".{kind}"):
+                    continue
+                result["file_count"] += 1
+                result["total_bytes"] += os.path.getsize(path)
+        except OSError as exc:
+            result["ok"] = False
+            result["error"] = str(exc)
+        return result
+
 
 def round_artifact_store() -> FilesystemRoundArtifactStore:
     """Return the configured generated-round artifact store."""
@@ -145,6 +170,55 @@ def round_artifact_storage_capabilities() -> dict[str, Any]:
     return capabilities
 
 
+def round_artifact_storage_inventory(
+    include_mp3: bool = True,
+    include_pdf: bool = True,
+) -> dict[str, Any]:
+    """Return backend-neutral generated round artifact inventory."""
+    backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
+    inventory: dict[str, Any] = {
+        "backend": backend,
+        "ok": True,
+        "artifacts": {},
+        "total_file_count": 0,
+        "total_bytes": 0,
+        "issues": [],
+    }
+    if backend not in SUPPORTED_ROUND_ARTIFACT_BACKENDS:
+        inventory["ok"] = False
+        inventory["issues"].append(
+            {
+                "code": "artifact_storage_backend_unsupported",
+                "severity": "error",
+                "message": f"Unsupported round artifact storage backend: {backend}",
+            }
+        )
+        return inventory
+
+    store = round_artifact_store()
+    kinds = []
+    if include_mp3:
+        kinds.append("mp3")
+    if include_pdf:
+        kinds.append("pdf")
+    for kind in kinds:
+        item = store.inventory(kind)
+        inventory["artifacts"][kind] = item
+        if not item["ok"]:
+            inventory["ok"] = False
+            inventory["issues"].append(
+                {
+                    "code": f"artifact_storage_{kind}_inventory_failed",
+                    "severity": "warning",
+                    "message": f"Could not inspect {kind.upper()} artifact inventory.",
+                }
+            )
+            continue
+        inventory["total_file_count"] += item["file_count"]
+        inventory["total_bytes"] += item["total_bytes"]
+    return inventory
+
+
 def _check_writable_directory(path: str, label: str, create: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {
         "label": label,
@@ -209,6 +283,10 @@ def check_round_artifact_storage(
     """Check directories required for round artifacts."""
     backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
     capabilities = round_artifact_storage_capabilities()
+    inventory = round_artifact_storage_inventory(
+        include_mp3=include_mp3,
+        include_pdf=include_pdf,
+    )
     if backend not in SUPPORTED_ROUND_ARTIFACT_BACKENDS:
         hint = (
             "Set ROUND_ARTIFACT_STORAGE_BACKEND=filesystem or install a "
@@ -218,6 +296,7 @@ def check_round_artifact_storage(
             "ok": False,
             "backend": backend,
             "capabilities": capabilities,
+            "inventory": inventory,
             "checks": [],
             "issues": [
                 {
@@ -267,6 +346,7 @@ def check_round_artifact_storage(
         "ok": not issues,
         "backend": backend,
         "capabilities": capabilities,
+        "inventory": inventory,
         "checks": checks,
         "issues": issues,
         "hints": [issue["details"]["hint"] for issue in issues],

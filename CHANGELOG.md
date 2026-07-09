@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added artifact storage capability metadata to service-health and `/healthz`
   so writable filesystem storage remains green while still warning that it
   blocks multi-replica HA until shared/object storage is configured.
+- Added generated round artifact inventory metadata to service-health and
+  `/healthz` so admins and agents can track MP3/PDF artifact counts and total
+  bytes without relying on filesystem-only route code.
 - Added credential-safe native database backup planning to backup-readiness
   JSON and CLI output for PostgreSQL and other managed SQL deployments.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the

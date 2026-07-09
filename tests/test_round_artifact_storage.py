@@ -9,6 +9,7 @@ from musicround.helpers.storage_health import (
     round_artifact_path,
     round_artifact_store,
     round_artifact_storage_capabilities,
+    round_artifact_storage_inventory,
     round_mp3_path,
     round_pdf_path,
 )
@@ -36,6 +37,30 @@ def test_filesystem_artifact_store_reads_writes_and_deletes(app):
         assert store.delete("pdf", 5) is False
 
 
+def test_filesystem_artifact_store_reports_inventory(app, tmp_path):
+    with app.app_context():
+        app.config["ROUND_MP3_DIR"] = str(tmp_path / "rounds")
+        app.config["ROUND_PDF_DIR"] = str(tmp_path / "pdfs")
+        os.makedirs(app.config["ROUND_MP3_DIR"], exist_ok=True)
+        os.makedirs(app.config["ROUND_PDF_DIR"], exist_ok=True)
+        store = round_artifact_store()
+        store.write_bytes("mp3", 1, b"1234")
+        store.write_bytes("pdf", 2, b"abcdef")
+        (tmp_path / "rounds" / "ignore.tmp").write_bytes(b"not an artifact")
+
+        inventory = round_artifact_storage_inventory()
+
+        assert inventory["ok"] is True
+        assert inventory["backend"] == "filesystem"
+        assert inventory["artifacts"]["mp3"]["file_count"] == 1
+        assert inventory["artifacts"]["mp3"]["total_bytes"] == 4
+        assert inventory["artifacts"]["pdf"]["file_count"] == 1
+        assert inventory["artifacts"]["pdf"]["total_bytes"] == 6
+        assert inventory["total_file_count"] == 2
+        assert inventory["total_bytes"] == 10
+        assert "round_1.mp3" not in str(inventory)
+
+
 def test_artifact_storage_health_reports_backend(app):
     with app.app_context():
         health = check_round_artifact_storage()
@@ -44,6 +69,9 @@ def test_artifact_storage_health_reports_backend(app):
         assert health["backend"] == "filesystem"
         assert health["capabilities"]["supported"] is True
         assert health["capabilities"]["ha_blocking"] is True
+        assert health["inventory"]["backend"] == "filesystem"
+        assert "mp3" in health["inventory"]["artifacts"]
+        assert "pdf" in health["inventory"]["artifacts"]
         assert {check["label"] for check in health["checks"]} == {
             "Round MP3 directory",
             "Round PDF directory",
@@ -81,6 +109,7 @@ def test_artifact_storage_fails_closed_for_unsupported_backend(app):
         assert health["ok"] is False
         assert health["backend"] == "s3"
         assert health["capabilities"]["supported"] is False
+        assert health["inventory"]["ok"] is False
         assert health["capabilities"]["ha_blocking"] is False
         assert health["issues"][0]["code"] == "artifact_storage_backend_unsupported"
         with pytest.raises(RuntimeError, match="Unsupported ROUND_ARTIFACT_STORAGE_BACKEND"):

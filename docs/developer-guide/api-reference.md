@@ -755,6 +755,16 @@ not require login and must not expose tokens, passwords, or full database URIs.
     "artifact_storage": {
       "status": "ok",
       "ok": true,
+      "backend": "filesystem",
+      "capabilities": {
+        "supports_direct_file_paths": true,
+        "supports_shared_multi_replica": false,
+        "ha_blocking": true
+      },
+      "inventory": {
+        "total_file_count": 16,
+        "total_bytes": 104857600
+      },
       "issues": []
     }
   }

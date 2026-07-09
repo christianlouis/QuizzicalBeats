@@ -57,6 +57,11 @@ generation, scheduling, and delivery. It does not mean the deployment is fully
 host-loss tolerant: `capabilities.ha_blocking=true` remains visible until round
 artifacts move to shared or object storage.
 
+The same payload includes a generated-artifact inventory with aggregate MP3/PDF
+file counts and byte totals. It intentionally reports totals only, not artifact
+filenames, so the public-safe health endpoint can support sync and capacity
+checks without leaking individual round asset names.
+
 For filesystem storage, the health payload includes:
 
 - Directory name
