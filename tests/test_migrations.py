@@ -212,6 +212,48 @@ def test_ensure_oauth_provider_unique_indexes_normalizes_blank_values(tmp_path):
     assert blank_count == 0
 
 
+def test_oauth_migrations_share_postgres_advisory_lock():
+    """OAuth startup migrations serialize PostgreSQL DDL across web/MCP pods."""
+    from migrations import (
+        add_oauth_providers,
+        add_spotify_oauth_columns,
+        ensure_oauth_provider_unique_indexes,
+    )
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _Connection:
+        dialect = _Dialect()
+
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, statement, params=None):
+            self.calls.append((str(statement), params))
+
+    for migration in (
+        add_oauth_providers,
+        add_spotify_oauth_columns,
+        ensure_oauth_provider_unique_indexes,
+    ):
+        connection = _Connection()
+
+        assert migration._acquire_postgres_migration_lock(connection) is True
+        migration._release_postgres_migration_lock(connection)
+
+        assert connection.calls == [
+            (
+                "SELECT pg_advisory_lock(:lock_id)",
+                {"lock_id": migration.POSTGRES_MIGRATION_LOCK_ID},
+            ),
+            (
+                "SELECT pg_advisory_unlock(:lock_id)",
+                {"lock_id": migration.POSTGRES_MIGRATION_LOCK_ID},
+            ),
+        ]
+
+
 def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tmp_path):
     """Legacy round tables get generated-asset status columns."""
     database_path = tmp_path / "legacy-round.db"

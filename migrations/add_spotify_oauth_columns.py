@@ -7,6 +7,7 @@ from musicround import db, create_app
 
 # Migration name (used for logging and tracking)
 migration_name = os.path.splitext(os.path.basename(__file__))[0]
+POSTGRES_MIGRATION_LOCK_ID = 472814770501
 
 
 def _quote_identifier(engine, identifier):
@@ -20,6 +21,24 @@ def _add_user_column(connection, column_definition):
 
 def _index_exists(inspector, index_name):
     return any(index.get("name") == index_name for index in inspector.get_indexes("user"))
+
+
+def _acquire_postgres_migration_lock(connection):
+    if connection.dialect.name.lower() != "postgresql":
+        return False
+    connection.execute(
+        text("SELECT pg_advisory_lock(:lock_id)"),
+        {"lock_id": POSTGRES_MIGRATION_LOCK_ID},
+    )
+    return True
+
+
+def _release_postgres_migration_lock(connection):
+    if connection.dialect.name.lower() == "postgresql":
+        connection.execute(
+            text("SELECT pg_advisory_unlock(:lock_id)"),
+            {"lock_id": POSTGRES_MIGRATION_LOCK_ID},
+        )
 
 
 def _create_spotify_id_index(connection):
@@ -59,79 +78,47 @@ def run_migration():
 
             # Use raw SQL for schema changes to avoid issues with model definitions
             # that might already expect the columns to exist.
-            inspector = db.inspect(db.engine)
-            columns = [col['name'] for col in inspector.get_columns('user')]
+            with db.engine.connect() as connection:
+                lock_acquired = _acquire_postgres_migration_lock(connection)
+                try:
+                    inspector = db.inspect(connection)
+                    columns = [col['name'] for col in inspector.get_columns('user')]
 
-            # COLUMN NAMING STRATEGY EXPLANATION:
-            # ==================================
-            # This migration adds 'spotify_id' as the standardized column name
-            # for Spotify user IDs.
-            # The chosen strategy is to use 'spotify_id' consistently throughout the application
-            # for all Spotify-related user identification, rather than a generic 'oauth_id'.
-            #
-            # Reasoning:
-            # 1. Consistency: All OAuth provider columns follow the pattern '{provider}_id'
-            #    (e.g., google_id, authentik_id, dropbox_id, spotify_id)
-            # 2. Clarity: 'spotify_id' explicitly indicates this field stores Spotify user IDs
-            # 3. Maintainability: Future developers can immediately understand the purpose
-            # 4. Extensibility: Allows for multiple OAuth providers without column name conflicts
-            #
-            # This approach avoids generic 'oauth_id' which could be ambiguous when supporting
-            # multiple OAuth providers. Each provider gets its own dedicated ID column.
+                    if 'spotify_id' not in columns:
+                        print("Adding column 'spotify_id' to 'user' table.")
+                        _add_user_column(connection, "spotify_id VARCHAR(100)")
+                        connection.commit()
+                        print("Added 'spotify_id'.")
+                    else:
+                        print("Column 'spotify_id' already exists.")
 
-            if 'spotify_id' in columns and 'spotify_id' not in columns:
-                # NOTE: This condition will never be true - kept for historical reference
-                # If there was ever an 'oauth_id' column that needed renaming to 'spotify_id',
-                # this would be the place to handle it. However, we've chosen to implement
-                # 'spotify_id' from the start for clarity and consistency.
-                print(
-                    "Column 'spotify_id' exists. It will be kept for now. "
-                    "Adding 'spotify_id'."
-                )
+                    if 'spotify_token' not in columns:
+                        print("Adding column 'spotify_token' to 'user' table.")
+                        _add_user_column(connection, "spotify_token TEXT")
+                        connection.commit()
+                        print("Added 'spotify_token'.")
+                    else:
+                        print("Column 'spotify_token' already exists.")
 
-            if 'spotify_id' not in columns:
-                print("Adding column 'spotify_id' to 'user' table.")
-                with db.engine.connect() as connection:
-                    _add_user_column(connection, "spotify_id VARCHAR(100)")
-                    connection.commit()
-                print("Added 'spotify_id'.")
-            else:
-                print("Column 'spotify_id' already exists.")
+                    if 'spotify_refresh_token' not in columns:
+                        print(
+                            "Adding column 'spotify_refresh_token' to 'user' table."
+                        )
+                        _add_user_column(connection, "spotify_refresh_token TEXT")
+                        connection.commit()
+                        print("Added 'spotify_refresh_token'.")
+                    else:
+                        print("Column 'spotify_refresh_token' already exists.")
 
-            if 'spotify_token' not in columns:
-                print("Adding column 'spotify_token' to 'user' table.")
-                with db.engine.connect() as connection:
-                    _add_user_column(connection, "spotify_token TEXT")
-                    connection.commit()
-                print("Added 'spotify_token'.")
-            else:
-                print("Column 'spotify_token' already exists.")
+                    if 'spotify_token_expiry' not in columns:
+                        print("Adding column 'spotify_token_expiry' to 'user' table.")
+                        _add_user_column(connection, "spotify_token_expiry DATETIME")
+                        connection.commit()
+                        print("Added 'spotify_token_expiry'.")
+                    else:
+                        print("Column 'spotify_token_expiry' already exists.")
 
-            if 'spotify_refresh_token' not in columns:
-                print("Adding column 'spotify_refresh_token' to 'user' table.")
-                with db.engine.connect() as connection:
-                    _add_user_column(connection, "spotify_refresh_token TEXT")
-                    connection.commit()
-                print("Added 'spotify_refresh_token'.")
-            else:
-                print("Column 'spotify_refresh_token' already exists.")
-
-            if 'spotify_token_expiry' not in columns:
-                print("Adding column 'spotify_token_expiry' to 'user' table.")
-                with db.engine.connect() as connection:
-                    _add_user_column(connection, "spotify_token_expiry DATETIME")
-                    connection.commit()
-                print("Added 'spotify_token_expiry'.")
-            else:
-                print("Column 'spotify_token_expiry' already exists.")
-
-            # Add index to spotify_id if it doesn't exist
-            # Index creation syntax can vary between DBs (e.g., SQLite vs PostgreSQL)
-            # SQLAlchemy model indexes would be cleaner, but this manual
-            # migration has to upgrade existing deployments in place.
-            # but for a manual script:
-            try:
-                with db.engine.connect() as connection:
+                    inspector = db.inspect(connection)
                     if not _index_exists(inspector, "idx_user_spotify_id"):
                         print(
                             "Adding index 'idx_user_spotify_id' to "
@@ -142,12 +129,9 @@ def run_migration():
                         print("Added unique index 'idx_user_spotify_id'.")
                     else:
                         print("Index 'idx_user_spotify_id' already exists.")
-            except Exception as e:
-                print(
-                    "Could not create index on spotify_id "
-                    "(this might be okay if using a different DB or if it exists): "
-                    f"{e}"
-                )
+                finally:
+                    if lock_acquired:
+                        _release_postgres_migration_lock(connection)
 
             print(f"Migration {migration_name} completed successfully.")
             return True
