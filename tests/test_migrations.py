@@ -740,6 +740,58 @@ def test_add_quizmaster_profile_preferences_to_legacy_database(tmp_path):
     assert "timezone" in UserPreferences.__table__.columns.keys()
 
 
+def test_quizmaster_profile_preferences_backfills_null_timezones(tmp_path):
+    """Existing timezone columns with NULL values are normalized to Berlin."""
+    database_path = tmp_path / "legacy-null-timezone.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        db.create_all()
+        db.session.remove()
+        db.drop_all()
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE user_preferences (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER UNIQUE,
+                    default_tts_service VARCHAR(32),
+                    enable_intro BOOLEAN,
+                    theme VARCHAR(16),
+                    default_language VARCHAR(16),
+                    tone VARCHAR(200),
+                    tts_voice VARCHAR(120),
+                    email_recipient VARCHAR(120),
+                    preferred_genres TEXT,
+                    preferred_decades TEXT,
+                    banned_artists TEXT,
+                    banned_songs TEXT,
+                    repeat_cooldown_weeks INTEGER,
+                    timezone VARCHAR(64)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO user_preferences "
+                "(id, user_id, default_tts_service, enable_intro, theme, timezone) "
+                "VALUES (1, 10, 'polly', 1, 'light', NULL)"
+            )
+
+        from migrations import add_quizmaster_profile_preferences
+
+        assert add_quizmaster_profile_preferences.run_migration() is True
+        assert add_quizmaster_profile_preferences.run_migration() is None
+
+    with sqlite3.connect(database_path) as conn:
+        row = conn.execute(
+            "SELECT default_language, tone, repeat_cooldown_weeks, timezone "
+            "FROM user_preferences WHERE id = 1"
+        ).fetchone()
+    assert row[0] == "de"
+    assert row[1] == "warm, concise, lightly humorous"
+    assert row[2] == 12
+    assert row[3] == "Europe/Berlin"
+
+
 def test_round_songs_comment_matches_storage_behavior():
     """Round.songs remains documented and parsed as comma-separated IDs."""
     round_ = Round(

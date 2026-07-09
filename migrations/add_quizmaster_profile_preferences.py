@@ -24,6 +24,7 @@ def run_migration():
         from musicround import db
 
         inspector = inspect(db.engine)
+        dialect = db.engine.dialect.name
         existing_columns = {
             column["name"] for column in inspector.get_columns("user_preferences")
         }
@@ -32,25 +33,49 @@ def run_migration():
             for name, definition in PROFILE_COLUMNS.items()
             if name not in existing_columns
         ]
-        if not missing_columns:
-            logging.info("No changes were needed")
-            return None
+        changed = False
 
         with db.engine.connect() as conn:
             for name, definition in missing_columns:
                 conn.execute(
                     text(f"ALTER TABLE user_preferences ADD COLUMN {name} {definition}")
                 )
-            conn.execute(
+                changed = True
+            changed = changed or conn.execute(
                 text(
                     "UPDATE user_preferences "
                     "SET default_language = COALESCE(default_language, 'de'), "
                     "tone = COALESCE(tone, 'warm, concise, lightly humorous'), "
                     "repeat_cooldown_weeks = COALESCE(repeat_cooldown_weeks, 12), "
-                    "timezone = COALESCE(timezone, 'Europe/Berlin')"
+                    "timezone = COALESCE(NULLIF(TRIM(timezone), ''), 'Europe/Berlin') "
+                    "WHERE default_language IS NULL "
+                    "OR tone IS NULL "
+                    "OR repeat_cooldown_weeks IS NULL "
+                    "OR timezone IS NULL "
+                    "OR TRIM(timezone) = ''"
                 )
-            )
+            ).rowcount > 0
+            if "timezone" in existing_columns or any(
+                name == "timezone" for name, _definition in missing_columns
+            ):
+                if dialect == "postgresql":
+                    conn.execute(
+                        text(
+                            "ALTER TABLE user_preferences "
+                            "ALTER COLUMN timezone SET DEFAULT 'Europe/Berlin'"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE user_preferences "
+                            "ALTER COLUMN timezone SET NOT NULL"
+                        )
+                    )
             conn.commit()
+
+        if not changed:
+            logging.info("No changes were needed")
+            return None
 
         logging.info("Migration add_quizmaster_profile_preferences completed successfully")
         return True
