@@ -2,6 +2,7 @@
 
 import sqlite3
 
+import sqlalchemy as sa
 from flask import Flask
 
 from musicround import db
@@ -84,6 +85,30 @@ def test_add_song_fields_adds_model_isrc_to_legacy_song_table(tmp_path):
     with sqlite3.connect(database_path) as conn:
         indexes = [row[1] for row in conn.execute("PRAGMA index_list(song)").fetchall()]
     assert "ix_song_isrc" in indexes
+
+
+def test_song_deezer_id_uses_big_integer_for_large_catalog_ids(tmp_path):
+    """Deezer catalog ids can exceed PostgreSQL INTEGER range."""
+    assert isinstance(Song.__table__.columns["deezer_id"].type, sa.BigInteger)
+
+    database_path = tmp_path / "legacy-song.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE song (
+                id INTEGER PRIMARY KEY,
+                deezer_id INTEGER,
+                title VARCHAR(200) NOT NULL,
+                artist VARCHAR(200) NOT NULL
+            )
+            """
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import widen_song_deezer_id
+
+        assert widen_song_deezer_id.run_migration() is None
 
 
 def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tmp_path):

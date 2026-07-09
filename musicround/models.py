@@ -169,7 +169,7 @@ class Song(db.Model):
     """
     id = db.Column(db.Integer, primary_key=True)
     spotify_id = db.Column(db.String(100), unique=True, nullable=True)
-    deezer_id = db.Column(db.Integer, unique=True, nullable=True)
+    deezer_id = db.Column(db.BigInteger, unique=True, nullable=True)
     isrc = db.Column(db.String(20), index=True, nullable=True)  # Add ISRC code
     title = db.Column(db.String(200), nullable=False)
     artist = db.Column(db.String(200), nullable=False)
