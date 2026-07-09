@@ -45,7 +45,13 @@ This information helps you track database growth and ensure you're performing re
 
 ## Storage Monitoring
 
-The storage section provides information about key directories:
+The storage section provides information about generated round artifact storage.
+The default backend is `filesystem`, using `ROUND_MP3_DIR` and `ROUND_PDF_DIR`
+for generated MP3 and PDF files. Unsupported `ROUND_ARTIFACT_STORAGE_BACKEND`
+values are treated as unhealthy so delivery does not continue against an
+unknown storage target.
+
+For filesystem storage, the health payload includes:
 
 - Directory name
 - Number of files in each directory

@@ -41,8 +41,9 @@ from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
     require_round_artifact_storage,
-    round_mp3_dir,
-    round_pdf_dir,
+    round_artifact_store,
+    round_mp3_path,
+    round_pdf_path,
 )
 from musicround.helpers.service_health import (
     artifact_storage_service_health,
@@ -1664,8 +1665,8 @@ def round_review_payload(
             "usage_warning": _song_usage_warning(song, window_start, user_id=user.id if user else None),
         })
 
-    mp3_path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
-    pdf_path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
+    mp3_path = round_mp3_path(round_id)
+    pdf_path = round_pdf_path(round_id)
     quality = None
     quality_error = None
     try:
@@ -2818,7 +2819,7 @@ def generate_round_pdf(round_id: int) -> dict[str, Any]:
     round_obj.pdf_generated = True
     round_obj.last_generated_at = datetime.utcnow()
     db.session.commit()
-    path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
+    path = round_pdf_path(round_id)
     return {"round_id": round_id, "path": path, "bytes": len(pdf_data)}
 
 
@@ -2849,7 +2850,7 @@ def generate_round_mp3(round_id: int, user_id: int | None = None) -> dict[str, A
         if payload.get("success") is False or payload.get("error"):
             raise AutomationError(payload.get("error", "MP3 generation failed."))
 
-    path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
+    path = round_mp3_path(round_id)
     if not os.path.exists(path):
         current_app.logger.error("MP3 generation for round %s did not create %s", round_id, path)
         raise AutomationError(AUTOMATION_MP3_GENERATION_ERROR)
@@ -6237,7 +6238,7 @@ def inspect_mp3_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join(round_mp3_dir(), f"round_{round_id}.mp3")
+        path = round_mp3_path(round_id)
     if not os.path.exists(path):
         raise AutomationError(f"MP3 file not found: {path}")
 
@@ -6278,12 +6279,15 @@ def inspect_pdf_quality(path: str | None = None, round_id: int | None = None) ->
     if not path:
         if round_id is None:
             raise AutomationError("Pass either path or round_id.")
-        path = os.path.join(round_pdf_dir(), f"round_{round_id}.pdf")
+        path = round_pdf_path(round_id)
     if not os.path.exists(path):
         raise AutomationError(f"PDF file not found: {path}")
 
-    with open(path, "rb") as pdf_file:
-        data = pdf_file.read()
+    if round_id is not None:
+        data = round_artifact_store().read_bytes("pdf", round_id)
+    else:
+        with open(path, "rb") as pdf_file:
+            data = pdf_file.read()
     warnings = []
     if not data.startswith(b"%PDF-"):
         warnings.append("File does not start with a PDF header.")

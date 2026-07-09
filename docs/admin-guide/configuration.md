@@ -95,6 +95,7 @@ SQLALCHEMY_TRACK_MODIFICATIONS=False
 
 # Application file storage
 DATA_DIR=/data
+ROUND_ARTIFACT_STORAGE_BACKEND=filesystem
 ROUND_MP3_DIR=/data/rounds
 ROUND_PDF_DIR=/data/pdfs
 

@@ -26,8 +26,9 @@ from musicround.helpers.paths import app_data_path
 from musicround.helpers import round_notifications
 from musicround.helpers.storage_health import (
     check_round_artifact_storage,
-    round_mp3_dir,
-    round_pdf_dir,
+    round_artifact_store,
+    round_mp3_path,
+    round_pdf_path,
 )
 from musicround.services import automation
 from musicround.services.automation import AutomationError
@@ -639,8 +640,8 @@ def round_bundle_review(round_id):
     """Review generated round assets before scheduling or sending."""
     rnd = _get_visible_round_or_404(round_id)
     round_quality_report = session.pop('round_quality_report', None)
-    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
-    pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
+    mp3_file_path = round_mp3_path(round_id)
+    pdf_file_path = round_pdf_path(round_id)
     audio_scripts = (
         RoundAudioScript.query.filter_by(round_id=rnd.id)
         .order_by(RoundAudioScript.created_at.desc(), RoundAudioScript.id.desc())
@@ -1113,11 +1114,7 @@ def round_mp3(round_id):
     # Preserve the exact ordering from the round.songs field
     songs = [songs_dict.get(song_id) for song_id in song_ids if songs_dict.get(song_id)]
 
-    # Create a directory for rounds in /data if it doesn't exist
-    rounds_dir = round_mp3_dir()
-
-    # Define the path for the MP3 file
-    mp3_file_path = os.path.join(rounds_dir, f'round_{round_id}.mp3')
+    mp3_file_path = round_mp3_path(round_id)
     current_app.logger.info(f"Checking MP3 generation status for round {round_id}")
     force_regenerate = _bool_form_value('force', False)
 
@@ -1284,7 +1281,7 @@ def round_mp3(round_id):
 def download_mp3(round_id):
     """Download an MP3 file for a round"""
     _get_visible_round_or_404(round_id)
-    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
+    mp3_file_path = round_mp3_path(round_id)
     
     if not os.path.exists(mp3_file_path):
         flash('MP3 file not found. Please generate the MP3 first.', 'error')
@@ -1297,7 +1294,7 @@ def download_mp3(round_id):
 def download_pdf(round_id):
     """Download a PDF file for a round"""
     _get_visible_round_or_404(round_id)
-    pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
+    pdf_file_path = round_pdf_path(round_id)
     
     if not os.path.exists(pdf_file_path):
         flash('PDF file not found. Please generate the PDF first.', 'error')
@@ -1314,16 +1311,12 @@ def generate_pdf(round_id):
     if not rnd:
         return 'Round not found'
 
-    file_name = f'round_{round_id}.pdf'
-    dir_path = round_pdf_dir()
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
-    file_path = os.path.join(dir_path, file_name)
+    artifact_store = round_artifact_store()
+    file_path = artifact_store.path('pdf', round_id)
 
     # If it exists and the flag indicates it's up-to-date, read from disk
     if os.path.exists(file_path) and rnd.pdf_generated:
-        with open(file_path, 'rb') as file:
-            return file.read()
+        return artifact_store.read_bytes('pdf', round_id)
 
     # Get songs data in the correct order
     song_ids = rnd.song_id_list
@@ -1485,9 +1478,8 @@ def generate_pdf(round_id):
     # Get the value from the buffer
     buffer.seek(0)
     
-    # Save to file
-    with open(file_path, 'wb') as file:
-        file.write(buffer.getvalue())
+    # Save to the configured artifact store.
+    artifact_store.write_bytes('pdf', round_id, buffer.getvalue())
     
     return buffer.getvalue()
 
@@ -1507,8 +1499,7 @@ def round_pdf(round_id):
     if not storage['ok']:
         return _storage_failure_response(round_id, storage)
 
-    pdfs_dir = round_pdf_dir()
-    pdf_file_path = os.path.join(pdfs_dir, f'round_{rnd.id}.pdf')
+    pdf_file_path = round_pdf_path(rnd.id)
     
     # Check if the PDF has already been generated and if the file exists
     # We'll generate a new file if either the flag is False or the file doesn't exist
@@ -1532,8 +1523,7 @@ def round_pdf(round_id):
         if isinstance(pdf_data, str):
             return jsonify({'success': False, 'error': pdf_data}), 400
 
-        with open(pdf_file_path, 'wb') as f:
-            f.write(pdf_data)
+        round_artifact_store().write_bytes('pdf', round_id, pdf_data)
         
         # Update the round object to indicate PDF has been generated and update timestamp
         rnd.pdf_generated = True
@@ -1605,7 +1595,7 @@ def send_email(round_id):
         return redirect(url_for('rounds.round_detail', round_id=round_id))
     
     # Define the path for the MP3 file
-    mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
+    mp3_file_path = round_mp3_path(round_id)
     
     # Regenerate if the database marks the asset stale or the file is missing.
     if not rnd.mp3_generated or not os.path.exists(mp3_file_path):
@@ -1733,14 +1723,9 @@ def delete_round(round_id):
     
     try:
         # Delete associated MP3 file if it exists
-        mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
-        if os.path.exists(mp3_file_path):
-            os.remove(mp3_file_path)
-            
-        # Delete associated PDF file if it exists
-        pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
-        if os.path.exists(pdf_file_path):
-            os.remove(pdf_file_path)
+        artifact_store = round_artifact_store()
+        artifact_store.delete('mp3', round_id)
+        artifact_store.delete('pdf', round_id)
         
         # Delete the round from the database
         db.session.delete(rnd)
@@ -1936,7 +1921,7 @@ def export_to_dropbox(round_id):
                     raise Exception(f"Error generating PDF: {pdf_data}")
             else:
                 # PDF already exists, read it
-                pdf_file_path = os.path.join(round_pdf_dir(), f'round_{round_id}.pdf')
+                pdf_file_path = round_pdf_path(round_id)
                 current_app.logger.debug(f"Reading existing PDF from {pdf_file_path}")
                 
                 if not os.path.exists(pdf_file_path):
@@ -1944,8 +1929,7 @@ def export_to_dropbox(round_id):
                     # Generate it anyway
                     pdf_data = generate_pdf(round_id)
                 else:
-                    with open(pdf_file_path, 'rb') as f:
-                        pdf_data = f.read()
+                    pdf_data = round_artifact_store().read_bytes('pdf', round_id)
                     current_app.logger.debug(f"Read {len(pdf_data)} bytes from PDF file")
             
             # Upload PDF
@@ -1977,7 +1961,7 @@ def export_to_dropbox(round_id):
             current_app.logger.info(f"MP3 export requested for round {round_id}")
             
             # Check if MP3 exists, generate if not
-            mp3_file_path = os.path.join(round_mp3_dir(), f'round_{round_id}.mp3')
+            mp3_file_path = round_mp3_path(round_id)
             current_app.logger.debug(f"Checking for MP3 at {mp3_file_path}")
             current_app.logger.debug(f"MP3 generated flag: {round_obj.mp3_generated}")
             
@@ -1997,8 +1981,7 @@ def export_to_dropbox(round_id):
             
             # MP3 exists, upload it
             current_app.logger.debug(f"Reading MP3 file from {mp3_file_path}")
-            with open(mp3_file_path, 'rb') as f:
-                mp3_data = f.read()
+            mp3_data = round_artifact_store().read_bytes('mp3', round_id)
             
             current_app.logger.debug(f"Read {len(mp3_data)} bytes from MP3 file")
             
