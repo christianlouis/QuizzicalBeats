@@ -194,7 +194,7 @@ def test_backup_readiness_command_blocks_managed_database_without_secret_leak(
     monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
     monkeypatch.setenv(
         "SQLALCHEMY_DATABASE_URI",
-        "postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats"
+        "postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats"
     )
     monkeypatch.setattr(sys, "argv", ["run.py", "backup", "readiness", "--json"])
 
@@ -207,7 +207,7 @@ def test_backup_readiness_command_blocks_managed_database_without_secret_leak(
     assert payload["ok"] is False
     assert payload["issues"][0]["code"] == "managed_database_requires_external_backup"
     assert payload["recommended_scheduler_command"] is None
-    assert "super-secret" not in output
+    assert "redaction-fixture" not in output
     assert "postgresql://" not in output
     assert "Traceback" not in captured.err
 
@@ -567,7 +567,7 @@ def test_database_preflight_accepts_complete_pg_env(monkeypatch, capsys):
     monkeypatch.setenv("PGHOST", "postgres.example")
     monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
     monkeypatch.setenv("PGUSER", "qb_user")
-    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setenv("PGPASSWORD", "redaction-fixture-value")
     monkeypatch.setenv("PGSSLMODE", "require")
     monkeypatch.setattr(sys, "argv", ["run.py", "database", "preflight"])
 
@@ -581,8 +581,8 @@ def test_database_preflight_accepts_complete_pg_env(monkeypatch, capsys):
         "PGSSLMODE"
     ) in captured.out
     assert "Database preflight passed." in captured.out
-    assert "super-secret-password" not in captured.out
-    assert "super-secret-password" not in captured.err
+    assert "redaction-fixture-value" not in captured.out
+    assert "redaction-fixture-value" not in captured.err
 
 
 def test_database_status_json_warns_when_full_uri_masks_pg_env(monkeypatch, capsys):
@@ -596,7 +596,7 @@ def test_database_status_json_warns_when_full_uri_masks_pg_env(monkeypatch, caps
     monkeypatch.setenv("PGHOST", "postgres.example")
     monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
     monkeypatch.setenv("PGUSER", "qb_user")
-    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setenv("PGPASSWORD", "redaction-fixture-value")
     monkeypatch.setattr(sys, "argv", ["run.py", "database", "status", "--json"])
 
     exit_code = run.main()
@@ -610,7 +610,7 @@ def test_database_status_json_warns_when_full_uri_masks_pg_env(monkeypatch, caps
         "database_uri_overrides_postgres_env",
     ]
     assert payload["postgres_env"]["complete"] is True
-    assert "super-secret-password" not in captured.out
+    assert "redaction-fixture-value" not in captured.out
     assert "postgres.example" not in captured.out
     assert "/data/song_data.db" not in captured.out
 
@@ -626,7 +626,7 @@ def test_database_status_prints_uri_override_warning(monkeypatch, capsys):
     monkeypatch.setenv("PGHOST", "postgres.example")
     monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
     monkeypatch.setenv("PGUSER", "qb_user")
-    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setenv("PGPASSWORD", "redaction-fixture-value")
     monkeypatch.setattr(sys, "argv", ["run.py", "database", "status"])
 
     exit_code = run.main()
@@ -635,7 +635,7 @@ def test_database_status_prints_uri_override_warning(monkeypatch, capsys):
     assert exit_code == 0
     assert "SQLALCHEMY_DATABASE_URI overrides complete split PostgreSQL" in captured.out
     assert "legacy /data SQLite database is configured" in captured.out
-    assert "super-secret-password" not in captured.out
+    assert "redaction-fixture-value" not in captured.out
     assert "postgres.example" not in captured.out
     assert "/data/song_data.db" not in captured.out
 
@@ -704,7 +704,7 @@ def test_database_cutover_plan_json_accepts_complete_pg_env(monkeypatch, capsys)
     monkeypatch.setenv("PGHOST", "postgres.example")
     monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
     monkeypatch.setenv("PGUSER", "qb_user")
-    monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+    monkeypatch.setenv("PGPASSWORD", "redaction-fixture-value")
     monkeypatch.setenv("PGSSLMODE", "require")
     monkeypatch.setattr(sys, "argv", ["run.py", "database", "cutover-plan", "--json"])
 
@@ -718,7 +718,7 @@ def test_database_cutover_plan_json_accepts_complete_pg_env(monkeypatch, capsys)
     assert payload["database"]["backend"] == "postgresql"
     assert payload["blocked_steps"] == []
     assert "dry_run_sqlite_migration" in payload["ready_steps"]
-    assert "super-secret-password" not in captured.out
+    assert "redaction-fixture-value" not in captured.out
     assert "Traceback" not in captured.err
 
 

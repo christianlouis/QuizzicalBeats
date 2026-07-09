@@ -126,7 +126,7 @@ def test_database_uri_override_detects_complete_postgres_env():
         'PGHOST': 'postgres.example',
         'PGDATABASE': 'quizzicalbeats',
         'PGUSER': 'qb_user',
-        'PGPASSWORD': 'super-secret-password',
+        'PGPASSWORD': 'redaction-fixture-value',
     }
 
     assert database_uri_overrides_postgres_env(env) is True
@@ -245,10 +245,10 @@ def test_config_bool_parses_common_managed_database_values(monkeypatch):
 
 def test_managed_database_requirement_error_is_credential_safe():
     """Managed DB guard errors must not include raw database credentials."""
-    uri = 'postgresql://qb_user:super-secret@postgres.example/qb'
+    uri = 'postgresql://qb_user:redaction-fixture@postgres.example/qb'
 
     assert managed_database_requirement_error(uri, True) is None
-    assert 'super-secret' not in managed_database_requirement_error(None, True)
+    assert 'redaction-fixture' not in managed_database_requirement_error(None, True)
     sqlite_error = managed_database_requirement_error('sqlite:////data/song_data.db', 'on')
     assert 'points at SQLite' in sqlite_error
     assert 'complete PG* database credentials' in sqlite_error
@@ -257,13 +257,13 @@ def test_managed_database_requirement_error_is_credential_safe():
 
 def test_database_uri_redaction_hides_credentials():
     """Credential-safe summaries must never expose database passwords."""
-    uri = 'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+    uri = 'postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats'
 
     redacted = redact_database_uri(uri)
     summary = database_summary(uri)
 
-    assert 'super-secret' not in redacted
-    assert 'super-secret' not in summary['redacted_uri']
+    assert 'redaction-fixture' not in redacted
+    assert 'redaction-fixture' not in summary['redacted_uri']
     assert summary['backend'] == 'postgresql'
     assert summary['host'] == 'postgres.example'
     assert summary['database'] == 'quizzicalbeats'
@@ -271,24 +271,24 @@ def test_database_uri_redaction_hides_credentials():
 
 def test_database_uri_redaction_preserves_valid_escaped_username():
     """Redacted URIs should stay parseable when usernames need escaping."""
-    uri = 'postgresql+psycopg2://qb%20user:super-secret@[2001:db8::1]:5432/quiz%20db'
+    uri = 'postgresql+psycopg2://qb%20user:redaction-fixture@[2001:db8::1]:5432/quiz%20db'
 
     redacted = redact_database_uri(uri)
 
     assert redacted == 'postgresql+psycopg2://qb%20user:***@[2001:db8::1]:5432/quiz%20db'
     assert 'qb user' not in redacted
-    assert 'super-secret' not in redacted
+    assert 'redaction-fixture' not in redacted
 
 
 def test_database_uri_redaction_requotes_literal_percent_username():
     """Literal percent characters should stay percent-encoded after redaction."""
-    uri = 'postgresql+psycopg2://user%25name:super-secret@postgres.example:5432/qb'
+    uri = 'postgresql+psycopg2://user%25name:redaction-fixture@postgres.example:5432/qb'
 
     redacted = redact_database_uri(uri)
 
     assert redacted == 'postgresql+psycopg2://user%25name:***@postgres.example:5432/qb'
     assert 'user%name' not in redacted
-    assert 'super-secret' not in redacted
+    assert 'redaction-fixture' not in redacted
 
 
 def test_database_uri_from_postgres_env_quotes_secret_components():

@@ -313,7 +313,7 @@ def test_manifest_audit_blocks_sensitive_database_configmap_without_leaking_valu
         READY_MANIFEST.replace(
             '  DATABASE_REQUIRE_MANAGED: "true"\n',
             '  DATABASE_REQUIRE_MANAGED: "true"\n'
-            '  SQLALCHEMY_DATABASE_URI: "postgresql://qb:super-secret@db/qb"\n',
+            '  SQLALCHEMY_DATABASE_URI: "postgresql://qb:redaction-fixture@db/qb"\n',
         ),
         encoding="utf-8",
     )
@@ -327,7 +327,7 @@ def test_manifest_audit_blocks_sensitive_database_configmap_without_leaking_valu
         and issue["details"]["keys"] == ["SQLALCHEMY_DATABASE_URI"]
         for issue in result["blocked_issues"]
     )
-    assert "super-secret" not in repr(result)
+    assert "redaction-fixture" not in repr(result)
     assert "postgresql://qb" not in repr(result)
 
 
@@ -344,7 +344,7 @@ metadata:
 data:
   PGPASSWORD: c3VwZXItc2VjcmV0
 stringData:
-  SQLALCHEMY_DATABASE_URI: postgresql://qb:plain-secret@db/qb
+  SQLALCHEMY_DATABASE_URI: postgresql://qb:raw-uri-fixture@db/qb
 """,
         encoding="utf-8",
     )
@@ -358,7 +358,7 @@ stringData:
         and issue["details"]["keys"] == ["PGPASSWORD", "SQLALCHEMY_DATABASE_URI"]
         for issue in result["blocked_issues"]
     )
-    assert "plain-secret" not in repr(result)
+    assert "raw-uri-fixture" not in repr(result)
     assert "c3VwZXItc2VjcmV0" not in repr(result)
 
 
@@ -540,7 +540,7 @@ def test_manifest_audit_blocks_literal_sensitive_database_env_without_leaking_va
             "            - configMapRef:\n",
             "          env:\n"
             "            - name: PGPASSWORD\n"
-            "              value: super-secret-password\n"
+            "              value: redaction-fixture-value\n"
             "          envFrom:\n"
             "            - configMapRef:\n",
             1,
@@ -557,7 +557,7 @@ def test_manifest_audit_blocks_literal_sensitive_database_env_without_leaking_va
         and issue["details"]["keys"] == ["PGPASSWORD"]
         for issue in result["blocked_issues"]
     )
-    assert "super-secret-password" not in repr(result)
+    assert "redaction-fixture-value" not in repr(result)
 
 
 def test_manifest_audit_blocks_direct_database_env_override(tmp_path):

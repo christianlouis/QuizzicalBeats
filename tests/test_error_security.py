@@ -68,7 +68,7 @@ def test_error_page_redacts_sensitive_form_fields_for_admins(app, client):
         data={
             'password': 'plain-password-value',
             'api_token': 'plain-token-value',
-            'client_secret': 'plain-secret-value',
+            'client_secret': 'raw-uri-fixture-value',
             'comment': 'visible-form-comment',
         },
     )
@@ -80,7 +80,7 @@ def test_error_page_redacts_sensitive_form_fields_for_admins(app, client):
     assert 'visible-form-comment' in body
     assert 'plain-password-value' not in body
     assert 'plain-token-value' not in body
-    assert 'plain-secret-value' not in body
+    assert 'raw-uri-fixture-value' not in body
     assert '[redacted]' in body
 
 
