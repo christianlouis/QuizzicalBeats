@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a filesystem-backed round artifact storage abstraction for generated
   MP3/PDF paths, reads, writes, deletes, and health checks so future cloud
   backends can replace direct `/data` filesystem access incrementally.
+- Added the configured round artifact storage backend to service-health and
+  `/healthz` payloads so operators and agents can verify the active backend.
 - Aligned the roadmap, TODO list, and agentic backlog crosswalk with the
   current GitHub issue state so agents can distinguish the remaining
   milestone-scale work from the old bug-slice backlog.
