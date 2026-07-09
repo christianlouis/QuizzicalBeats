@@ -792,6 +792,68 @@ def test_quizmaster_profile_preferences_backfills_null_timezones(tmp_path):
     assert row[3] == "Europe/Berlin"
 
 
+def test_quizmaster_profile_preferences_creates_missing_user_preferences(tmp_path):
+    """Existing users without preferences get Berlin timezone defaults."""
+    database_path = tmp_path / "legacy-missing-preferences.db"
+    app = _legacy_app(database_path)
+    with app.app_context():
+        db.create_all()
+        db.session.remove()
+        db.drop_all()
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE "user" (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(80) UNIQUE NOT NULL,
+                    email VARCHAR(120) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE user_preferences (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER UNIQUE,
+                    default_tts_service VARCHAR(32),
+                    enable_intro BOOLEAN,
+                    theme VARCHAR(16),
+                    default_language VARCHAR(16),
+                    tone VARCHAR(200),
+                    tts_voice VARCHAR(120),
+                    email_recipient VARCHAR(120),
+                    preferred_genres TEXT,
+                    preferred_decades TEXT,
+                    banned_artists TEXT,
+                    banned_songs TEXT,
+                    repeat_cooldown_weeks INTEGER,
+                    timezone VARCHAR(64)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO \"user\" (id, username, email, password_hash) "
+                "VALUES (1, 'christianlouis', 'christianlouis@gmail.com', NULL)"
+            )
+
+        from migrations import add_quizmaster_profile_preferences
+
+        assert add_quizmaster_profile_preferences.run_migration() is True
+        assert add_quizmaster_profile_preferences.run_migration() is None
+
+    with sqlite3.connect(database_path) as conn:
+        row = conn.execute(
+            "SELECT user_id, default_language, tone, repeat_cooldown_weeks, timezone "
+            "FROM user_preferences WHERE user_id = 1"
+        ).fetchone()
+    assert row[0] == 1
+    assert row[1] == "de"
+    assert row[2] == "warm, concise, lightly humorous"
+    assert row[3] == 12
+    assert row[4] == "Europe/Berlin"
+
+
 def test_round_songs_comment_matches_storage_behavior():
     """Round.songs remains documented and parsed as comma-separated IDs."""
     round_ = Round(

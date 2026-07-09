@@ -28,6 +28,8 @@ def run_migration():
         existing_columns = {
             column["name"] for column in inspector.get_columns("user_preferences")
         }
+        existing_tables = set(inspector.get_table_names())
+        has_user_table = "user" in existing_tables
         missing_columns = [
             (name, definition)
             for name, definition in PROFILE_COLUMNS.items()
@@ -55,6 +57,22 @@ def run_migration():
                     "OR TRIM(timezone) = ''"
                 )
             ).rowcount > 0
+            if has_user_table:
+                changed = changed or conn.execute(
+                    text(
+                        'INSERT INTO user_preferences '
+                        "(user_id, default_language, tone, repeat_cooldown_weeks, timezone) "
+                        'SELECT u.id, '
+                        "'de', "
+                        "'warm, concise, lightly humorous', "
+                        "12, "
+                        "'Europe/Berlin' "
+                        'FROM "user" u '
+                        "WHERE NOT EXISTS ("
+                        "SELECT 1 FROM user_preferences p WHERE p.user_id = u.id"
+                        ")"
+                    )
+                ).rowcount > 0
             if "timezone" in existing_columns or any(
                 name == "timezone" for name, _definition in missing_columns
             ):
