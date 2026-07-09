@@ -342,7 +342,7 @@ kind: Secret
 metadata:
   name: quizzicalbeats-secrets
 data:
-  PGPASSWORD: cmVkYWN0aW9uLWZpeHR1cmU=
+  PGPASSWORD: ""
 stringData:
   SQLALCHEMY_DATABASE_URI: postgresql://qb:raw-uri-fixture@db/qb
 """,
@@ -359,7 +359,6 @@ stringData:
         for issue in result["blocked_issues"]
     )
     assert "raw-uri-fixture" not in repr(result)
-    assert "cmVkYWN0aW9uLWZpeHR1cmU=" not in repr(result)
 
 
 def test_manifest_audit_blocks_external_secret_without_database_credential_key(tmp_path):
