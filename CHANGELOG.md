@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added an optional, internal offline Spotify metadata archive search path with
+  a disk-backed read-only SQLite service, an authenticated Song Library search
+  UI, ISRC/Spotify-ID lookup, bounded freetext queries, and review-only
+  candidate results.
 - Added Deezer-first metadata enrichment with dry-run MCP automation, album
   metadata caching, and rate limiting so the catalog can be improved without
   automatically calling paid providers.

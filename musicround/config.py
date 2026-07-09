@@ -96,6 +96,10 @@ class Config:
     OMDB_ALBUMS_TABLE = os.getenv("OMDB_ALBUMS_TABLE", "albums")
     OMDB_ARTISTS_TABLE = os.getenv("OMDB_ARTISTS_TABLE", "artists")
     OMDB_ARTIST_TRACKS_TABLE = os.getenv("OMDB_ARTIST_TRACKS_TABLE", "artist_track")
+    # Optional internal, read-only metadata service backed by the July 2025
+    # Spotify archive. It is intentionally separate from the QB application DB.
+    SPOTIFY_ARCHIVE_CATALOG_URL = os.getenv("SPOTIFY_ARCHIVE_CATALOG_URL")
+    SPOTIFY_ARCHIVE_CATALOG_TIMEOUT = _int_from_env("SPOTIFY_ARCHIVE_CATALOG_TIMEOUT", 5)
     APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Berlin")
     
     # Automation settings

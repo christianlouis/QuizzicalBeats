@@ -147,6 +147,25 @@
             <h1 class="text-3xl font-bold text-navy-800 font-montserrat mb-3">Your Song Library</h1>
             <p class="text-gray-600 mb-6">Browse, search and manage all your imported songs to use in music quizzes.</p>
         </div>
+
+        <section class="mb-6 border border-teal-200 bg-teal-50 px-5 py-4" aria-labelledby="archiveSearchHeading">
+            <div class="flex flex-col gap-3 md:flex-row md:items-end">
+                <div class="flex-1">
+                    <h2 id="archiveSearchHeading" class="text-base font-semibold text-navy-800">Offline Spotify Archive</h2>
+                    <p class="mt-1 text-sm text-gray-600">Search metadata candidates by title, artist, ISRC, or Spotify ID. Results are review-only.</p>
+                </div>
+                <div class="flex w-full gap-2 md:w-auto">
+                    <label class="sr-only" for="archiveSearchInput">Search offline archive</label>
+                    <input id="archiveSearchInput" type="search" minlength="2" placeholder="Song, artist, ISRC..."
+                        class="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 md:w-72">
+                    <button id="archiveSearchButton" type="button" class="rounded-md bg-teal-600 px-4 py-2 text-white hover:bg-teal-700">
+                        <i class="fas fa-database mr-2"></i>Search
+                    </button>
+                </div>
+            </div>
+            <div id="archiveSearchStatus" class="mt-3 text-sm text-gray-600" aria-live="polite"></div>
+            <div id="archiveSearchResults" class="mt-3 hidden overflow-x-auto"></div>
+        </section>
         
         {% if total_songs|default(0) > 0 %}
             <div class="mb-6 bg-white shadow-md rounded-lg p-5">
@@ -1542,6 +1561,65 @@
             
             // Initial render
             renderTable();
+
+            function archiveEscape(value) {
+                return $('<div>').text(value ?? '').html();
+            }
+
+            function renderArchiveResults(data) {
+                const container = $('#archiveSearchResults');
+                const results = data.results || [];
+                if (!results.length) {
+                    container.html('<p class="text-sm text-gray-600">No archive candidates found.</p>').removeClass('hidden');
+                    return;
+                }
+                const rows = results.map(function(item) {
+                    return `<tr class="border-t border-teal-100">
+                        <td class="px-3 py-2 font-medium">${archiveEscape(item.title)}</td>
+                        <td class="px-3 py-2">${archiveEscape(item.artists)}</td>
+                        <td class="px-3 py-2">${archiveEscape(item.year || 'Unknown')}</td>
+                        <td class="px-3 py-2">${archiveEscape(item.isrc || 'Missing')}</td>
+                        <td class="px-3 py-2">${archiveEscape(item.popularity)}</td>
+                    </tr>`;
+                }).join('');
+                container.html(`<table class="w-full text-left text-sm"><thead class="bg-teal-100 text-navy-800"><tr>
+                    <th class="px-3 py-2">Title</th><th class="px-3 py-2">Artist(s)</th><th class="px-3 py-2">Year</th><th class="px-3 py-2">ISRC</th><th class="px-3 py-2">Popularity</th>
+                </tr></thead><tbody>${rows}</tbody></table>`).removeClass('hidden');
+            }
+
+            $('#archiveSearchButton').on('click', function() {
+                const query = $('#archiveSearchInput').val().trim();
+                const status = $('#archiveSearchStatus');
+                const button = $(this);
+                if (query.length < 2) {
+                    status.text('Enter at least two characters.');
+                    return;
+                }
+                button.prop('disabled', true);
+                status.text('Searching offline metadata archive...');
+                $('#archiveSearchResults').addClass('hidden').empty();
+                $.ajax({
+                    url: '/api/songs/archive-search',
+                    data: {q: query, limit: 20},
+                    success: function(data) {
+                        status.text(`Showing ${(data.results || []).length} review-only candidate(s) from ${data.snapshot || 'the archive'}.`);
+                        renderArchiveResults(data);
+                    },
+                    error: function(xhr) {
+                        status.text(xhr.responseJSON?.error || 'Offline archive search is unavailable.');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false);
+                    }
+                });
+            });
+
+            $('#archiveSearchInput').on('keydown', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    $('#archiveSearchButton').trigger('click');
+                }
+            });
         });
     </script>
 {% endblock %}

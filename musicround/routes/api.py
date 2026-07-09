@@ -18,6 +18,7 @@ from musicround.helpers.spotify_helper import get_spotify_token
 from musicround.helpers.dropbox_helper import DROPBOX_API_TIMEOUT_SECONDS
 from musicround.helpers.logging_utils import redact_authorization_header
 from musicround.services import automation
+from musicround.helpers.spotify_archive import SpotifyArchiveError, search_spotify_archive_catalog
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -944,6 +945,21 @@ def search_songs():
         song_payload = _song_payload(songs_by_id[song_id])
         song_payload.update(metadata_by_id.get(song_id, {}))
         payload.append(song_payload)
+    return jsonify(payload)
+
+
+@api_bp.route('/songs/archive-search')
+@login_required
+def search_songs_archive():
+    """Return review-only candidates from the internal offline Spotify archive."""
+    try:
+        payload = search_spotify_archive_catalog(
+            current_app,
+            request.args.get('q', ''),
+            limit=_int_arg('limit', default=20, minimum=1, maximum=50) or 20,
+        )
+    except SpotifyArchiveError as exc:
+        return jsonify({'error': str(exc)}), 400
     return jsonify(payload)
 
 @api_bp.route('/songs/update-audio-features', methods=['POST'])

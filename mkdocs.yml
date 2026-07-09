@@ -60,6 +60,7 @@ nav:
     - Architecture: developer-guide/architecture.md
     - API Reference: developer-guide/api-reference.md
     - MCP Interface: developer-guide/mcp.md
+    - Offline Spotify Archive: developer-guide/spotify-archive-catalog.md
     - Database Schema: developer-guide/database-schema.md
     - OAuth Integration: developer-guide/oauth-integration.md
     - Contributing: developer-guide/contributing.md
