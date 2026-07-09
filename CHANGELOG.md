@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Updated ROADMAP.md to reflect shipped seed-source candidate review, artifact
+  storage abstraction, and collaboration access-control slices while keeping
+  the remaining cloud, scheduler, and real-time work visible for follow-up.
 - Added a filesystem-backed round artifact storage abstraction for generated
   MP3/PDF paths, reads, writes, deletes, and health checks so future cloud
   backends can replace direct `/data` filesystem access incrementally.

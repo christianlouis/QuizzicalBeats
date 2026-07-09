@@ -11,7 +11,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Latest Release**: v1.10 - "Import Infrastructure"
 **Active Development**: v2.x - Reliability, Performance, and Agentic Round Production
-**Repository Health**: 🟡 Production-hardening in progress; managed database cutover is complete, artifact storage and managed-database backups remain the main HA blockers
+**Repository Health**: 🟡 Production-hardening in progress; managed database cutover is complete, generated-artifact storage is abstracted but still filesystem-backed, and cloud backups remain the main HA blockers
 
 ---
 
@@ -376,7 +376,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v3.2 - "Scraper Symphony" *(Q3 2026 - LOW PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: Low  
 **Effort**: 3 weeks
 
@@ -385,17 +385,18 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 **Features**:
 - [ ] Billboard chart scraper
 - [ ] Official Charts scraper
-- [ ] 2-3 additional sources
-- [ ] Data normalization
-- [ ] Spotify record linking
-- [ ] Admin review interface
+- [x] 2-3 additional sources registered for agent review
+- [x] Seed-source registry for chart, festival, playlist, editorial, and curated sources
+- [x] Read-only candidate extraction for text, JSON, and Spotify Top 10,000 HTML sources
+- [x] Spotify and ISRC hints extracted from reviewed source candidates
+- [x] Admin model views for source and run review
 - [ ] Scheduled scraper runs
-- [ ] Error logging
+- [x] Credential-safe source run logging and failure recording
 
 **Success Metrics**:
 - Weekly chart updates
-- 95%+ successful Spotify matching
-- Comprehensive historical data
+- 95%+ successful Spotify matching after provider import verification
+- Comprehensive historical data through reviewed source runs
 
 ---
 
@@ -425,22 +426,24 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 ---
 
 #### v4.0 - "Storage Sanctuary" *(Q4 2026 - HIGH PRIORITY)*
-**Status**: 🔴 Not Started  
+**Status**: 🟡 In Progress
 **Priority**: High  
 **Effort**: 3-4 weeks
 
 **Goals**: Cloud storage integration
 
 **Features**:
-- [ ] Storage backend abstraction
+- [x] Storage backend abstraction for generated round artifacts
 - [ ] AWS S3 support
 - [ ] S3-compatible storage (MinIO, Wasabi)
-- [ ] Dropbox storage backend
+- [ ] Dropbox storage backend for generated artifact storage
 - [ ] Unified management UI
+- [x] Admin health visibility for artifact backend, inventory, and HA warnings
 - [ ] Cloud backup storage
-- [ ] MP3 cloud storage
+- [x] MP3/PDF artifact read/write paths behind the storage abstraction
 - [ ] Differential uploads
 - [ ] Background synchronization
+- [x] CLI readiness gate for generated-artifact storage
 
 **Success Metrics**:
 - Support 100GB+ storage
@@ -449,7 +452,7 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Dependencies**:
 - boto3 (AWS SDK)
-- Storage abstraction layer
+- Storage abstraction layer foundation is in place; object-store backends remain open
 
 ---
 
@@ -462,14 +465,15 @@ Quizzical Beats aims to be the premier platform for creating, managing, and deli
 
 **Features**:
 - [ ] Shared round editing
-- [x] Persisted round ownership and viewer/editor share grants
+- [x] Persisted round ownership and viewer/editor/producer share grants
 - [x] Browser owner/visibility filtering and edit-route access checks
-- [ ] Collaboration roles beyond viewer/editor (comment/admin)
+- [x] Producer role for shared asset generation and delivery without owner-only admin powers
+- [ ] Collaboration roles beyond viewer/editor/producer (comment/admin)
 - [ ] User invitations via email/username UI
 - [ ] Presence indicators
 - [ ] Revision history
-- [ ] Public sharing links
-- [ ] Access audit logs
+- [x] Public sharing links with system-setting guard
+- [x] Access audit logs for shares and public-link lifecycle
 - [ ] Comment threads
 
 **Success Metrics**:
@@ -633,6 +637,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 | Date | Change |
 |------|--------|
+| 2026-07 | Updated roadmap status for shipped seed-source review, artifact-storage abstraction, and collaboration access-control slices |
 | 2026-07 | Marked managed database cutover complete and narrowed remaining HA blockers to artifact storage and managed-database backups |
 | 2026-07 | Realigned roadmap status with v1.10 Import Infrastructure and PR #142 reliability work |
 | 2026-02 | Added v1.9 Security Hardening release |
