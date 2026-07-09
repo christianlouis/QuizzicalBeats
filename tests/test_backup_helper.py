@@ -193,7 +193,7 @@ class TestCreateBackup:
         from musicround.helpers.backup_helper import BACKUP_SQLITE_ONLY_MESSAGE, create_backup
 
         app.config['SQLALCHEMY_DATABASE_URI'] = (
-            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+            'postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats'
         )
         app.config['DATABASE_BACKEND'] = 'postgresql'
 
@@ -203,7 +203,7 @@ class TestCreateBackup:
         assert result['status'] == 'error'
         assert result['message'] == BACKUP_SQLITE_ONLY_MESSAGE
         assert result['path'] is None
-        assert 'super-secret' not in result['message']
+        assert 'redaction-fixture' not in result['message']
         assert 'postgresql://' not in result['message']
 
     def test_create_backup_missing_sqlite_file_hides_path(self, app, tmp_path):
@@ -320,7 +320,7 @@ class TestRestoreBackup:
         from musicround.helpers.backup_helper import BACKUP_SQLITE_ONLY_MESSAGE, restore_backup
 
         app.config['SQLALCHEMY_DATABASE_URI'] = (
-            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+            'postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats'
         )
         app.config['DATABASE_BACKEND'] = 'postgresql'
 
@@ -330,7 +330,7 @@ class TestRestoreBackup:
 
         assert result['status'] == 'error'
         assert result['message'] == BACKUP_SQLITE_ONLY_MESSAGE
-        assert 'super-secret' not in result['message']
+        assert 'redaction-fixture' not in result['message']
         assert 'postgresql://' not in result['message']
         zip_file.assert_not_called()
 
@@ -570,7 +570,7 @@ class TestGetBackupSummary:
         from musicround.helpers.backup_helper import get_backup_summary
 
         app.config['SQLALCHEMY_DATABASE_URI'] = (
-            'postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats'
+            'postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats'
         )
         app.config['DATABASE_BACKEND'] = 'postgresql'
 
@@ -582,7 +582,7 @@ class TestGetBackupSummary:
         assert summary['database_host'] == 'postgres.example'
         assert summary['database_name'] == 'quizzicalbeats'
         assert 'managed database backup tooling' in summary['backup_warning']
-        assert 'super-secret' not in summary['backup_warning']
+        assert 'redaction-fixture' not in summary['backup_warning']
         assert 'postgresql://' not in summary['backup_warning']
 
 
@@ -609,7 +609,7 @@ class TestBackupReadinessReport:
         from musicround.helpers.backup_helper import backup_readiness_report
 
         app.config["SQLALCHEMY_DATABASE_URI"] = (
-            "postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats"
+            "postgresql://qb_user:redaction-fixture@postgres.example:5432/quizzicalbeats"
         )
         app.config["DATABASE_BACKEND"] = "postgresql"
 
@@ -623,7 +623,7 @@ class TestBackupReadinessReport:
         assert result["recommended_scheduler_command"] is None
         assert result["database_host"] == "postgres.example"
         assert result["database_name"] == "quizzicalbeats"
-        assert "super-secret" not in serialized
+        assert "redaction-fixture" not in serialized
         assert "postgresql://" not in serialized
 
     def test_backup_readiness_blocks_sqlite_when_managed_required(self, app, tmp_path):

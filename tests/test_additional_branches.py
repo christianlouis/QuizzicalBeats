@@ -234,7 +234,7 @@ class TestSystemHealthRoute:
         monkeypatch.setenv('PGHOST', 'postgres.example')
         monkeypatch.setenv('PGDATABASE', 'quizzicalbeats')
         monkeypatch.setenv('PGUSER', 'qb_user')
-        monkeypatch.setenv('PGPASSWORD', 'super-secret-password')
+        monkeypatch.setenv('PGPASSWORD', 'redaction-fixture-value')
 
         with app.app_context():
             app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/song_data.db'
@@ -247,7 +247,7 @@ class TestSystemHealthRoute:
         assert health['status'] == 'warning'
         assert 'legacy_sqlite_data_store' in codes
         assert 'database_uri_overrides_postgres_env' in codes
-        assert 'super-secret-password' not in json.dumps(health)
+        assert 'redaction-fixture-value' not in json.dumps(health)
 
     def test_system_health_requires_admin(self, app, client):
         """Test that system-health requires admin access."""

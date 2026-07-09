@@ -790,11 +790,11 @@ class TestRoundAutomation:
         monkeypatch.setenv("PGHOST", "postgres.internal")
         monkeypatch.setenv("PGDATABASE", "quizzicalbeats")
         monkeypatch.setenv("PGUSER", "qb_user")
-        monkeypatch.setenv("PGPASSWORD", "super-secret-password")
+        monkeypatch.setenv("PGPASSWORD", "redaction-fixture-value")
         monkeypatch.setenv("PGSSLMODE", "require")
         with app.app_context():
             app.config["SQLALCHEMY_DATABASE_URI"] = (
-                "postgresql://qb_user:super-secret-password@postgres.internal/quizzicalbeats"
+                "postgresql://qb_user:redaction-fixture-value@postgres.internal/quizzicalbeats"
             )
             app.config["DATABASE_BACKEND"] = "postgresql"
             app.config["DATABASE_REQUIRE_MANAGED"] = True
@@ -814,7 +814,7 @@ class TestRoundAutomation:
             "PGPASSWORD",
         ]
         serialized = repr(result)
-        assert "super-secret-password" not in serialized
+        assert "redaction-fixture-value" not in serialized
         assert "postgresql://qb_user:***@postgres.internal/quizzicalbeats" in serialized
 
     def test_database_cutover_plan_summary_blocks_legacy_sqlite(self, app):
