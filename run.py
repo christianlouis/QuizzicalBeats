@@ -22,6 +22,26 @@ def _create_database_cli_app():
     return app
 
 
+def _create_backup_readiness_cli_app():
+    """Create a minimal app for backup diagnostics without DB side effects."""
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    if "DATABASE_REQUIRE_MANAGED" in os.environ:
+        app.config["DATABASE_REQUIRE_MANAGED"] = os.environ["DATABASE_REQUIRE_MANAGED"]
+    try:
+        db_uri = _configured_database_uri_without_fallback(app)
+    except ValueError as exc:
+        db_uri = None
+        app.config["BACKUP_READINESS_CONFIG_ERROR"] = str(exc)
+    if db_uri:
+        from musicround.helpers.database_config import database_backend, database_summary
+
+        app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
+        app.config["DATABASE_BACKEND"] = database_backend(db_uri)
+        app.config["DATABASE_URI_REDACTED"] = database_summary(db_uri)["redacted_uri"]
+    return app
+
+
 def _configured_database_uri_without_fallback(app):
     """Resolve explicit database config without creating the local fallback."""
     from musicround.helpers.database_config import database_uri_from_postgres_env
@@ -46,6 +66,17 @@ def main():
     # Create backup action
     create_parser = backup_subparsers.add_parser('create', help='Create a new backup')
     create_parser.add_argument('--auto', action='store_true', help='Create backup with automatic name')
+
+    readiness_parser = backup_subparsers.add_parser(
+        'readiness',
+        help='Check whether built-in app backups are valid for the configured database',
+    )
+    readiness_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable credential-safe backup readiness diagnostics',
+    )
     
     # Retention policy action
     retention_parser = backup_subparsers.add_parser('retention', help='Apply backup retention policy')
@@ -88,6 +119,22 @@ def main():
         dest='json_output',
         help='Print machine-readable credential-safe cutover steps',
     )
+    manifest_audit_parser = database_subparsers.add_parser(
+        'manifest-audit',
+        help='Audit Kubernetes manifests for managed database cutover readiness',
+    )
+    manifest_audit_parser.add_argument(
+        '--path',
+        action='append',
+        required=True,
+        help='Kubernetes manifest file or directory to scan. May be repeated.',
+    )
+    manifest_audit_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable credential-safe audit results',
+    )
     migrate_parser = database_subparsers.add_parser(
         'migrate-sqlite',
         help='Dry-run or execute a SQLite-to-configured-database row copy',
@@ -116,6 +163,35 @@ def main():
     health_parser = subparsers.add_parser('health', help='Health diagnostics')
     health_subparsers = health_parser.add_subparsers(dest='health_action', help='Health action to perform')
     health_subparsers.add_parser('check', help='Print public-safe health status as JSON')
+
+    scheduled_emails_parser = subparsers.add_parser(
+        'scheduled-emails',
+        help='Scheduled round email jobs',
+    )
+    scheduled_emails_subparsers = scheduled_emails_parser.add_subparsers(
+        dest='scheduled_emails_action',
+        help='Scheduled email action to perform',
+    )
+    process_due_parser = scheduled_emails_subparsers.add_parser(
+        'process-due',
+        help='Send due scheduled round emails from the app container',
+    )
+    process_due_parser.add_argument(
+        '--limit',
+        type=int,
+        default=10,
+        help='Maximum number of due exports to process, between 1 and 100.',
+    )
+    process_due_parser.add_argument(
+        '--now',
+        help='Optional ISO timestamp for deterministic smoke tests.',
+    )
+    process_due_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print machine-readable processing results.',
+    )
 
     deployment_parser = subparsers.add_parser('deployment', help='Deployment smoke checks')
     deployment_subparsers = deployment_parser.add_subparsers(
@@ -273,7 +349,10 @@ def main():
     
     # Run the command
     if args.command == 'backup':
-        app = create_app()
+        if args.backup_action == 'readiness':
+            app = _create_backup_readiness_cli_app()
+        else:
+            app = create_app()
         with app.app_context():
             if args.backup_action == 'create':
                 from musicround.helpers.backup_helper import create_backup
@@ -293,7 +372,47 @@ def main():
                 else:
                     print(f"Retention policy failed: {result['message']}")
                     return 1
+            elif args.backup_action == 'readiness':
+                from musicround.helpers.backup_helper import backup_readiness_report
+
+                result = backup_readiness_report()
+                if args.json_output:
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                else:
+                    print(f"Backup readiness: {result['status']}")
+                    print(f"Database backend: {result['database_backend']}")
+                    print(
+                        "Application backup supported: "
+                        f"{result['application_backup_supported']}"
+                    )
+                    for issue in result["issues"]:
+                        print(f"- {issue['severity']}: {issue['code']}")
+                        print(f"  {issue['message']}")
+                    print(f"Next action: {result['next_action']}")
+                return 0 if result["ok"] else 1
     elif args.command == 'database':
+        if args.database_action == 'manifest-audit':
+            from musicround.helpers.kubernetes_database_audit import (
+                audit_kubernetes_database_manifests,
+            )
+
+            try:
+                result = audit_kubernetes_database_manifests(args.path)
+            except RuntimeError as exc:
+                print(f"Database manifest audit error: {exc}", file=sys.stderr)
+                return 78
+            if args.json_output:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"Database manifest audit {result['status']}:")
+                for issue in result["issues"]:
+                    print(
+                        f"- {issue['severity']}: {issue['code']} "
+                        f"{issue['resource'] if issue.get('resource') else ''}"
+                    )
+                    print(f"  {issue['message']}")
+            return 0 if result["ok"] else 1
+
         if args.database_action == 'migrate-sqlite':
             if args.replace_target and not args.execute:
                 print(
@@ -500,6 +619,32 @@ def main():
             payload = application_health_payload()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
+    elif args.command == 'scheduled-emails':
+        if args.scheduled_emails_action == 'process-due':
+            with contextlib.redirect_stdout(sys.stderr):
+                app = create_app()
+            with app.app_context():
+                from musicround.services.automation import (
+                    AutomationError,
+                    process_due_scheduled_round_emails,
+                )
+
+                try:
+                    result = process_due_scheduled_round_emails(
+                        now=args.now,
+                        limit=args.limit,
+                    )
+                except AutomationError as exc:
+                    print(f"Scheduled email processing error: {exc}", file=sys.stderr)
+                    return 78
+                if args.json_output:
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                else:
+                    print(
+                        "Scheduled email processing complete: "
+                        f"{result['processed_count']} export(s) processed."
+                    )
+                return 0
     elif args.command == 'deployment':
         if args.deployment_action == 'smoke':
             from musicround.helpers.deployment_smoke import run_deployment_smoke

@@ -12,7 +12,11 @@ from datetime import datetime
 import tempfile
 from flask import current_app
 
-from musicround.helpers.database_config import database_summary, is_sqlite_database_uri
+from musicround.helpers.database_config import (
+    database_summary,
+    is_sqlite_database_uri,
+    managed_database_requirement_error,
+)
 from musicround.helpers.paths import app_data_path, backup_dir
 
 # Set up logging
@@ -689,6 +693,77 @@ def get_backup_summary():
         "database_backend": application_backup["database_backend"],
         "database_host": application_backup["host"],
         "database_name": application_backup["database"],
+    }
+
+def backup_readiness_report():
+    """
+    Report whether the built-in application backup path is safe for the
+    currently configured database backend.
+
+    The application ZIP backup is intentionally SQLite-only. Managed SQL
+    deployments must use provider/native database backup tooling for the
+    database and treat this app-level path as media/config-only infrastructure.
+    """
+    application_backup = _application_backup_support()
+    db_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    issues = []
+    config_error = current_app.config.get("BACKUP_READINESS_CONFIG_ERROR")
+
+    if config_error:
+        issues.append({
+            "code": "postgres_env_incomplete",
+            "severity": "error",
+            "message": config_error,
+            "hint": "Complete the missing PG* secret keys before relying on managed DB backups.",
+        })
+
+    managed_error = managed_database_requirement_error(
+        db_uri,
+        current_app.config.get("DATABASE_REQUIRE_MANAGED"),
+    )
+    if managed_error:
+        issues.append({
+            "code": "managed_database_requirement_failed",
+            "severity": "error",
+            "message": managed_error,
+            "hint": (
+                "Configure managed SQL before enabling DATABASE_REQUIRE_MANAGED "
+                "or before relying on HA backup readiness."
+            ),
+        })
+
+    if not application_backup["supported"] and not config_error:
+        issue_code = "application_backup_unsupported"
+        if application_backup["database_backend"] not in ("sqlite", "unconfigured"):
+            issue_code = "managed_database_requires_external_backup"
+        issues.append({
+            "code": issue_code,
+            "severity": "error",
+            "message": application_backup["warning"],
+            "hint": (
+                "Replace scheduled app ZIP backups with managed database "
+                "snapshots/dumps before treating this deployment as HA-ready."
+            ),
+        })
+
+    status = "ok" if not issues else "error"
+    return {
+        "ok": not issues,
+        "status": status,
+        "application_backup_supported": application_backup["supported"],
+        "database_backend": application_backup["database_backend"],
+        "database_host": application_backup["host"],
+        "database_name": application_backup["database"],
+        "backup_location": backup_dir(),
+        "issues": issues,
+        "next_action": (
+            "built-in backup command is safe for this SQLite deployment"
+            if not issues else issues[0]["hint"]
+        ),
+        "recommended_scheduler_command": (
+            "python /app/run.py backup create --auto"
+            if application_backup["supported"] and not issues else None
+        ),
     }
 
 def generate_backup_config_suggestion(retention_days=30):

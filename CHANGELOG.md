@@ -77,6 +77,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added browser round ownership filtering, owner/visibility indicators, and route-level edit checks for shared rounds.
 - Added a local performance smoke CLI for catalog search, playlist parsing, round-review payloads, and MCP-like analytics summaries.
 - Added a deployment smoke CLI for public health, security headers, server header, static cache, and gzip checks.
+- Added a credential-safe Kubernetes manifest audit for managed database cutover readiness.
+- Added a direct scheduled-email processing CLI for app-image CronJobs.
+- Added a backup readiness CLI that blocks built-in app ZIP backups for managed
+  SQL deployments and points operators to external database backup tooling.
+- Added Kubernetes manifest warnings for replicated QB workloads that lack
+  topology spread constraints or matching PodDisruptionBudgets.
+- Added Kubernetes manifest warnings for Web/MCP workloads that lack readiness
+  or liveness probes.
+- Added Kubernetes manifest warnings for Web/MCP containers without complete
+  CPU/memory requests and limits.
+- Added Kubernetes manifest warnings for CronJobs that allow overlapping runs.
+- Added Kubernetes manifest blockers for sensitive database credentials or full
+  database URIs configured as literal environment values.
+- Added Kubernetes manifest blockers for sensitive database credentials or full
+  database URIs stored in ConfigMaps.
+- Added Kubernetes manifest blockers for raw Kubernetes Secret documents that
+  contain sensitive database keys.
+- Added Kubernetes manifest checks for ExternalSecret database credential key
+  mappings, with a warning when `dataFrom` prevents static key verification.
+- Added Kubernetes manifest blockers for ExternalSecrets that target QB secrets
+  without a SecretStore or ClusterSecretStore reference.
+- Added Kubernetes manifest blockers for ExternalSecrets with unsupported
+  `secretStoreRef.kind` values.
+- Added Kubernetes manifest blockers for managed DB cutovers that do not expose
+  either a complete database URI secret key or complete split PostgreSQL key names.
+- Added Kubernetes manifest blockers for duplicate ExternalSecrets writing the
+  shared QB secret target.
+- Added Kubernetes manifest blockers for direct database environment overrides
+  on QB workloads.
+- Added Kubernetes manifest blockers for ReadWriteOnce PVCs mounted by multiple
+  QB workloads.
+- Added Kubernetes manifest blockers for scheduled automation that still shells
+  into a web pod instead of running the application image directly.
 - Added headered CSV playlist parsing for text-import automation, including `artist,title` and `title;artist` layouts.
 - Added planned quiz round records plus MCP tools to create, list, update, and link upcoming quiz dates before a round exists.
 - Added planned quiz dates to the browser round calendar with quizmaster visibility and linked-round actions.

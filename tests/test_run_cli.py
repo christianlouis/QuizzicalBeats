@@ -15,7 +15,8 @@ def test_health_check_command_outputs_public_safe_json(app, monkeypatch, capsys)
     monkeypatch.setattr(run, "create_app", lambda: app)
 
     exit_code = run.main()
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
+    output = captured.out
     payload = json.loads(output)
 
     assert exit_code == 0
@@ -33,7 +34,8 @@ def test_notifications_oauth_tokens_command_defaults_to_dry_run(app, monkeypatch
     monkeypatch.setattr(run, "create_app", lambda: app)
 
     exit_code = run.main()
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
+    output = captured.out
     payload = json.loads(output)
 
     assert exit_code == 0
@@ -58,7 +60,8 @@ def test_notifications_verify_email_command_defaults_to_dry_run(app, monkeypatch
     monkeypatch.setattr(run, "create_app", lambda: app)
 
     exit_code = run.main()
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
+    output = captured.out
     payload = json.loads(output)
 
     assert exit_code == 0
@@ -87,6 +90,151 @@ def test_notifications_admin_summary_command_defaults_to_dry_run(app, monkeypatc
     assert payload["recipient"] == "admin@example.test"
     assert payload["summary"]["actionable_count"] == 0
     assert "secret" not in output.lower()
+
+
+def test_scheduled_emails_process_due_command_outputs_json(app, monkeypatch, capsys):
+    """Scheduled email CLI should run in the app container and emit safe JSON."""
+    import run
+    from musicround.services import automation
+
+    def fake_process_due_scheduled_round_emails(now=None, limit=10):
+        return {
+            "processed_count": 0,
+            "now": now or "2026-07-08T20:00:00Z",
+            "results": [],
+            "limit": limit,
+        }
+
+    monkeypatch.setattr(run, "create_app", lambda: app)
+    monkeypatch.setattr(
+        automation,
+        "process_due_scheduled_round_emails",
+        fake_process_due_scheduled_round_emails,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run.py",
+            "scheduled-emails",
+            "process-due",
+            "--now",
+            "2026-07-08T20:00:00Z",
+            "--limit",
+            "25",
+            "--json",
+        ],
+    )
+
+    exit_code = run.main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["processed_count"] == 0
+    assert payload["limit"] == 25
+    assert payload["now"] == "2026-07-08T20:00:00Z"
+    assert "secret" not in output.lower()
+
+
+def test_scheduled_emails_process_due_command_reports_validation_errors(
+    app,
+    monkeypatch,
+    capsys,
+):
+    """Scheduled email CLI should map automation validation errors to EX_CONFIG."""
+    import run
+
+    monkeypatch.setattr(run, "create_app", lambda: app)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run.py", "scheduled-emails", "process-due", "--limit", "0"],
+    )
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 78
+    assert "limit must be between 1 and 100" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_backup_readiness_command_outputs_json_for_sqlite(app, monkeypatch, capsys, tmp_path):
+    """Backup readiness CLI should allow the built-in backup path for SQLite."""
+    import run
+
+    db_path = tmp_path / "song_data.db"
+    db_path.write_bytes(b"sqlite placeholder")
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+    app.config["DATABASE_BACKEND"] = "sqlite"
+    monkeypatch.setattr(run, "create_app", lambda: app)
+    monkeypatch.setattr(sys, "argv", ["run.py", "backup", "readiness", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    output = captured.out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["application_backup_supported"] is True
+    assert payload["recommended_scheduler_command"] == "python /app/run.py backup create --auto"
+    assert str(db_path) not in output
+
+
+def test_backup_readiness_command_blocks_managed_database_without_secret_leak(
+    monkeypatch,
+    capsys,
+):
+    """Backup readiness CLI should reject app ZIP backups for managed SQL."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv(
+        "SQLALCHEMY_DATABASE_URI",
+        "postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats"
+    )
+    monkeypatch.setattr(sys, "argv", ["run.py", "backup", "readiness", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    output = captured.out
+    payload = json.loads(output)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["issues"][0]["code"] == "managed_database_requires_external_backup"
+    assert payload["recommended_scheduler_command"] is None
+    assert "super-secret" not in output
+    assert "postgresql://" not in output
+    assert "Traceback" not in captured.err
+
+
+def test_backup_readiness_command_reports_managed_guard_without_app_start_failure(
+    monkeypatch,
+    capsys,
+):
+    """Backup readiness should fail closed as JSON even when the app would reject SQLite."""
+    import run
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-testing-only")
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token-for-testing")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "sqlite:////data/song_data.db")
+    monkeypatch.setenv("DATABASE_REQUIRE_MANAGED", "true")
+    monkeypatch.setattr(sys, "argv", ["run.py", "backup", "readiness", "--json"])
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["issues"][0]["code"] == "managed_database_requirement_failed"
+    assert payload["recommended_scheduler_command"] is None
+    assert "/data/song_data.db" not in captured.out
+    assert "Traceback" not in captured.err
 
 
 def test_performance_smoke_command_outputs_json(app, monkeypatch, capsys):
@@ -599,6 +747,94 @@ def test_database_cutover_plan_reports_incomplete_pg_env_safely(monkeypatch, cap
     assert "PGUSER" in payload["issues"][0]["message"]
     assert "configure_managed_database" in payload["blocked_steps"]
     assert "postgres.example" not in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_database_manifest_audit_json_reports_legacy_sqlite(monkeypatch, capsys, tmp_path):
+    """Manifest audit should flag SQLite cutover blockers without exposing raw paths."""
+    import run
+
+    manifest = tmp_path / "qb.yaml"
+    manifest.write_text(
+        """
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quizzicalbeats-config
+data:
+  SQLALCHEMY_DATABASE_URI: sqlite:////data/song_data.db
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: quizzicalbeats-secrets
+spec:
+  target:
+    name: quizzicalbeats-secrets
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quizzicalbeats
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          envFrom:
+            - configMapRef:
+                name: quizzicalbeats-config
+            - secretRef:
+                name: quizzicalbeats-secrets
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quizzicalbeats-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: mcp
+          envFrom:
+            - configMapRef:
+                name: quizzicalbeats-config
+            - secretRef:
+                name: quizzicalbeats-secrets
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: quizzicalbeats-backup
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: backup
+              envFrom:
+                - configMapRef:
+                    name: quizzicalbeats-config
+                - secretRef:
+                    name: quizzicalbeats-secrets
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run.py", "database", "manifest-audit", "--path", str(manifest), "--json"],
+    )
+
+    exit_code = run.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["status"] == "blocked"
+    assert payload["blocked_issues"][0]["code"] == "legacy_sqlite_configmap"
+    assert "/data/song_data.db" not in captured.out
     assert "Traceback" not in captured.err
 
 

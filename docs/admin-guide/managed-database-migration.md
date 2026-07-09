@@ -44,6 +44,45 @@ database to a managed SQL database without exposing credentials in logs or Git.
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database cutover-plan --json
    ```
 
+   Before changing GitOps manifests, run the credential-safe manifest audit
+   against the QuizzicalBeats manifest directory. It reports key names,
+   workload wiring, SQLite fallbacks, and `/data` coupling without reading or
+   printing secret values:
+
+   ```bash
+   python run.py database manifest-audit --path apps/quizzicalbeats --json
+   ```
+
+   The audit must not report `legacy_sqlite_configmap`,
+   `managed_guard_not_enabled`, `database_secret_configmap_value`, or
+   `database_secret_literal_env`, `database_secret_raw_manifest`, or
+   `external_secret_database_keys_missing`, or
+   `external_secret_store_ref_missing`, `external_secret_store_ref_kind_invalid`,
+   `external_secret_target_duplicate`, or
+   `managed_database_config_keys_missing`, or
+   `database_direct_env_override`, or
+   `rwo_persistent_volume_claim_multi_consumer`, or
+   `scheduled_job_execs_web_pod` before live
+   cutover. Warnings about `/data` mounts, `application_backup_scheduler_for_managed_db`,
+   `topology_spread_missing`, `pod_disruption_budget_missing`,
+   `readiness_probe_missing`, `liveness_probe_missing`, or
+   `resource_requirements_missing` can remain during the database cutover if
+   artifacts still use the existing volume, but they must be addressed before
+   multi-replica HA. `external_secret_database_keys_unverifiable` means the
+   ExternalSecret uses `dataFrom`; manually confirm the external item exposes
+   `PGPASSWORD` or `SQLALCHEMY_DATABASE_URI` before cutover.
+   `managed_database_config_keys_unverifiable` means `dataFrom` may provide
+   missing PG* keys that are not visible in Git; verify the external item or
+   switch to explicit key mappings before the maintenance window.
+   `cronjob_concurrency_not_forbid` should also be cleared for scheduled email,
+   backup, and repair jobs before they are trusted in production automation.
+   `rwo_persistent_volume_claim_multi_consumer` means more than one workload
+   mounts the same `ReadWriteOnce` claim; move shared artifacts to object/shared
+   storage or keep the claim attached to one workload before the HA cutover.
+   `scheduled_job_execs_web_pod` means a scheduled automation still shells into
+   the first web pod it finds; replace it with the application image running
+   `python /app/run.py scheduled-emails process-due --json`.
+
    Before the managed database cutover, run the stricter preflight. It fails
    with exit code `78` while legacy SQLite is still active or the PG*
    configuration is incomplete:
@@ -73,11 +112,27 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
 4. Add the managed database configuration. For PostgreSQL/CNPG, prefer
    `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` from Kubernetes
-   `secretKeyRef` entries so no full URI secret needs to be stored. Remove or
-   blank `SQLALCHEMY_DATABASE_URI` before using the component variables; a set
-   URI wins over PG* values by design. A complete `SQLALCHEMY_DATABASE_URI` in
-   the 1Password item `quizzicalbeats/quizzicalbeats-secrets` is still
-   supported.
+   `secretKeyRef` entries so no full URI secret needs to be stored.
+   `PGPASSWORD` and `SQLALCHEMY_DATABASE_URI` must not be ConfigMap values or
+   literal `env.value` entries in GitOps manifests. Do not commit raw
+   Kubernetes `Secret` documents that contain these keys; use the
+   1Password-backed `ExternalSecret` target or reference CNPG-generated
+   Secrets. The `ExternalSecret` must reference the approved `SecretStore` or
+   `ClusterSecretStore`; a target Secret name alone does not prove the
+   controller can sync it. Exactly one ExternalSecret should own the
+   `quizzicalbeats-secrets` target. If `secretStoreRef.kind` is set, it must be
+   either `SecretStore` or `ClusterSecretStore`. Prefer explicit ExternalSecret
+   `data.secretKey` mappings for `PGPASSWORD` or `SQLALCHEMY_DATABASE_URI`; if
+   `dataFrom` is used, verify the external item contents through 1Password or
+   the external secret owner before the cutover. Remove or blank
+   `SQLALCHEMY_DATABASE_URI` before using the
+   component variables; a set URI wins over PG* values by design. A complete
+   `SQLALCHEMY_DATABASE_URI` in the 1Password item
+   `quizzicalbeats/quizzicalbeats-secrets` is still supported.
+   Web, MCP, and scheduled jobs should import database settings through the
+   shared `quizzicalbeats-config` and `quizzicalbeats-secrets` `envFrom`
+   entries only; direct DB-specific `env` entries can override those shared
+   values and split workloads during cutover.
 
 ## Dry Run
 
@@ -121,27 +176,41 @@ database to a managed SQL database without exposing credentials in logs or Git.
 
 ## Production Cutover
 
+The current GitOps target for Quizzical Beats should use a dedicated
+CloudNativePG cluster named `quizzicalbeats-postgresql-ha`. Keep the application
+database name and owner as `quizzicalbeats`, set `PGHOST` to
+`quizzicalbeats-postgresql-ha-rw.quizzicalbeats.svc.cluster.local`, and map the
+existing 1Password field `DB_PASSWORD` to both:
+
+- `PGPASSWORD` in the shared `quizzicalbeats-secrets` Secret for the app.
+- `password` in the CNPG bootstrap Secret, with `username: quizzicalbeats`.
+
+Do not require a new raw password in Git or logs. The 1Password item currently
+uses `DB_PASSWORD`, so an ExternalSecret must publish the app-facing
+`PGPASSWORD` key explicitly. After moving scheduled email into the app image,
+remove the pod-exec ServiceAccount, Role, and RoleBinding. The MCP deployment
+does not need `/data`; run it without the PVC mount and use two replicas with a
+PodDisruptionBudget and hostname topology spread. Keep the web deployment on
+one replica until `/data` artifact storage is externalized.
+
 1. Ensure External Secrets has synced the updated 1Password item:
 
    ```bash
    kubectl -n quizzicalbeats get externalsecret quizzicalbeats-secrets
-   kubectl -n quizzicalbeats get secret quizzicalbeats-secrets \
-     -o jsonpath='{.data.SQLALCHEMY_DATABASE_URI}' >/dev/null
+   kubectl -n quizzicalbeats get externalsecret quizzicalbeats-cnpg-app
    ```
 
-   If using CNPG component variables instead, verify the app deployment has
-   `PGHOST`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` configured without
-   printing their values, then confirm the referenced Secret exposes those keys
-   without printing the secret data:
+   Verify the ConfigMap and Secret expose the component variable key names
+   without printing values:
 
    ```bash
-   kubectl -n quizzicalbeats get deploy quizzicalbeats \
-     -o jsonpath='{range .spec.template.spec.containers[?(@.name=="web")].env[*]}{.name}{"\n"}{end}' \
-     | grep -E '^(PGHOST|PGDATABASE|PGUSER|PGPASSWORD)$'
+   kubectl -n quizzicalbeats get configmap quizzicalbeats-config -o json \
+     | jq -r '.data | keys[]' \
+     | grep -E '^(PGHOST|PGDATABASE|PGUSER|DATABASE_REQUIRE_MANAGED)$'
 
    kubectl -n quizzicalbeats get secret quizzicalbeats-secrets -o json \
      | jq -r '.data | keys[]' \
-     | grep -E '^(PGHOST|PGDATABASE|PGUSER|PGPASSWORD)$'
+     | grep '^PGPASSWORD$'
    ```
 
 2. Deploy the app with `DATABASE_REQUIRE_MANAGED=true` and without a ConfigMap
@@ -190,7 +259,29 @@ database to a managed SQL database without exposing credentials in logs or Git.
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py database preflight
    kubectl -n quizzicalbeats exec deploy/quizzicalbeats-mcp -c mcp -- python /app/run.py database preflight
    kubectl -n quizzicalbeats create job --from=cronjob/quizzicalbeats-scheduled-email qb-db-cutover-smoke
+   kubectl -n quizzicalbeats logs job/qb-db-cutover-smoke
    ```
+
+   The scheduled-email CronJob should run the application image directly with:
+
+   ```bash
+   python /app/run.py scheduled-emails process-due --json
+   ```
+
+   Avoid scheduler definitions that shell out to `kubectl exec` into a web pod;
+   they work only while there is a single web pod and undermine the HA target.
+
+8. Verify the backup path after the managed database is active:
+
+   ```bash
+   kubectl -n quizzicalbeats exec deploy/quizzicalbeats -c web -- python /app/run.py backup readiness --json
+   ```
+
+   For PostgreSQL or another managed SQL backend this command must fail closed
+   until a native database backup or snapshot path is documented and scheduled.
+   The app-level ZIP backup is only valid for SQLite database files; it can
+   still cover local media/config artifacts, but it is not the managed database
+   backup.
 
 ## Rollback
 

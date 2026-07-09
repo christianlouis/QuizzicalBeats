@@ -90,12 +90,22 @@ Restore your system when needed:
 For scripting and automation, use the CLI commands:
 
 ```bash
+# Check whether the built-in backup path is valid for this database backend
+python run.py backup readiness --json
+
 # Create a backup
 python run.py backup create --auto
 
 # Apply retention policy
 python run.py backup retention --days 30
 ```
+
+The built-in ZIP backup and restore path is intentionally SQLite-only. When
+Quizzical Beats runs against PostgreSQL or another managed SQL backend,
+`backup readiness` fails and reports a credential-safe hint instead of printing
+connection strings. In that setup, use provider/native database snapshots or
+dumps for the database, and do not treat `backup create --auto` as the HA
+database backup.
 
 ## Backup Verification
 

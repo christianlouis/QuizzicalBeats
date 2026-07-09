@@ -586,6 +586,64 @@ class TestGetBackupSummary:
         assert 'postgresql://' not in summary['backup_warning']
 
 
+class TestBackupReadinessReport:
+    """Tests for the backup readiness gate."""
+
+    def test_backup_readiness_allows_sqlite_application_backup(self, app, tmp_path):
+        from musicround.helpers.backup_helper import backup_readiness_report
+
+        db_path = tmp_path / "song_data.db"
+        _write_sqlite_db(db_path)
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+        app.config["DATABASE_BACKEND"] = "sqlite"
+
+        result = backup_readiness_report()
+
+        assert result["ok"] is True
+        assert result["status"] == "ok"
+        assert result["application_backup_supported"] is True
+        assert result["issues"] == []
+        assert result["recommended_scheduler_command"] == "python /app/run.py backup create --auto"
+
+    def test_backup_readiness_blocks_managed_database_without_secret_leak(self, app):
+        from musicround.helpers.backup_helper import backup_readiness_report
+
+        app.config["SQLALCHEMY_DATABASE_URI"] = (
+            "postgresql://qb_user:super-secret@postgres.example:5432/quizzicalbeats"
+        )
+        app.config["DATABASE_BACKEND"] = "postgresql"
+
+        result = backup_readiness_report()
+        serialized = json.dumps(result)
+
+        assert result["ok"] is False
+        assert result["status"] == "error"
+        assert result["application_backup_supported"] is False
+        assert result["issues"][0]["code"] == "managed_database_requires_external_backup"
+        assert result["recommended_scheduler_command"] is None
+        assert result["database_host"] == "postgres.example"
+        assert result["database_name"] == "quizzicalbeats"
+        assert "super-secret" not in serialized
+        assert "postgresql://" not in serialized
+
+    def test_backup_readiness_blocks_sqlite_when_managed_required(self, app, tmp_path):
+        from musicround.helpers.backup_helper import backup_readiness_report
+
+        db_path = tmp_path / "song_data.db"
+        _write_sqlite_db(db_path)
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+        app.config["DATABASE_BACKEND"] = "sqlite"
+        app.config["DATABASE_REQUIRE_MANAGED"] = True
+
+        result = backup_readiness_report()
+        serialized = json.dumps(result)
+
+        assert result["ok"] is False
+        assert result["issues"][0]["code"] == "managed_database_requirement_failed"
+        assert result["recommended_scheduler_command"] is None
+        assert str(db_path) not in serialized
+
+
 class TestGenerateBackupConfigSuggestion:
     """Tests for generate_backup_config_suggestion function."""
 
