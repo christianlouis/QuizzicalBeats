@@ -95,7 +95,7 @@ def search_spotify_archive_catalog(app, query: str, limit: int = 20) -> dict[str
 
 
 def lookup_spotify_archive_isrcs(app, isrcs: list[str]) -> dict[str, Any]:
-    """Resolve up to 500 exact ISRCs through the internal archive service."""
+    """Resolve exact ISRCs through the internal archive service in bounded batches."""
     normalized = sorted({str(value).strip().upper() for value in isrcs if str(value).strip()})
     if not normalized:
         return {"results": [], "snapshot": None}

@@ -706,7 +706,7 @@ def _apply_archive_metadata(song: Song, metadata: dict[str, Any]) -> list[str]:
 
 
 def backfill_songs_from_spotify_archive(
-    batch_size: int = 500,
+    batch_size: int = 50,
     dry_run: bool = True,
     limit: int | None = None,
 ) -> dict[str, Any]:
