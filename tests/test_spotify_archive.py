@@ -75,6 +75,28 @@ def test_archive_catalog_reports_missing_database(tmp_path):
     assert client.get('/v1/search?q=Song').status_code == 503
 
 
+def test_archive_catalog_bulk_isrc_lookup_uses_metadata_only_fields(tmp_path):
+    database_path = tmp_path / "spotify_clean.sqlite3"
+    _archive_db(database_path)
+    client = create_app(str(database_path)).test_client()
+
+    response = client.post('/v1/isrc-bulk-lookup', json={'isrcs': ['DEABC1234567']})
+
+    assert response.status_code == 200
+    assert response.get_json()['results'] == [{
+        'album_name': 'Album',
+        'artists': None,
+        'cover_url': None,
+        'duration_ms': 180000,
+        'isrc': 'DEABC1234567',
+        'popularity': 78,
+        'source': 'spotify_archive_2025_07',
+        'spotify_id': 'spotify-id',
+        'title': 'Archive Song',
+        'year': 1999,
+    }]
+
+
 def test_qb_archive_client_returns_review_only_candidates(app):
     app.config['SPOTIFY_ARCHIVE_CATALOG_URL'] = 'http://archive.test'
 
@@ -127,7 +149,7 @@ def test_archive_backfill_fills_missing_fields_without_replacing_existing_previe
         )
         db.session.add(song)
         db.session.commit()
-        with patch('musicround.services.automation.lookup_spotify_archive_isrcs') as lookup:
+        with patch('musicround.services.automation.bulk_lookup_spotify_archive_isrcs') as lookup:
             lookup.return_value = {
                 'results': [{
                     'isrc': 'DEABC1234567', 'spotify_id': 'spotify-id', 'album_name': 'Archive Album',

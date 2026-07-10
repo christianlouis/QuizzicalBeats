@@ -42,7 +42,10 @@ from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.metadata import get_deezer_track_metadata, normalize_deezer_rank
 from musicround.helpers.omdb import OmdbError, omdb_catalog_status, search_omdb_catalog
-from musicround.helpers.spotify_archive import SpotifyArchiveError, lookup_spotify_archive_isrcs
+from musicround.helpers.spotify_archive import (
+    SpotifyArchiveError,
+    bulk_lookup_spotify_archive_isrcs,
+)
 from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
@@ -721,13 +724,13 @@ def backfill_songs_from_spotify_archive(
     songs = query.all()
     processed = matched = updated = 0
     examples: list[dict[str, Any]] = []
+    try:
+        response = bulk_lookup_spotify_archive_isrcs(current_app, [song.isrc for song in songs])
+    except SpotifyArchiveError as exc:
+        raise AutomationError(str(exc)) from exc
+    matches = {str(item.get("isrc") or "").upper(): item for item in response["results"]}
     for start in range(0, len(songs), batch_size):
         batch = songs[start:start + batch_size]
-        try:
-            response = lookup_spotify_archive_isrcs(current_app, [song.isrc for song in batch])
-        except SpotifyArchiveError as exc:
-            raise AutomationError(str(exc)) from exc
-        matches = {str(item.get("isrc") or "").upper(): item for item in response["results"]}
         for song in batch:
             processed += 1
             metadata = matches.get(str(song.isrc).upper())

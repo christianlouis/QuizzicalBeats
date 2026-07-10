@@ -102,6 +102,7 @@ class Config:
     # The archive is disk-backed and may need a few seconds for a batch that
     # resolves album artwork in addition to exact ISRC matches.
     SPOTIFY_ARCHIVE_CATALOG_TIMEOUT = _int_from_env("SPOTIFY_ARCHIVE_CATALOG_TIMEOUT", 30)
+    SPOTIFY_ARCHIVE_BULK_TIMEOUT = _int_from_env("SPOTIFY_ARCHIVE_BULK_TIMEOUT", 1800)
     APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Berlin")
     
     # Automation settings

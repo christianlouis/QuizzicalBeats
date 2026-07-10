@@ -28,12 +28,13 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def _connection(database_path: str) -> sqlite3.Connection:
+def _connection(database_path: str, *, allow_temp_writes: bool = False) -> sqlite3.Connection:
     """Open the archive as immutable, disk-backed SQLite with bounded memory use."""
     uri = f"file:{Path(database_path).resolve()}?mode=ro&immutable=1"
     connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only=ON")
+    if not allow_temp_writes:
+        connection.execute("PRAGMA query_only=ON")
     connection.execute("PRAGMA trusted_schema=OFF")
     connection.execute("PRAGMA mmap_size=0")
     connection.execute("PRAGMA cache_size=-8192")
@@ -90,6 +91,53 @@ def _isrc_results(connection: sqlite3.Connection, isrcs: list[str]) -> list[dict
     for row in rows:
         payload = _row_payload(row)
         chosen.setdefault(payload["isrc"], payload)
+    return list(chosen.values())
+
+
+def _bulk_isrc_results(connection: sqlite3.Connection, isrcs: list[str]) -> list[dict[str, Any]]:
+    """Scan tracks once against a file-backed temporary set of requested ISRCs.
+
+    The source ISRC index is excellent for one interactive lookup but causes
+    thousands of random reads on network storage during a catalog true-up.
+    ``CROSS JOIN`` preserves the sequential ``tracks`` scan order while the
+    temporary SQLite table remains file-backed via ``temp_store=FILE``.
+    """
+    connection.execute("CREATE TEMP TABLE requested_isrcs (isrc TEXT PRIMARY KEY)")
+    connection.executemany(
+        "INSERT OR IGNORE INTO requested_isrcs (isrc) VALUES (?)",
+        ((isrc,) for isrc in isrcs),
+    )
+    rows = connection.execute(
+        """
+        SELECT tracks.id AS spotify_id, tracks.external_id_isrc AS isrc,
+               tracks.name AS title, tracks.popularity AS popularity,
+               tracks.duration_ms AS duration_ms, albums.name AS album_name,
+               albums.release_date AS release_date
+        FROM tracks NOT INDEXED
+        CROSS JOIN requested_isrcs ON requested_isrcs.isrc = tracks.external_id_isrc
+        JOIN albums ON albums.rowid = tracks.album_rowid
+        """
+    ).fetchall()
+    chosen: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        release_date = row["release_date"]
+        payload = {
+            "spotify_id": row["spotify_id"],
+            "isrc": row["isrc"],
+            "title": row["title"],
+            "artists": None,
+            "album_name": row["album_name"],
+            "year": int(release_date[:4]) if release_date and release_date[:4].isdigit() else None,
+            "popularity": row["popularity"],
+            "duration_ms": row["duration_ms"],
+            "cover_url": None,
+            "source": SNAPSHOT,
+        }
+        existing = chosen.get(payload["isrc"])
+        if existing is None or (payload["popularity"], payload["spotify_id"]) > (
+            existing["popularity"], existing["spotify_id"]
+        ):
+            chosen[payload["isrc"]] = payload
     return list(chosen.values())
 
 
@@ -224,8 +272,29 @@ def create_app(database_path: str | None = None) -> Flask:
             return jsonify({"error": "Archive ISRC lookup failed."}), 500
         return jsonify({"results": results, "snapshot": SNAPSHOT})
 
+    @app.post("/v1/isrc-bulk-lookup")
+    def isrc_bulk_lookup():
+        """Resolve a bounded full-catalog ISRC true-up in one sequential scan."""
+        payload = request.get_json(silent=True) or {}
+        raw_isrcs = payload.get("isrcs")
+        if not isinstance(raw_isrcs, list):
+            return jsonify({"error": "isrcs must be a JSON array."}), 400
+        isrcs = sorted({str(value).strip().upper() for value in raw_isrcs if str(value).strip()})
+        if not isrcs or len(isrcs) > 10_000:
+            return jsonify({"error": "isrcs must contain between 1 and 10000 values."}), 400
+        database_path = app.config["SPOTIFY_ARCHIVE_DB_PATH"]
+        if not Path(database_path).is_file():
+            return jsonify({"error": "Archive database is not ready."}), 503
+        try:
+            with _connection(database_path, allow_temp_writes=True) as connection:
+                results = _bulk_isrc_results(connection, isrcs)
+        except sqlite3.Error:
+            app.logger.exception("Spotify archive bulk ISRC lookup failed")
+            return jsonify({"error": "Archive ISRC bulk lookup failed."}), 500
+        return jsonify({"results": results, "snapshot": SNAPSHOT})
+
     return app
 
 
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=8080)
+    create_app().run(host="0.0.0.0", port=8080, threaded=True)

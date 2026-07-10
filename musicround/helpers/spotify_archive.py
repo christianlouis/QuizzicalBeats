@@ -121,3 +121,32 @@ def lookup_spotify_archive_isrcs(app, isrcs: list[str]) -> dict[str, Any]:
     if not isinstance(payload.get("results"), list):
         raise SpotifyArchiveError("Offline Spotify archive catalog returned invalid data.")
     return payload
+
+
+def bulk_lookup_spotify_archive_isrcs(app, isrcs: list[str]) -> dict[str, Any]:
+    """Resolve up to 10000 ISRCs in one sequential, disk-backed archive scan."""
+    normalized = sorted({str(value).strip().upper() for value in isrcs if str(value).strip()})
+    if not normalized:
+        return {"results": [], "snapshot": None}
+    if len(normalized) > 10_000:
+        raise SpotifyArchiveError("Archive bulk ISRC lookup supports at most 10000 values.")
+    base_url = _base_url(app)
+    if not base_url:
+        raise SpotifyArchiveError("Offline Spotify archive catalog is not configured.")
+    try:
+        response = requests.post(
+            f"{base_url}/v1/isrc-bulk-lookup",
+            json={"isrcs": normalized},
+            timeout=app.config.get("SPOTIFY_ARCHIVE_BULK_TIMEOUT", 1800),
+        )
+    except requests.RequestException as exc:
+        raise SpotifyArchiveError("Offline Spotify archive catalog is unavailable.") from exc
+    if not response.ok:
+        raise SpotifyArchiveError("Offline Spotify archive ISRC bulk lookup failed.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SpotifyArchiveError("Offline Spotify archive catalog returned invalid data.") from exc
+    if not isinstance(payload.get("results"), list):
+        raise SpotifyArchiveError("Offline Spotify archive catalog returned invalid data.")
+    return payload
