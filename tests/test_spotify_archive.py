@@ -24,6 +24,7 @@ def _archive_db(path: Path) -> None:
             album_rowid INTEGER NOT NULL
         );
         CREATE TABLE artists (name TEXT NOT NULL);
+        CREATE TABLE album_images (album_rowid INTEGER NOT NULL, width INTEGER NOT NULL, url TEXT NOT NULL);
         CREATE TABLE track_artists (track_rowid INTEGER NOT NULL, artist_rowid INTEGER NOT NULL);
         CREATE UNIQUE INDEX tracks_id_unique ON tracks(id);
         CREATE INDEX tracks_popularity ON tracks(popularity);
@@ -54,6 +55,7 @@ def test_archive_catalog_search_is_read_only_and_returns_metadata(tmp_path):
     assert payload['results'] == [{
         'album_name': 'Album',
         'artists': 'Archive Artist',
+        'cover_url': None,
         'duration_ms': 180000,
         'isrc': 'DEABC1234567',
         'popularity': 78,
@@ -112,3 +114,36 @@ def test_qb_archive_api_returns_candidates(app, client):
 
     assert response.status_code == 200
     assert response.get_json()['review_only'] is True
+
+
+def test_archive_backfill_fills_missing_fields_without_replacing_existing_preview(app):
+    from musicround.models import Song, db
+    from musicround.services import automation
+
+    with app.app_context():
+        song = Song(
+            title='Existing title', artist='Existing artist', isrc='DEABC1234567',
+            preview_url='https://deezer.example.test/preview',
+        )
+        db.session.add(song)
+        db.session.commit()
+        with patch('musicround.services.automation.lookup_spotify_archive_isrcs') as lookup:
+            lookup.return_value = {
+                'results': [{
+                    'isrc': 'DEABC1234567', 'spotify_id': 'spotify-id', 'album_name': 'Archive Album',
+                    'year': 1999, 'duration_ms': 180000, 'cover_url': 'https://example.test/cover',
+                    'popularity': 78,
+                }],
+                'snapshot': 'spotify_archive_2025_07',
+            }
+            result = automation.backfill_songs_from_spotify_archive(dry_run=False)
+        refreshed = db.session.get(Song, song.id)
+
+    assert result['processed_count'] == 1
+    assert result['matched_count'] == 1
+    assert result['updated_count'] == 1
+    assert refreshed.spotify_id == 'spotify-id'
+    assert refreshed.album_name == 'Archive Album'
+    assert refreshed.preview_url == 'https://deezer.example.test/preview'
+    assert refreshed.popularity == 78
+    assert 'spotify_archive_2025_07' in refreshed.metadata_sources

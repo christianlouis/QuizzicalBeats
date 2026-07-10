@@ -42,6 +42,7 @@ from musicround.helpers.email_helper import send_email
 from musicround.helpers.import_helper import ImportHelper
 from musicround.helpers.metadata import get_deezer_track_metadata, normalize_deezer_rank
 from musicround.helpers.omdb import OmdbError, omdb_catalog_status, search_omdb_catalog
+from musicround.helpers.spotify_archive import SpotifyArchiveError, lookup_spotify_archive_isrcs
 from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
 from musicround.helpers.storage_health import (
@@ -649,6 +650,98 @@ def _song_metadata_sources(song: Song) -> set[str]:
         for source in (song.metadata_sources or "").split(",")
         if source.strip()
     }
+
+
+def _archive_additional_data(song: Song, metadata: dict[str, Any]) -> str:
+    """Record snapshot-only fields without replacing fresher provider metadata."""
+    try:
+        payload = json.loads(song.additional_data or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    payload["spotify_archive_2025_07"] = {
+        "spotify_id": metadata.get("spotify_id"),
+        "popularity": metadata.get("popularity"),
+        "isrc": metadata.get("isrc"),
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _apply_archive_metadata(song: Song, metadata: dict[str, Any]) -> list[str]:
+    """Fill missing stable fields from an exact ISRC archive match."""
+    changed: list[str] = []
+    for field_name in ("album_name", "year", "duration_ms", "spotify_cover_url", "cover_url"):
+        source_field = "cover_url" if field_name in {"spotify_cover_url", "cover_url"} else field_name
+        value = metadata.get(source_field)
+        if value in (None, "") or getattr(song, field_name) not in (None, ""):
+            continue
+        if field_name in {"year", "duration_ms"}:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+        setattr(song, field_name, value)
+        changed.append(field_name)
+    spotify_id = metadata.get("spotify_id")
+    if spotify_id and not song.spotify_id:
+        conflict = Song.query.filter(Song.spotify_id == spotify_id, Song.id != song.id).first()
+        if not conflict:
+            song.spotify_id = spotify_id
+            changed.append("spotify_id")
+    if song.popularity is None or not 0 <= song.popularity <= 100:
+        popularity = metadata.get("popularity")
+        if popularity is not None:
+            song.popularity = int(popularity)
+            changed.append("popularity")
+    additional_data = _archive_additional_data(song, metadata)
+    if song.additional_data != additional_data:
+        song.additional_data = additional_data
+        changed.append("additional_data")
+    sources = _song_metadata_sources(song)
+    sources.add("spotify_archive_2025_07")
+    source_text = ",".join(sorted(sources))
+    if song.metadata_sources != source_text:
+        song.metadata_sources = source_text
+        changed.append("metadata_sources")
+    return changed
+
+
+def backfill_songs_from_spotify_archive(
+    batch_size: int = 500,
+    dry_run: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Backfill QB catalog metadata from exact ISRC matches in the offline archive."""
+    if not 1 <= batch_size <= 500:
+        raise AutomationError("batch_size must be between 1 and 500.")
+    if limit is not None and not 1 <= limit <= 50000:
+        raise AutomationError("limit must be between 1 and 50000.")
+    query = Song.query.filter(Song.isrc.isnot(None), db.func.trim(Song.isrc) != "").order_by(Song.id)
+    if limit is not None:
+        query = query.limit(limit)
+    songs = query.all()
+    processed = matched = updated = 0
+    examples: list[dict[str, Any]] = []
+    for start in range(0, len(songs), batch_size):
+        batch = songs[start:start + batch_size]
+        try:
+            response = lookup_spotify_archive_isrcs(current_app, [song.isrc for song in batch])
+        except SpotifyArchiveError as exc:
+            raise AutomationError(str(exc)) from exc
+        matches = {str(item.get("isrc") or "").upper(): item for item in response["results"]}
+        for song in batch:
+            processed += 1
+            metadata = matches.get(str(song.isrc).upper())
+            if not metadata:
+                continue
+            matched += 1
+            changed = _apply_archive_metadata(song, metadata) if not dry_run else []
+            if changed:
+                updated += 1
+            if len(examples) < 100:
+                examples.append({"song": _song_summary(song), "matched": True, "changed_fields": changed})
+        if not dry_run:
+            db.session.commit()
+    return {"dry_run": dry_run, "processed_count": processed, "matched_count": matched, "updated_count": updated, "examples": examples}
 
 
 def _apply_deezer_metadata(song: Song, metadata: dict[str, Any], *, overwrite: bool) -> list[str]:

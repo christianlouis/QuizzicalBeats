@@ -175,6 +175,21 @@ def enrich_songs_from_deezer(
 
 
 @mcp.tool()
+def backfill_songs_from_spotify_archive(
+    batch_size: int = 500,
+    dry_run: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Backfill exact-ISRC catalog metadata from the internal offline Spotify archive."""
+    return _with_app_context(
+        automation.backfill_songs_from_spotify_archive,
+        batch_size=batch_size,
+        dry_run=dry_run,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def export_song_isrc_catalog(
     missing_only: bool = False,
     limit: int = 50000,

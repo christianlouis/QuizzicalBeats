@@ -27,6 +27,16 @@ seconds, so a large catalog cannot monopolize the API pod.
 The QB browser calls its authenticated `/api/songs/archive-search` proxy. The
 internal catalog service must never be exposed through a public ingress.
 
+## ISRC Metadata Backfill
+
+Once the catalog service is healthy, `backfill_songs_from_spotify_archive`
+matches QB songs by ISRC in batches of up to 500. It fills missing Spotify IDs,
+album/year/duration/cover metadata, repairs missing popularity values, and
+records the archive snapshot in `additional_data` and `metadata_sources`.
+
+The backfill does not replace an existing preview URL, title, artist, or valid
+current popularity score. Use its dry-run output before an all-catalog write.
+
 ## Kubernetes Bootstrap
 
 The GitOps manifest provides a one-shot download Job and a separate catalog

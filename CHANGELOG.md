@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added batched, exact-ISRC metadata backfill from the optional offline Spotify
+  archive. It fills missing stable fields and records snapshot provenance while
+  preserving existing curated values and current provider previews.
 - Added an optional, internal offline Spotify metadata archive search path with
   a disk-backed read-only SQLite service, an authenticated Song Library search
   UI, ISRC/Spotify-ID lookup, bounded freetext queries, and review-only

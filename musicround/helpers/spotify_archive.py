@@ -92,3 +92,32 @@ def search_spotify_archive_catalog(app, query: str, limit: int = 20) -> dict[str
             "Resolve a selected candidate through Deezer before adding or replacing a song preview.",
         ],
     }
+
+
+def lookup_spotify_archive_isrcs(app, isrcs: list[str]) -> dict[str, Any]:
+    """Resolve up to 500 exact ISRCs through the internal archive service."""
+    normalized = sorted({str(value).strip().upper() for value in isrcs if str(value).strip()})
+    if not normalized:
+        return {"results": [], "snapshot": None}
+    if len(normalized) > 500:
+        raise SpotifyArchiveError("Archive ISRC lookup supports at most 500 values per request.")
+    base_url = _base_url(app)
+    if not base_url:
+        raise SpotifyArchiveError("Offline Spotify archive catalog is not configured.")
+    try:
+        response = requests.post(
+            f"{base_url}/v1/isrc-lookup",
+            json={"isrcs": normalized},
+            timeout=app.config.get("SPOTIFY_ARCHIVE_CATALOG_TIMEOUT", 5),
+        )
+    except requests.RequestException as exc:
+        raise SpotifyArchiveError("Offline Spotify archive catalog is unavailable.") from exc
+    if not response.ok:
+        raise SpotifyArchiveError("Offline Spotify archive ISRC lookup failed.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SpotifyArchiveError("Offline Spotify archive catalog returned invalid data.") from exc
+    if not isinstance(payload.get("results"), list):
+        raise SpotifyArchiveError("Offline Spotify archive catalog returned invalid data.")
+    return payload

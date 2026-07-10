@@ -49,6 +49,7 @@ def _exact_results(connection: sqlite3.Connection, query: str, limit: int) -> li
                tracks.name AS title, tracks.popularity AS popularity,
                tracks.preview_url AS preview_url, tracks.duration_ms AS duration_ms,
                albums.name AS album_name, albums.release_date AS release_date,
+               (SELECT url FROM album_images WHERE album_rowid = albums.rowid ORDER BY width DESC LIMIT 1) AS cover_url,
                GROUP_CONCAT(artists.name, ', ') AS artists
         FROM tracks
         JOIN albums ON albums.rowid = tracks.album_rowid
@@ -62,6 +63,34 @@ def _exact_results(connection: sqlite3.Connection, query: str, limit: int) -> li
         {"query": query, "limit": limit},
     ).fetchall()
     return [_row_payload(row) for row in rows]
+
+
+def _isrc_results(connection: sqlite3.Connection, isrcs: list[str]) -> list[dict[str, Any]]:
+    """Return the most popular archive recording for each exact ISRC."""
+    placeholders = ", ".join("?" for _ in isrcs)
+    rows = connection.execute(
+        f"""
+        SELECT tracks.id AS spotify_id, tracks.external_id_isrc AS isrc,
+               tracks.name AS title, tracks.popularity AS popularity,
+               tracks.preview_url AS preview_url, tracks.duration_ms AS duration_ms,
+               albums.name AS album_name, albums.release_date AS release_date,
+               (SELECT url FROM album_images WHERE album_rowid = albums.rowid ORDER BY width DESC LIMIT 1) AS cover_url,
+               GROUP_CONCAT(artists.name, ', ') AS artists
+        FROM tracks
+        JOIN albums ON albums.rowid = tracks.album_rowid
+        JOIN track_artists ON track_artists.track_rowid = tracks.rowid
+        JOIN artists ON artists.rowid = track_artists.artist_rowid
+        WHERE tracks.external_id_isrc IN ({placeholders})
+        GROUP BY tracks.rowid
+        ORDER BY tracks.external_id_isrc ASC, tracks.popularity DESC, tracks.id ASC
+        """,
+        isrcs,
+    ).fetchall()
+    chosen: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        payload = _row_payload(row)
+        chosen.setdefault(payload["isrc"], payload)
+    return list(chosen.values())
 
 
 def _text_results(
@@ -81,6 +110,7 @@ def _text_results(
                    tracks.name AS title, tracks.popularity AS popularity,
                    tracks.preview_url AS preview_url, tracks.duration_ms AS duration_ms,
                    albums.name AS album_name, albums.release_date AS release_date,
+                   (SELECT url FROM album_images WHERE album_rowid = albums.rowid ORDER BY width DESC LIMIT 1) AS cover_url,
                    GROUP_CONCAT(artists.name, ', ') AS artists
             FROM tracks INDEXED BY tracks_popularity
             JOIN albums ON albums.rowid = tracks.album_rowid
@@ -115,6 +145,7 @@ def _row_payload(row: sqlite3.Row) -> dict[str, Any]:
         "year": int(release_date[:4]) if release_date and release_date[:4].isdigit() else None,
         "popularity": row["popularity"],
         "duration_ms": row["duration_ms"],
+        "cover_url": row["cover_url"],
         "source": SNAPSHOT,
     }
 
@@ -172,6 +203,26 @@ def create_app(database_path: str | None = None) -> Flask:
             app.logger.exception("Spotify archive search failed")
             return jsonify({"error": "Archive search failed."}), 500
         return jsonify({"results": results, "query_mode": mode, "snapshot": SNAPSHOT})
+
+    @app.post("/v1/isrc-lookup")
+    def isrc_lookup():
+        payload = request.get_json(silent=True) or {}
+        raw_isrcs = payload.get("isrcs")
+        if not isinstance(raw_isrcs, list):
+            return jsonify({"error": "isrcs must be a JSON array."}), 400
+        isrcs = sorted({str(value).strip().upper() for value in raw_isrcs if str(value).strip()})
+        if not isrcs or len(isrcs) > 500:
+            return jsonify({"error": "isrcs must contain between 1 and 500 values."}), 400
+        database_path = app.config["SPOTIFY_ARCHIVE_DB_PATH"]
+        if not Path(database_path).is_file():
+            return jsonify({"error": "Archive database is not ready."}), 503
+        try:
+            with _connection(database_path) as connection:
+                results = _isrc_results(connection, isrcs)
+        except sqlite3.Error:
+            app.logger.exception("Spotify archive ISRC lookup failed")
+            return jsonify({"error": "Archive ISRC lookup failed."}), 500
+        return jsonify({"results": results, "snapshot": SNAPSHOT})
 
     return app
 
