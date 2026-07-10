@@ -190,6 +190,21 @@ def backfill_songs_from_spotify_archive(
 
 
 @mcp.tool()
+def backfill_song_audio_features_from_spotify_archive(
+    batch_size: int = 50,
+    dry_run: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Fill missing audio fields from exact Spotify IDs in the offline archive."""
+    return _with_app_context(
+        automation.backfill_song_audio_features_from_spotify_archive,
+        batch_size=batch_size,
+        dry_run=dry_run,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def export_song_isrc_catalog(
     missing_only: bool = False,
     limit: int = 50000,

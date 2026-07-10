@@ -44,6 +44,7 @@ from musicround.helpers.metadata import get_deezer_track_metadata, normalize_dee
 from musicround.helpers.omdb import OmdbError, omdb_catalog_status, search_omdb_catalog
 from musicround.helpers.spotify_archive import (
     SpotifyArchiveError,
+    bulk_lookup_spotify_archive_audio_features,
     bulk_lookup_spotify_archive_isrcs,
 )
 from musicround.helpers.round_notifications import send_round_blocked_notification
@@ -745,6 +746,101 @@ def backfill_songs_from_spotify_archive(
         if not dry_run:
             db.session.commit()
     return {"dry_run": dry_run, "processed_count": processed, "matched_count": matched, "updated_count": updated, "examples": examples}
+
+
+_ARCHIVE_AUDIO_FEATURE_FIELDS = (
+    "duration_ms", "time_signature", "tempo", "key", "mode", "danceability", "energy",
+    "loudness", "speechiness", "acousticness", "instrumentalness", "liveness", "valence",
+)
+
+
+def _archive_audio_additional_data(song: Song, metadata: dict[str, Any]) -> str:
+    """Record the offline feature snapshot without replacing unrelated provenance."""
+    try:
+        payload = json.loads(song.additional_data or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    payload["spotify_archive_2025_07_audio_features"] = {
+        "spotify_id": metadata.get("spotify_id"),
+        "snapshot": "spotify_archive_2025_07",
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _apply_archive_audio_features(song: Song, metadata: dict[str, Any]) -> list[str]:
+    """Fill only missing QB audio fields from an exact Spotify-ID match."""
+    changed: list[str] = []
+    for field_name in _ARCHIVE_AUDIO_FEATURE_FIELDS:
+        value = metadata.get(field_name)
+        if value is None or getattr(song, field_name) is not None:
+            continue
+        setattr(song, field_name, value)
+        changed.append(field_name)
+    if not changed:
+        return changed
+    additional_data = _archive_audio_additional_data(song, metadata)
+    if song.additional_data != additional_data:
+        song.additional_data = additional_data
+        changed.append("additional_data")
+    sources = _song_metadata_sources(song)
+    sources.add("spotify_archive_2025_07_audio_features")
+    source_text = ",".join(sorted(sources))
+    if song.metadata_sources != source_text:
+        song.metadata_sources = source_text
+        changed.append("metadata_sources")
+    return changed
+
+
+def backfill_song_audio_features_from_spotify_archive(
+    batch_size: int = 50,
+    dry_run: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Fill missing QB audio fields from exact Spotify IDs in the offline snapshot."""
+    if not 1 <= batch_size <= 500:
+        raise AutomationError("batch_size must be between 1 and 500.")
+    if limit is not None and not 1 <= limit <= 50_000:
+        raise AutomationError("limit must be between 1 and 50000.")
+    missing_features = or_(*(getattr(Song, field_name).is_(None) for field_name in _ARCHIVE_AUDIO_FEATURE_FIELDS))
+    query = Song.query.filter(
+        Song.spotify_id.isnot(None),
+        db.func.trim(Song.spotify_id) != "",
+        missing_features,
+    ).order_by(Song.id)
+    if limit is not None:
+        query = query.limit(limit)
+    songs = query.all()
+    processed = matched = updated = 0
+    examples: list[dict[str, Any]] = []
+    try:
+        response = bulk_lookup_spotify_archive_audio_features(
+            current_app, [song.spotify_id for song in songs]
+        )
+    except SpotifyArchiveError as exc:
+        raise AutomationError(str(exc)) from exc
+    matches = {str(item.get("spotify_id") or ""): item for item in response["results"]}
+    for start in range(0, len(songs), batch_size):
+        batch = songs[start:start + batch_size]
+        for song in batch:
+            processed += 1
+            metadata = matches.get(str(song.spotify_id))
+            if not metadata:
+                continue
+            matched += 1
+            changed = _apply_archive_audio_features(song, metadata) if not dry_run else []
+            if changed:
+                updated += 1
+            if len(examples) < 100:
+                examples.append({"song": _song_summary(song), "matched": True, "changed_fields": changed})
+        if not dry_run:
+            db.session.commit()
+    return {
+        "dry_run": dry_run,
+        "processed_count": processed,
+        "matched_count": matched,
+        "updated_count": updated,
+        "examples": examples,
+    }
 
 
 def _apply_deezer_metadata(song: Song, metadata: dict[str, Any], *, overwrite: bool) -> list[str]:

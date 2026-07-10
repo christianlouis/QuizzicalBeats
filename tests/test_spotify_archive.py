@@ -42,6 +42,27 @@ def _archive_db(path: Path) -> None:
     connection.close()
 
 
+def _audio_features_db(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE track_audio_features (
+            track_id TEXT NOT NULL, duration_ms INTEGER, time_signature INTEGER,
+            tempo INTEGER, key INTEGER, mode INTEGER, danceability REAL, energy REAL,
+            loudness REAL, speechiness REAL, acousticness REAL, instrumentalness REAL,
+            liveness REAL, valence REAL
+        );
+        CREATE UNIQUE INDEX track_audio_features_track_id_unique ON track_audio_features(track_id);
+        """
+    )
+    connection.execute(
+        "INSERT INTO track_audio_features VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ('spotify-id', 180000, 4, 120, 7, 1, .7, .8, -5.5, .05, .1, .0, .2, .9),
+    )
+    connection.commit()
+    connection.close()
+
+
 def test_archive_catalog_search_is_read_only_and_returns_metadata(tmp_path):
     database_path = tmp_path / "spotify_clean.sqlite3"
     _archive_db(database_path)
@@ -94,6 +115,24 @@ def test_archive_catalog_bulk_isrc_lookup_uses_metadata_only_fields(tmp_path):
         'spotify_id': 'spotify-id',
         'title': 'Archive Song',
         'year': 1999,
+    }]
+
+
+def test_archive_catalog_bulk_audio_features_lookup_is_read_only(tmp_path):
+    metadata_path = tmp_path / "spotify_clean.sqlite3"
+    audio_features_path = tmp_path / "spotify_clean_audio_features.sqlite3"
+    _archive_db(metadata_path)
+    _audio_features_db(audio_features_path)
+    client = create_app(str(metadata_path), str(audio_features_path)).test_client()
+
+    response = client.post('/v1/audio-features-bulk-lookup', json={'spotify_ids': ['spotify-id']})
+
+    assert response.status_code == 200
+    assert response.get_json()['results'] == [{
+        'acousticness': .1, 'danceability': .7, 'duration_ms': 180000, 'energy': .8,
+        'instrumentalness': .0, 'key': 7, 'liveness': .2, 'loudness': -5.5,
+        'mode': 1, 'speechiness': .05, 'spotify_id': 'spotify-id', 'tempo': 120,
+        'time_signature': 4, 'valence': .9,
     }]
 
 
@@ -169,3 +208,30 @@ def test_archive_backfill_fills_missing_fields_without_replacing_existing_previe
     assert refreshed.preview_url == 'https://deezer.example.test/preview'
     assert refreshed.popularity == 78
     assert 'spotify_archive_2025_07' in refreshed.metadata_sources
+
+
+def test_archive_audio_backfill_fills_only_missing_audio_fields(app):
+    from musicround.models import Song, db
+    from musicround.services import automation
+
+    with app.app_context():
+        song = Song(title='Existing title', artist='Existing artist', spotify_id='spotify-id', tempo=99)
+        db.session.add(song)
+        db.session.commit()
+        with patch('musicround.services.automation.bulk_lookup_spotify_archive_audio_features') as lookup:
+            lookup.return_value = {'results': [{
+                'spotify_id': 'spotify-id', 'duration_ms': 180000, 'time_signature': 4,
+                'tempo': 120, 'key': 7, 'mode': 1, 'danceability': .7, 'energy': .8,
+                'loudness': -5.5, 'speechiness': .05, 'acousticness': .1,
+                'instrumentalness': .0, 'liveness': .2, 'valence': .9,
+            }]}
+            result = automation.backfill_song_audio_features_from_spotify_archive(dry_run=False)
+        refreshed = db.session.get(Song, song.id)
+
+    assert result['processed_count'] == 1
+    assert result['matched_count'] == 1
+    assert result['updated_count'] == 1
+    assert refreshed.tempo == 99
+    assert refreshed.energy == .8
+    assert refreshed.time_signature == 4
+    assert 'spotify_archive_2025_07_audio_features' in refreshed.metadata_sources

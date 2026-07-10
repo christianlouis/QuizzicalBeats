@@ -16,6 +16,7 @@ from flask import Flask, jsonify, request
 
 
 DEFAULT_DB_PATH = "/archive/spotify_clean.sqlite3"
+DEFAULT_AUDIO_FEATURES_DB_PATH = "/archive/spotify_clean_audio_features.sqlite3"
 DEFAULT_MIN_POPULARITY = 20
 DEFAULT_QUERY_TIMEOUT_SECONDS = 2.0
 SNAPSHOT = "spotify_archive_2025_07"
@@ -141,6 +142,35 @@ def _bulk_isrc_results(connection: sqlite3.Connection, isrcs: list[str]) -> list
     return list(chosen.values())
 
 
+def _bulk_audio_feature_results(
+    connection: sqlite3.Connection, spotify_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Scan audio features once against a file-backed requested-ID set.
+
+    The 39-GB archive lives on network-backed storage. A single sequential scan
+    avoids thousands of random index reads when trueing up the whole library.
+    The temporary requested-ID table stays on disk through ``temp_store=FILE``.
+    """
+    connection.execute("CREATE TEMP TABLE requested_spotify_ids (spotify_id TEXT PRIMARY KEY)")
+    connection.executemany(
+        "INSERT OR IGNORE INTO requested_spotify_ids (spotify_id) VALUES (?)",
+        ((spotify_id,) for spotify_id in spotify_ids),
+    )
+    rows = connection.execute(
+        """
+        SELECT features.track_id AS spotify_id, features.duration_ms,
+               features.time_signature, features.tempo, features.key, features.mode,
+               features.danceability, features.energy, features.loudness,
+               features.speechiness, features.acousticness, features.instrumentalness,
+               features.liveness, features.valence
+        FROM track_audio_features AS features NOT INDEXED
+        CROSS JOIN requested_spotify_ids
+          ON requested_spotify_ids.spotify_id = features.track_id
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _text_results(
     connection: sqlite3.Connection,
     query: str,
@@ -198,11 +228,18 @@ def _row_payload(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def create_app(database_path: str | None = None) -> Flask:
+def create_app(
+    database_path: str | None = None,
+    audio_features_database_path: str | None = None,
+) -> Flask:
     """Create the internal-only archive catalog application."""
     app = Flask(__name__)
     app.config.update(
         SPOTIFY_ARCHIVE_DB_PATH=database_path or os.getenv("SPOTIFY_ARCHIVE_DB_PATH", DEFAULT_DB_PATH),
+        SPOTIFY_ARCHIVE_AUDIO_FEATURES_DB_PATH=(
+            audio_features_database_path
+            or os.getenv("SPOTIFY_ARCHIVE_AUDIO_FEATURES_DB_PATH", DEFAULT_AUDIO_FEATURES_DB_PATH)
+        ),
         SPOTIFY_ARCHIVE_MIN_POPULARITY=_int_env(
             "SPOTIFY_ARCHIVE_MIN_POPULARITY", DEFAULT_MIN_POPULARITY
         ),
@@ -214,11 +251,13 @@ def create_app(database_path: str | None = None) -> Flask:
     @app.get("/healthz")
     def healthz():
         path = Path(app.config["SPOTIFY_ARCHIVE_DB_PATH"])
+        audio_features_path = Path(app.config["SPOTIFY_ARCHIVE_AUDIO_FEATURES_DB_PATH"])
         return jsonify({
             "ok": path.is_file(),
             "snapshot": SNAPSHOT,
             "read_only": True,
             "database_present": path.is_file(),
+            "audio_features_database_present": audio_features_path.is_file(),
         }), 200 if path.is_file() else 503
 
     @app.get("/v1/search")
@@ -291,6 +330,27 @@ def create_app(database_path: str | None = None) -> Flask:
         except sqlite3.Error:
             app.logger.exception("Spotify archive bulk ISRC lookup failed")
             return jsonify({"error": "Archive ISRC bulk lookup failed."}), 500
+        return jsonify({"results": results, "snapshot": SNAPSHOT})
+
+    @app.post("/v1/audio-features-bulk-lookup")
+    def audio_features_bulk_lookup():
+        """Resolve QB Spotify IDs against the offline audio-features snapshot."""
+        payload = request.get_json(silent=True) or {}
+        raw_spotify_ids = payload.get("spotify_ids")
+        if not isinstance(raw_spotify_ids, list):
+            return jsonify({"error": "spotify_ids must be a JSON array."}), 400
+        spotify_ids = sorted({str(value).strip() for value in raw_spotify_ids if str(value).strip()})
+        if not spotify_ids or len(spotify_ids) > 50_000:
+            return jsonify({"error": "spotify_ids must contain between 1 and 50000 values."}), 400
+        database_path = app.config["SPOTIFY_ARCHIVE_AUDIO_FEATURES_DB_PATH"]
+        if not Path(database_path).is_file():
+            return jsonify({"error": "Archive audio-features database is not ready."}), 503
+        try:
+            with _connection(database_path, allow_temp_writes=True) as connection:
+                results = _bulk_audio_feature_results(connection, spotify_ids)
+        except sqlite3.Error:
+            app.logger.exception("Spotify archive audio-features bulk lookup failed")
+            return jsonify({"error": "Archive audio-features bulk lookup failed."}), 500
         return jsonify({"results": results, "snapshot": SNAPSHOT})
 
     return app
