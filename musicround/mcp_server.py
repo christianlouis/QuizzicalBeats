@@ -179,6 +179,7 @@ def backfill_songs_from_spotify_archive(
     batch_size: int = 50,
     dry_run: bool = True,
     limit: int | None = None,
+    song_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """Backfill exact-ISRC catalog metadata from the internal offline Spotify archive."""
     return _with_app_context(
@@ -186,6 +187,7 @@ def backfill_songs_from_spotify_archive(
         batch_size=batch_size,
         dry_run=dry_run,
         limit=limit,
+        song_ids=song_ids,
     )
 
 

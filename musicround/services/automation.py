@@ -46,6 +46,7 @@ from musicround.helpers.spotify_archive import (
     SpotifyArchiveError,
     bulk_lookup_spotify_archive_audio_features,
     bulk_lookup_spotify_archive_isrcs,
+    lookup_spotify_archive_isrcs,
 )
 from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
@@ -713,23 +714,47 @@ def backfill_songs_from_spotify_archive(
     batch_size: int = 50,
     dry_run: bool = True,
     limit: int | None = None,
+    song_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Backfill QB catalog metadata from exact ISRC matches in the offline archive."""
+    """Backfill QB metadata from exact ISRC matches in the offline archive.
+
+    An explicit ``song_ids`` list uses bounded identifier lookups. This lets
+    provider enrichment pipeline each completed batch without repeatedly
+    scanning the complete disk-backed Spotify archive.
+    """
     if not 1 <= batch_size <= 500:
         raise AutomationError("batch_size must be between 1 and 500.")
     if limit is not None and not 1 <= limit <= 50000:
         raise AutomationError("limit must be between 1 and 50000.")
     query = Song.query.filter(Song.isrc.isnot(None), db.func.trim(Song.isrc) != "").order_by(Song.id)
+    if song_ids is not None:
+        try:
+            clean_song_ids = [int(song_id) for song_id in song_ids]
+        except (TypeError, ValueError):
+            raise AutomationError("song_ids must contain integer IDs.") from None
+        query = query.filter(Song.id.in_(clean_song_ids))
     if limit is not None:
         query = query.limit(limit)
     songs = query.all()
     processed = matched = updated = 0
     examples: list[dict[str, Any]] = []
     try:
-        response = bulk_lookup_spotify_archive_isrcs(current_app, [song.isrc for song in songs])
+        isrcs = [song.isrc for song in songs]
+        if song_ids is None:
+            results = []
+            for start in range(0, len(isrcs), 10_000):
+                results.extend(
+                    bulk_lookup_spotify_archive_isrcs(current_app, isrcs[start:start + 10_000])["results"]
+                )
+        else:
+            results = []
+            for start in range(0, len(isrcs), 500):
+                results.extend(
+                    lookup_spotify_archive_isrcs(current_app, isrcs[start:start + 500])["results"]
+                )
     except SpotifyArchiveError as exc:
         raise AutomationError(str(exc)) from exc
-    matches = {str(item.get("isrc") or "").upper(): item for item in response["results"]}
+    matches = {str(item.get("isrc") or "").upper(): item for item in results}
     for start in range(0, len(songs), batch_size):
         batch = songs[start:start + batch_size]
         for song in batch:

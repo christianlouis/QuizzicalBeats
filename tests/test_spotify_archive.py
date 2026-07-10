@@ -210,6 +210,32 @@ def test_archive_backfill_fills_missing_fields_without_replacing_existing_previe
     assert 'spotify_archive_2025_07' in refreshed.metadata_sources
 
 
+def test_archive_backfill_uses_bounded_identifier_lookup_for_explicit_song_ids(app):
+    from musicround.models import Song, db
+    from musicround.services import automation
+
+    with app.app_context():
+        song = Song(title='Existing title', artist='Existing artist', isrc='DEABC1234567')
+        db.session.add(song)
+        db.session.commit()
+        with patch('musicround.services.automation.lookup_spotify_archive_isrcs') as lookup, patch(
+            'musicround.services.automation.bulk_lookup_spotify_archive_isrcs'
+        ) as bulk_lookup:
+            lookup.return_value = {
+                'results': [{'isrc': 'DEABC1234567', 'spotify_id': 'spotify-id', 'popularity': 78}],
+            }
+            result = automation.backfill_songs_from_spotify_archive(
+                dry_run=False, song_ids=[song.id],
+            )
+        refreshed = db.session.get(Song, song.id)
+
+    assert result['processed_count'] == 1
+    assert result['matched_count'] == 1
+    assert refreshed.spotify_id == 'spotify-id'
+    lookup.assert_called_once()
+    bulk_lookup.assert_not_called()
+
+
 def test_archive_audio_backfill_fills_only_missing_audio_fields(app):
     from musicround.models import Song, db
     from musicround.services import automation
