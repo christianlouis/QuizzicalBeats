@@ -118,6 +118,22 @@ def test_archive_catalog_bulk_isrc_lookup_uses_metadata_only_fields(tmp_path):
     }]
 
 
+def test_archive_catalog_isrc_lookup_uses_lightweight_batch_fields(tmp_path):
+    database_path = tmp_path / "spotify_clean.sqlite3"
+    _archive_db(database_path)
+    client = create_app(str(database_path)).test_client()
+
+    response = client.post('/v1/isrc-lookup', json={'isrcs': ['DEABC1234567']})
+
+    assert response.status_code == 200
+    assert response.get_json()['results'] == [{
+        'album_name': 'Album', 'artists': None, 'cover_url': None,
+        'duration_ms': 180000, 'isrc': 'DEABC1234567', 'popularity': 78,
+        'source': 'spotify_archive_2025_07', 'spotify_id': 'spotify-id',
+        'title': 'Archive Song', 'year': 1999,
+    }]
+
+
 def test_archive_catalog_bulk_audio_features_lookup_is_read_only(tmp_path):
     metadata_path = tmp_path / "spotify_clean.sqlite3"
     audio_features_path = tmp_path / "spotify_clean_audio_features.sqlite3"

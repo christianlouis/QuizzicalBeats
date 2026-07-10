@@ -68,29 +68,41 @@ def _exact_results(connection: sqlite3.Connection, query: str, limit: int) -> li
 
 
 def _isrc_results(connection: sqlite3.Connection, isrcs: list[str]) -> list[dict[str, Any]]:
-    """Return the most popular archive recording for each exact ISRC."""
+    """Return lightweight metadata for each exact ISRC through its source index.
+
+    Batch true-ups only need the stable track fields. Deliberately avoiding the
+    artist and cover joins keeps these bounded identifier lookups fast enough
+    to pipeline immediately after a Deezer batch.
+    """
     placeholders = ", ".join("?" for _ in isrcs)
     rows = connection.execute(
         f"""
         SELECT tracks.id AS spotify_id, tracks.external_id_isrc AS isrc,
                tracks.name AS title, tracks.popularity AS popularity,
-               tracks.preview_url AS preview_url, tracks.duration_ms AS duration_ms,
-               albums.name AS album_name, albums.release_date AS release_date,
-               (SELECT url FROM album_images WHERE album_rowid = albums.rowid ORDER BY width DESC LIMIT 1) AS cover_url,
-               GROUP_CONCAT(artists.name, ', ') AS artists
+               tracks.duration_ms AS duration_ms, albums.name AS album_name,
+               albums.release_date AS release_date
         FROM tracks
         JOIN albums ON albums.rowid = tracks.album_rowid
-        JOIN track_artists ON track_artists.track_rowid = tracks.rowid
-        JOIN artists ON artists.rowid = track_artists.artist_rowid
         WHERE tracks.external_id_isrc IN ({placeholders})
-        GROUP BY tracks.rowid
         ORDER BY tracks.external_id_isrc ASC, tracks.popularity DESC, tracks.id ASC
         """,
         isrcs,
     ).fetchall()
     chosen: dict[str, dict[str, Any]] = {}
     for row in rows:
-        payload = _row_payload(row)
+        release_date = row["release_date"]
+        payload = {
+            "spotify_id": row["spotify_id"],
+            "isrc": row["isrc"],
+            "title": row["title"],
+            "artists": None,
+            "album_name": row["album_name"],
+            "year": int(release_date[:4]) if release_date and release_date[:4].isdigit() else None,
+            "popularity": row["popularity"],
+            "duration_ms": row["duration_ms"],
+            "cover_url": None,
+            "source": SNAPSHOT,
+        }
         chosen.setdefault(payload["isrc"], payload)
     return list(chosen.values())
 
