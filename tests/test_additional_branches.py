@@ -2,7 +2,7 @@
 import json
 import pytest
 from musicround.helpers.import_queue import ImportQueue
-from musicround.models import db, ImportJobRecord, User, Role, Song, Tag
+from musicround.models import db, ImportJobRecord, SeedSource, User, Role, Song, Tag
 
 
 def _create_user(app, username, email, password='TestPass123!', is_admin=False):
@@ -21,6 +21,43 @@ def _create_user(app, username, email, password='TestPass123!', is_admin=False):
 def _login(app, client, username, password='TestPass123!'):
     """Log in a user."""
     client.post('/users/login', data={'username': username, 'password': password})
+
+
+class TestSeedSourceDashboard:
+    def test_admin_can_explain_and_toggle_catalog_source(self, app, client):
+        _create_user(app, 'seed_admin', 'seedadmin@example.com', is_admin=True)
+        with app.app_context():
+            source = SeedSource(
+                name='Example Chart',
+                source_type='chart',
+                provider='example',
+                url='https://example.test/chart',
+                active=True,
+                cadence='weekly',
+                notes='A test chart for review-only discovery.',
+            )
+            db.session.add(source)
+            db.session.commit()
+            source_id = source.id
+        _login(app, client, 'seed_admin')
+
+        response = client.get('/users/seed-sources')
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Catalog Sources' in body
+        assert 'never add songs automatically' in body
+        assert 'Example Chart' in body
+
+        response = client.post(
+            f'/users/seed-sources/{source_id}',
+            data={'cadence': 'daily'},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        with app.app_context():
+            source = db.session.get(SeedSource, source_id)
+            assert source.active is False
+            assert source.cadence == 'daily'
 
 
 class TestSetupRoute:

@@ -12,7 +12,7 @@ from flask_login import login_user, current_user, logout_user, login_required  #
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
 
-from musicround.models import db, User, Role, SystemSetting, UserPreferences
+from musicround.models import db, User, Role, SeedSource, SeedSourceRun, SystemSetting, UserPreferences
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
@@ -1533,6 +1533,72 @@ def backup_manager():
         notification=notification,
         config_suggestion=config_suggestion
     )
+
+
+@users_bp.route('/seed-sources')
+@login_required
+@admin_required
+def seed_sources():
+    """Show external catalog sources and their review-only ingestion status."""
+    sources = SeedSource.query.order_by(SeedSource.priority.desc(), SeedSource.name.asc()).all()
+    recent_runs = (
+        SeedSourceRun.query
+        .order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc())
+        .limit(20)
+        .all()
+    )
+    latest_runs = {
+        source.id: source.runs.order_by(SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()).first()
+        for source in sources
+    }
+    return render_template(
+        'admin/seed_sources.html',
+        sources=sources,
+        recent_runs=recent_runs,
+        latest_runs=latest_runs,
+    )
+
+
+@users_bp.route('/seed-sources/<int:source_id>', methods=['POST'])
+@login_required
+@admin_required
+def update_seed_source(source_id):
+    """Enable or pause a source and set its operator-approved read cadence."""
+    source = db.session.get(SeedSource, source_id)
+    if not source:
+        flash('Catalog source was not found.', 'danger')
+        return redirect(url_for('users.seed_sources'))
+    cadence = (request.form.get('cadence') or 'manual').strip().lower()
+    if cadence not in {'manual', 'daily', 'weekly'}:
+        flash('Choose manual, daily, or weekly cadence.', 'danger')
+        return redirect(url_for('users.seed_sources'))
+    source.active = request.form.get('active') == 'on'
+    source.cadence = cadence
+    source.updated_at = datetime.utcnow()
+    db.session.commit()
+    state = 'enabled' if source.active else 'paused'
+    flash(f'{source.name} is {state}. Candidate review remains required before any import.', 'success')
+    return redirect(url_for('users.seed_sources'))
+
+
+@users_bp.route('/seed-sources/<int:source_id>/refresh', methods=['POST'])
+@login_required
+@admin_required
+def refresh_seed_source(source_id):
+    """Fetch one source into the review-only candidate pipeline."""
+    from musicround.services import automation
+
+    source = db.session.get(SeedSource, source_id)
+    if not source:
+        flash('Catalog source was not found.', 'danger')
+        return redirect(url_for('users.seed_sources'))
+    try:
+        result = automation.fetch_seed_source_candidates(source_id, limit=100, timeout_seconds=20)
+    except AutomationError as exc:
+        flash(str(exc), 'danger')
+    else:
+        flash(f"{source.name}: reviewed {result['count']} candidates. No songs were imported.", 'success')
+    return redirect(url_for('users.seed_sources'))
 
 @users_bp.route('/create-backup', methods=['POST'])
 @automation_or_admin_required
