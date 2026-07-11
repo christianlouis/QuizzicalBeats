@@ -7,7 +7,14 @@ from musicround.helpers.catalog_backfill import run_backfill
 
 @pytest.fixture
 def test_songs(app):
-    """Create test songs in the database."""
+    """Create test songs with varied catalog metadata states.
+
+    Args:
+        app: Flask application fixture with a configured test database.
+
+    Returns:
+        list: IDs for the five created songs.
+    """
     # A: Has deezer_id, missing isrc
     s1 = Song(title="Song 1", artist="Artist 1", deezer_id="d1")
 
@@ -39,8 +46,9 @@ def test_songs(app):
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
 def test_run_backfill(mock_features, mock_archive, mock_deezer, app, test_songs):
+    """Test committed backfill execution across all three stages."""
     # Setup mocks
-    mock_deezer.side_effect = lambda did, app: {
+    mock_deezer.side_effect = lambda did, app, album_cache=None: {
         "d1": {"isrc": "ISRC0", "popularity": 50, "year": "2020", "genre": "Pop"},
         "d2": {"isrc": "ISRC2", "popularity": 60}
     }.get(did, {})
@@ -54,8 +62,8 @@ def test_run_backfill(mock_features, mock_archive, mock_deezer, app, test_songs)
 
     mock_features.return_value = {
         "results": [
-            {"id": "s1", "danceability": 0.5, "energy": 0.6},
-            {"id": "s2", "danceability": 0.7, "energy": 0.8}
+            {"spotify_id": "s1", "danceability": 0.5, "energy": 0.6},
+            {"spotify_id": "s2", "danceability": 0.7, "energy": 0.8}
         ]
     }
 
@@ -65,6 +73,12 @@ def test_run_backfill(mock_features, mock_archive, mock_deezer, app, test_songs)
     # Assert coverage before
     assert result["coverage_before"]["total_songs"] == 5
     assert result["coverage_before"]["with_isrc"] == 3  # ISRC1, ISRC2, ISRC3
+
+    # Assert coverage after
+    assert result["coverage_after"]["total_songs"] == 5
+    assert result["coverage_after"]["with_isrc"] == 4  # +ISRC0 from Stage A
+    assert result["coverage_after"]["with_spotify_id"] == 3  # s2, s4 + s5 existing
+    assert result["coverage_after"]["with_audio_features"] == 3  # s2, s4 + s5 existing
 
     # Assert stage A
     assert result["stage_a"]["processed"] == 1  # only s1 matches
@@ -101,7 +115,8 @@ def test_run_backfill(mock_features, mock_archive, mock_deezer, app, test_songs)
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
 def test_run_backfill_dry_run(mock_features, mock_archive, mock_deezer, app, test_songs):
-    mock_deezer.side_effect = lambda did, app: {
+    """Test dry-run reporting without persisting catalog changes."""
+    mock_deezer.side_effect = lambda did, app, album_cache=None: {
         "d1": {"isrc": "ISRC0", "popularity": 50, "year": "2020", "genre": "Pop"}
     }.get(did, {})
 
@@ -114,8 +129,8 @@ def test_run_backfill_dry_run(mock_features, mock_archive, mock_deezer, app, tes
 
     mock_features.return_value = {
         "results": [
-            {"id": "s1", "danceability": 0.5},
-            {"id": "s2", "danceability": 0.7}
+            {"spotify_id": "s1", "danceability": 0.5},
+            {"spotify_id": "s2", "danceability": 0.7}
         ]
     }
 
@@ -139,6 +154,7 @@ def test_run_backfill_dry_run(mock_features, mock_archive, mock_deezer, app, tes
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
 @patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
 def test_run_backfill_json_output(mock_features, mock_archive, mock_deezer, app, test_songs):
+    """Test that backfill results remain JSON serializable."""
     import json
 
     mock_deezer.return_value = {}
@@ -154,3 +170,43 @@ def test_run_backfill_json_output(mock_features, mock_archive, mock_deezer, app,
         assert "coverage_before" in json_output
     except TypeError as exc:
         pytest.fail(f"run_backfill result is not JSON serializable: {exc}")
+
+
+@patch('musicround.helpers.catalog_backfill.get_deezer_track_metadata')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
+def test_run_backfill_respects_limit(mock_features, mock_archive, mock_deezer, app, test_songs):
+    """Test that each backfill stage respects the configured limit."""
+    mock_deezer.side_effect = lambda did, app, album_cache=None: {
+        "d1": {"isrc": "ISRC0", "popularity": 50}
+    }.get(did, {})
+
+    mock_archive.return_value = {
+        "results": [
+            {"isrc": "ISRC0", "spotify_id": "s0"},
+            {"isrc": "ISRC1", "spotify_id": "s1"},
+            {"isrc": "ISRC2", "spotify_id": "s2"}
+        ]
+    }
+
+    mock_features.return_value = {
+        "results": [
+            {"spotify_id": "s0", "danceability": 0.4}
+        ]
+    }
+
+    result = run_backfill(dry_run=False, limit=1, chunk_size=1, sleep_sec=0)
+
+    assert result["stage_a"]["processed"] == 1
+    assert result["stage_a"]["updated"] == 1
+    assert result["stage_b"]["processed"] == 1
+    assert result["stage_b"]["updated"] == 1
+    assert result["stage_c"]["processed"] == 1
+    assert result["stage_c"]["updated"] == 1
+
+    s1 = db.session.get(Song, test_songs[0])
+    s2 = db.session.get(Song, test_songs[1])
+    assert s1.spotify_id == "s0"
+    assert s1.danceability == 0.4
+    assert s2.spotify_id is None
+    assert result["coverage_after"]["with_spotify_id"] == 2  # s1 mapped + s5 existing

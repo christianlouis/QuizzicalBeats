@@ -28,15 +28,29 @@ def get_coverage() -> Dict[str, int]:
     }
 
 
-def _chunked_query(query, chunk_size):
-    """Yields chunks of records from a query using offset/limit."""
-    offset = 0
+def _chunked_query(query, chunk_size, limit=None):
+    """Yield chunks of songs using keyset pagination by ID."""
+    last_id = 0
+    processed = 0
     while True:
-        chunk = query.offset(offset).limit(chunk_size).all()
+        if limit and processed >= limit:
+            break
+
+        current_chunk_size = chunk_size
+        if limit:
+            current_chunk_size = min(chunk_size, limit - processed)
+
+        chunk = (
+            query.filter(Song.id > last_id)
+            .order_by(Song.id)
+            .limit(current_chunk_size)
+            .all()
+        )
         if not chunk:
             break
         yield chunk
-        offset += len(chunk)
+        processed += len(chunk)
+        last_id = chunk[-1].id
 
 
 def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
@@ -54,21 +68,23 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
     }
 
     # --- Stage A: Deezer ISRC + missing metadata ---
-    query_a = Song.query.filter(Song.deezer_id.isnot(None), Song.isrc.is_(None)).order_by(Song.id)
-    if limit:
-        query_a = query_a.limit(limit)
+    query_a = Song.query.filter(Song.deezer_id.isnot(None), Song.isrc.is_(None))
 
-    for chunk_idx, chunk in enumerate(_chunked_query(query_a, chunk_size), 1):
+    for chunk_idx, chunk in enumerate(_chunked_query(query_a, chunk_size, limit), 1):
         if not chunk:
             break
 
         updated_in_chunk = 0
+        album_cache = {}
         for song in chunk:
             if limit and result["stage_a"]["processed"] >= limit:
                 break
 
             result["stage_a"]["processed"] += 1
-            metadata = get_deezer_track_metadata(song.deezer_id, app=app)
+            metadata = get_deezer_track_metadata(
+                song.deezer_id,
+                app=app,
+                album_cache=album_cache)
 
             changed = False
             if metadata.get("isrc") and not song.isrc:
@@ -105,13 +121,11 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
             break
 
     # --- Stage B: Offline Spotify true-up by EXACT ISRC ---
-    query_b = Song.query.filter(Song.isrc.isnot(None), Song.spotify_id.is_(None)).order_by(Song.id)
-    if limit:
-        query_b = query_b.limit(limit)
+    query_b = Song.query.filter(Song.isrc.isnot(None), Song.spotify_id.is_(None))
 
     newly_mapped_spotify_ids = []
 
-    for chunk_idx, chunk in enumerate(_chunked_query(query_b, chunk_size), 1):
+    for chunk_idx, chunk in enumerate(_chunked_query(query_b, chunk_size, limit), 1):
         if not chunk:
             break
 
@@ -162,11 +176,15 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
         result["stage_c"]["processed"] = len(newly_mapped_spotify_ids)
         updated_c = 0
 
-        try:
-            for i in range(0, len(newly_mapped_spotify_ids), chunk_size):
-                chunk_sids = newly_mapped_spotify_ids[i:i + chunk_size]
+        for i in range(0, len(newly_mapped_spotify_ids), chunk_size):
+            chunk_sids = newly_mapped_spotify_ids[i:i + chunk_size]
+            try:
                 archive_res = bulk_lookup_spotify_archive_audio_features(app, chunk_sids)
-                sid_to_features = {item["id"]: item for item in archive_res.get("results", [])}
+                sid_to_features = {
+                    item["spotify_id"]: item
+                    for item in archive_res.get("results", [])
+                    if item.get("spotify_id")
+                }
 
                 if not dry_run:
                     songs_to_update = Song.query.filter(Song.spotify_id.in_(chunk_sids)).all()
@@ -195,27 +213,26 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
                         if feat and feat.get("danceability") is not None:
                             updated_c += 1
 
-        except SpotifyArchiveError as exc:
-            app.logger.warning(
-                f"Stage C archive lookup failed, falling back to Spotify client: {exc}")
-            sp = app.config.get('sp')
-            if sp:
-                from musicround.helpers.import_helper import ImportHelper
-                if not dry_run:
-                    for sid in newly_mapped_spotify_ids:
-                        song = Song.query.filter_by(spotify_id=sid).first()
-                        if song:
-                            ImportHelper._fetch_audio_features_for_song(sp, song, sid)
-                            if song.danceability is not None:
-                                updated_c += 1
-                            if sleep_sec > 0:
-                                time.sleep(sleep_sec)
-                    db.session.commit()
+            except SpotifyArchiveError as exc:
+                app.logger.warning(
+                    f"Stage C archive lookup failed for chunk, falling back: {exc}")
+                sp = app.config.get('sp')
+                if sp:
+                    from musicround.helpers.import_helper import ImportHelper
+                    if not dry_run:
+                        for sid in chunk_sids:
+                            song = Song.query.filter_by(spotify_id=sid).first()
+                            if song:
+                                ImportHelper._fetch_audio_features_for_song(sp, song, sid)
+                                if song.danceability is not None:
+                                    updated_c += 1
+                                if sleep_sec > 0:
+                                    time.sleep(sleep_sec)
+                        db.session.commit()
+                    else:
+                        updated_c += len(chunk_sids)
                 else:
-                    for sid in newly_mapped_spotify_ids:
-                        updated_c += 1
-            else:
-                app.logger.error("Stage C fallback failed: Spotify client not available.")
+                    app.logger.error("Stage C fallback failed: Spotify client not available.")
 
         result["stage_c"]["updated"] = updated_c
         app.logger.info(
