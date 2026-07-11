@@ -23,6 +23,7 @@ from musicround.helpers.spotify_helper import (
     get_spotify_token,
     get_spotify_user_info as spotify_helper_get_user_info,
 )
+from musicround.services.automation import AutomationError
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 _LOGIN_FAILURES = {}
