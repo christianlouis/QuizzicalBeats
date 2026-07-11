@@ -53,6 +53,7 @@
                     </td>
                     <td class="px-4 py-4 align-top">
                         <form method="post" action="{{ url_for('users.update_seed_source', source_id=source.id) }}" class="flex items-center gap-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <label class="inline-flex items-center" title="Enable this source for scheduled review reads">
                                 <input class="h-4 w-4 accent-teal-600" type="checkbox" name="active" {% if source.active %}checked{% endif %}>
                             </label>
@@ -67,6 +68,7 @@
                     </td>
                     <td class="px-4 py-4 text-right align-top">
                         <form method="post" action="{{ url_for('users.refresh_seed_source', source_id=source.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <button class="inline-flex items-center gap-2 border border-teal-600 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit"><i class="fas fa-sync-alt"></i><span>Review now</span></button>
                         </form>
                     </td>

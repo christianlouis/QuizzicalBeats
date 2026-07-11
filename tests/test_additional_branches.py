@@ -1,5 +1,6 @@
 """Additional tests for setup, system health, and API branches."""
 import json
+import re
 import pytest
 from musicround.helpers.import_queue import ImportQueue
 from musicround.models import db, ImportJobRecord, SeedSource, User, Role, Song, Tag
@@ -24,7 +25,7 @@ def _login(app, client, username, password='TestPass123!'):
 
 
 class TestSeedSourceDashboard:
-    def test_admin_can_explain_and_toggle_catalog_source(self, app, client):
+    def test_admin_can_explain_and_toggle_catalog_source(self, app, client, monkeypatch):
         _create_user(app, 'seed_admin', 'seedadmin@example.com', is_admin=True)
         with app.app_context():
             source = SeedSource(
@@ -48,9 +49,15 @@ class TestSeedSourceDashboard:
         assert 'never add songs automatically' in body
         assert 'Example Chart' in body
 
+        app.config['WTF_CSRF_ENABLED'] = True
+        csrf_token = re.search(
+            r'name="csrf_token" value="([^"]+)"', body
+        ).group(1)
+        assert body.count('name="csrf_token"') == 2
+
         response = client.post(
             f'/users/seed-sources/{source_id}',
-            data={'cadence': 'daily'},
+            data={'cadence': 'daily', 'csrf_token': csrf_token},
             follow_redirects=True,
         )
         assert response.status_code == 200
@@ -58,6 +65,18 @@ class TestSeedSourceDashboard:
             source = db.session.get(SeedSource, source_id)
             assert source.active is False
             assert source.cadence == 'daily'
+
+        monkeypatch.setattr(
+            'musicround.services.automation.fetch_seed_source_candidates',
+            lambda *_args, **_kwargs: {'count': 1},
+        )
+        response = client.post(
+            f'/users/seed-sources/{source_id}/refresh',
+            data={'csrf_token': csrf_token},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b'reviewed 1 candidates' in response.data
 
 
 class TestSetupRoute:
