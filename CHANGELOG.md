@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added `run.py catalog backfill-isrc` CLI command to orchestrate idempotent backfill of Deezer metadata, exact-ISRC Spotify offline mapping, and audio features.
 - Added batched, exact-ISRC metadata backfill from the optional offline Spotify
   archive. It fills missing stable fields and records snapshot provenance while
   preserving existing curated values and current provider previews.

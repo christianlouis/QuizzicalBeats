@@ -65,11 +65,11 @@ def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='Quizzical Beats Management Script')
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
-    
+
     # Create the backup subcommand
     backup_parser = subparsers.add_parser('backup', help='Backup management')
     backup_subparsers = backup_parser.add_subparsers(dest='backup_action', help='Backup action to perform')
-    
+
     # Create backup action
     create_parser = backup_subparsers.add_parser('create', help='Create a new backup')
     create_parser.add_argument('--auto', action='store_true', help='Create backup with automatic name')
@@ -84,7 +84,7 @@ def main():
         dest='json_output',
         help='Print machine-readable credential-safe backup readiness diagnostics',
     )
-    
+
     # Retention policy action
     retention_parser = backup_subparsers.add_parser('retention', help='Apply backup retention policy')
     retention_parser.add_argument('--days', type=int, default=30, help='Number of days to keep backups')
@@ -368,10 +368,49 @@ def main():
         action='store_true',
         help='Send the admin summary email. Omit for the default dry run.',
     )
-    
+
+    catalog_parser = subparsers.add_parser('catalog', help='Catalog management commands')
+    catalog_subparsers = catalog_parser.add_subparsers(
+        dest='catalog_action',
+        help='Catalog action to perform',
+    )
+    backfill_isrc_parser = catalog_subparsers.add_parser(
+        'backfill-isrc',
+        help='Backfill catalog with provider identifiers (ISRCs) and offline Spotify lookups',
+    )
+    backfill_isrc_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Run the backfill process without committing changes to the database.',
+    )
+    backfill_isrc_parser.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='Maximum number of records to process per stage.',
+    )
+    backfill_isrc_parser.add_argument(
+        '--chunk-size',
+        type=int,
+        default=50,
+        help='Number of records to process per transaction chunk.',
+    )
+    backfill_isrc_parser.add_argument(
+        '--sleep',
+        type=float,
+        default=0.1,
+        help='Sleep time in seconds between chunk/API requests.',
+    )
+    backfill_isrc_parser.add_argument(
+        '--json',
+        action='store_true',
+        dest='json_output',
+        help='Print the result dictionary as JSON',
+    )
+
     # Parse the arguments
     args = parser.parse_args()
-    
+
     # Run the command
     if args.command == 'backup':
         if args.backup_action == 'readiness':
@@ -791,16 +830,53 @@ def main():
                 )
                 print(json.dumps(result, indent=2, sort_keys=True))
                 return 1 if result.get("failed") else 0
+    elif args.command == 'catalog':
+        if args.catalog_action == 'backfill-isrc':
+            with contextlib.redirect_stdout(sys.stderr):
+                app = _create_database_cli_app()
+            with app.app_context():
+                from musicround.helpers.catalog_backfill import run_backfill
+
+                try:
+                    result = run_backfill(
+                        dry_run=args.dry_run,
+                        limit=args.limit,
+                        chunk_size=args.chunk_size,
+                        sleep_sec=args.sleep,
+                    )
+                except Exception as exc:
+                    print(f"Catalog backfill error: {exc}", file=sys.stderr)
+                    return 78
+                if args.json_output:
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                else:
+                    print("Catalog Backfill Result:")
+                    print("Coverage Before:")
+                    for k, v in result["coverage_before"].items():
+                        print(f"  {k}: {v}")
+                    print("\nStage A (Deezer metadata):")
+                    print(f"  Processed: {result['stage_a']['processed']}")
+                    print(f"  Updated: {result['stage_a']['updated']}")
+                    print("\nStage B (Spotify ISRC true-up):")
+                    print(f"  Processed: {result['stage_b']['processed']}")
+                    print(f"  Updated: {result['stage_b']['updated']}")
+                    print("\nStage C (Spotify features):")
+                    print(f"  Processed: {result['stage_c']['processed']}")
+                    print(f"  Updated: {result['stage_c']['updated']}")
+                    print("\nCoverage After:")
+                    for k, v in result["coverage_after"].items():
+                        print(f"  {k}: {v}")
+                return 0
     else:
         # Default: Run the Flask app
         app = create_app()
         # When running in Docker, we need to listen on 0.0.0.0
         host = os.environ.get('FLASK_HOST', '0.0.0.0')
         port = int(os.environ.get('FLASK_PORT', 5000))
-        
+
         # Enable debug mode in development
         debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-        
+
         # Display app version and release info
         version = get_version_str()
         print(f"Quizzical Beats {version}")
@@ -808,8 +884,9 @@ def main():
         print("-" * 40)
         print(f"Starting Flask app on {host}:{port} (debug={debug})")
         app.run(host=host, port=port, debug=debug)
-    
+
     return 0
+
 
 if __name__ == '__main__':
     # Run the main function
