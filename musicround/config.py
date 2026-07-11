@@ -78,6 +78,9 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
     MAIL_SENDER = os.getenv("MAIL_SENDER", "quizzical-beats@example.com")
     MAIL_RECIPIENT = os.getenv("MAIL_RECIPIENT", "admin@example.com")
+    EMAIL_VERIFICATION_REQUIRED = bool_from_config(
+        os.getenv("EMAIL_VERIFICATION_REQUIRED", "False")
+    )
     IMPORT_JOB_EMAIL_NOTIFICATIONS = bool_from_config(
         os.getenv("IMPORT_JOB_EMAIL_NOTIFICATIONS", "False")
     )

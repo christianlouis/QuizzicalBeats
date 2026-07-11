@@ -76,6 +76,20 @@ def verify_email_delivery(recipient=None, send=False):
     return result
 
 
+def send_account_verification_email(recipient, username, verification_url):
+    """Send a local-account verification email without exposing token details in logs."""
+    return send_email(
+        recipient=recipient,
+        subject="Verify your Quizzical Beats email address",
+        body_text=(
+            f"Hello {username},\n\n"
+            "Confirm your email address to activate your Quizzical Beats account:\n"
+            f"{verification_url}\n\n"
+            "This link expires in 24 hours. If you did not create this account, ignore this email."
+        ),
+    )
+
+
 def send_email(recipient, subject, body_text, attachments=None):
     """
     Sends an email with optional attachments.

@@ -16,6 +16,7 @@ from musicround.models import db, User, Role, SystemSetting, UserPreferences
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
+from musicround.helpers.email_helper import send_account_verification_email
 from musicround.helpers.paths import app_data_dir, backup_dir
 from musicround.helpers.spotify_helper import (
     clear_manual_spotify_bearer_token,
@@ -34,6 +35,27 @@ def _get_or_create_user_preferences(user: User) -> UserPreferences:
         preferences = UserPreferences(user_id=user.id)
         db.session.add(preferences)
     return preferences
+
+
+def _issue_email_verification_token(user: User) -> str:
+    token = uuid.uuid4().hex
+    user.email_verification_token = token
+    user.email_verification_expiry = datetime.now() + timedelta(hours=24)
+    return token
+
+
+def _send_email_verification(user: User) -> bool:
+    token = _issue_email_verification_token(user)
+    db.session.commit()
+    verification_url = url_for("users.verify_email", token=token, _external=True)
+    sent, _message = send_account_verification_email(
+        recipient=user.email,
+        username=user.username,
+        verification_url=verification_url,
+    )
+    if not sent:
+        current_app.logger.warning("Could not send account verification email for user %s", user.id)
+    return sent
 
 
 def _client_rate_limit_id():
@@ -490,8 +512,12 @@ def register():
             )
             db.session.add(new_user)
             db.session.commit()
-            
-            flash('Registration successful! You can now log in.', 'success')
+            verification_sent = _send_email_verification(new_user)
+
+            if verification_sent:
+                flash('Registration successful. Check your email to verify your address.', 'success')
+            else:
+                flash('Registration successful. Email verification could not be sent yet.', 'warning')
             return redirect(url_for('users.login'))
         except Exception as e:
             db.session.rollback()
@@ -500,6 +526,33 @@ def register():
             return render_template('users/register.html')
     
     return render_template('users/register.html')
+
+
+@users_bp.route('/verify-email/<token>', methods=['GET'])
+def verify_email(token):
+    """Verify a local account email with a one-time, expiring token."""
+    user = User.query.filter_by(email_verification_token=token).first()
+    if not user or not user.email_verification_expiry or user.email_verification_expiry < datetime.now():
+        flash('This verification link is invalid or has expired.', 'danger')
+        return redirect(url_for('users.login'))
+
+    user.email_verified_at = datetime.now()
+    user.email_verification_token = None
+    user.email_verification_expiry = None
+    db.session.commit()
+    flash('Your email address has been verified. You can now log in.', 'success')
+    return redirect(url_for('users.login'))
+
+
+@users_bp.route('/resend-verification', methods=['POST'])
+def resend_verification():
+    """Resend a local-account verification email without disclosing account existence."""
+    email = (request.form.get('email') or '').strip().lower()
+    user = User.query.filter_by(email=email, auth_provider='local').first()
+    if user and not user.email_verified_at:
+        _send_email_verification(user)
+    flash('If the account needs verification, a new email has been sent.', 'success')
+    return redirect(url_for('users.login'))
 
 @users_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -537,6 +590,14 @@ def login():
         if not user or not check_password_hash(user.password_hash, password):
             _record_rate_limit_failure(_LOGIN_FAILURES, rate_limit_key, window_seconds)
             flash('Invalid username/email or password', 'danger')
+            return render_template('users/login.html', oauth_providers=oauth_providers)
+
+        if (
+            current_app.config.get('EMAIL_VERIFICATION_REQUIRED', False)
+            and user.auth_provider == 'local'
+            and not user.email_verified_at
+        ):
+            flash('Verify your email address before signing in.', 'warning')
             return render_template('users/login.html', oauth_providers=oauth_providers)
         
         # Log in the user

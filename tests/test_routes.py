@@ -74,6 +74,48 @@ class TestUserRoutes:
             user = User.query.filter_by(username='newuser').first()
             assert user is not None
 
+    def test_local_registration_sends_verification_and_token_confirms_email(self, app, client, monkeypatch):
+        sent = {}
+        monkeypatch.setattr(
+            'musicround.routes.users.send_account_verification_email',
+            lambda recipient, username, verification_url: sent.update(
+                recipient=recipient, username=username, verification_url=verification_url
+            ) or (True, 'sent'),
+        )
+        client.post('/users/register', data={
+            'username': 'verifyme',
+            'email': 'verifyme@example.com',
+            'password': 'SecurePass123!',
+            'confirm_password': 'SecurePass123!',
+        })
+        with app.app_context():
+            user = User.query.filter_by(username='verifyme').first()
+            assert user.email_verification_token
+            token = user.email_verification_token
+            assert sent['recipient'] == 'verifyme@example.com'
+            assert token in sent['verification_url']
+
+        response = client.get(f'/users/verify-email/{token}', follow_redirects=True)
+        assert response.status_code == 200
+        with app.app_context():
+            user = User.query.filter_by(username='verifyme').first()
+            assert user.email_verified_at is not None
+            assert user.email_verification_token is None
+
+    def test_required_email_verification_blocks_unverified_local_login(self, app, client):
+        with app.app_context():
+            app.config['EMAIL_VERIFICATION_REQUIRED'] = True
+            user = User(username='unverified', email='unverified@example.com')
+            user.password = 'ValidPass123!'
+            db.session.add(user)
+            db.session.commit()
+
+        response = client.post('/users/login', data={
+            'username': 'unverified',
+            'password': 'ValidPass123!',
+        }, follow_redirects=True)
+        assert b'Verify your email address before signing in.' in response.data
+
     def test_login_post_invalid_credentials(self, client):
         """Test that login with invalid credentials fails gracefully."""
         response = client.post('/users/login', data={

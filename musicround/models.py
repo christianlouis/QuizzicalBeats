@@ -66,6 +66,9 @@ class User(db.Model, UserMixin):
     # Token for password reset, email verification, etc.
     reset_token = db.Column(db.String(100), index=True, unique=True)
     reset_token_expiry = db.Column(db.DateTime)
+    email_verification_token = db.Column(db.String(100), index=True, unique=True)
+    email_verification_expiry = db.Column(db.DateTime)
+    email_verified_at = db.Column(db.DateTime)
     
     # Authentication provider info
     auth_provider = db.Column(db.String(20), default='local')  # 'local', 'google', 'authentik'

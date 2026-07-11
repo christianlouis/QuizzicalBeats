@@ -226,6 +226,9 @@ MAIL_PASSWORD=your-email-password
 MAIL_SENDER=quizzical-beats@example.com
 MAIL_RECIPIENT=admin@example.com
 IMPORT_JOB_EMAIL_NOTIFICATIONS=False
+# Set to True only after SMTP delivery has been verified. Existing accounts are
+# unaffected; newly registered local accounts must verify their email before login.
+EMAIL_VERIFICATION_REQUIRED=False
 ```
 
 Set `IMPORT_JOB_EMAIL_NOTIFICATIONS=True` to notify the owning user when an
