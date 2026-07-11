@@ -1,8 +1,9 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from musicround.models import db, Song
 from musicround.helpers.catalog_backfill import run_backfill
+from musicround.helpers.spotify_archive import SpotifyArchiveError
 
 
 @pytest.fixture
@@ -210,3 +211,79 @@ def test_run_backfill_respects_limit(mock_features, mock_archive, mock_deezer, a
     assert s1.danceability == 0.4
     assert s2.spotify_id is None
     assert result["coverage_after"]["with_spotify_id"] == 2  # s1 mapped + s5 existing
+
+
+@patch('musicround.helpers.catalog_backfill.get_deezer_track_metadata')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
+def test_run_backfill_skips_stage_b_archive_errors(
+        mock_features, mock_archive, mock_deezer, app, test_songs, caplog):
+    """Test that Stage B archive failures are logged and skipped."""
+    mock_deezer.return_value = {}
+    mock_archive.side_effect = SpotifyArchiveError("archive unavailable")
+    mock_features.return_value = {"results": []}
+
+    result = run_backfill(dry_run=False, limit=None, chunk_size=10, sleep_sec=0)
+
+    assert result["stage_b"]["processed"] == 2
+    assert result["stage_b"]["updated"] == 0
+    assert "Stage B archive lookup failed" in caplog.text
+
+
+@patch('musicround.helpers.catalog_backfill.get_deezer_track_metadata')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
+def test_run_backfill_skips_duplicate_spotify_ids(
+        mock_features, mock_archive, mock_deezer, app, test_songs, caplog):
+    """Test that Stage B skips Spotify IDs already assigned to another song."""
+    mock_deezer.return_value = {}
+    mock_archive.return_value = {
+        "results": [
+            {"isrc": "ISRC1", "spotify_id": "s3"},
+            {"isrc": "ISRC2", "spotify_id": "s2"}
+        ]
+    }
+    mock_features.return_value = {
+        "results": [
+            {"spotify_id": "s2", "danceability": 0.7}
+        ]
+    }
+
+    result = run_backfill(dry_run=False, limit=None, chunk_size=10, sleep_sec=0)
+
+    s2 = db.session.get(Song, test_songs[1])
+    s4 = db.session.get(Song, test_songs[3])
+    assert s2.spotify_id is None
+    assert s4.spotify_id == "s2"
+    assert result["stage_b"]["updated"] == 1
+    assert "Stage B skipped duplicate Spotify ID s3" in caplog.text
+
+
+@patch('musicround.helpers.import_helper.ImportHelper._fetch_audio_features_for_song')
+@patch('musicround.helpers.catalog_backfill.get_deezer_track_metadata')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_isrcs')
+@patch('musicround.helpers.catalog_backfill.bulk_lookup_spotify_archive_audio_features')
+def test_run_backfill_stage_c_uses_spotify_fallback(
+        mock_features, mock_archive, mock_deezer, mock_fetch_features, app, test_songs):
+    """Test that Stage C falls back to the Spotify client on archive errors."""
+    app.config['sp'] = MagicMock()
+    mock_deezer.return_value = {}
+    mock_archive.return_value = {
+        "results": [
+            {"isrc": "ISRC1", "spotify_id": "s1"}
+        ]
+    }
+    mock_features.side_effect = SpotifyArchiveError("features unavailable")
+
+    def set_features(sp, song, sid):
+        song.danceability = 0.9
+
+    mock_fetch_features.side_effect = set_features
+
+    result = run_backfill(dry_run=False, limit=None, chunk_size=10, sleep_sec=0)
+
+    s2 = db.session.get(Song, test_songs[1])
+    assert s2.spotify_id == "s1"
+    assert s2.danceability == 0.9
+    assert result["stage_c"]["processed"] == 1
+    assert result["stage_c"]["updated"] == 1

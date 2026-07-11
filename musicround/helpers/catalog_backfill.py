@@ -1,6 +1,7 @@
 import time
 from typing import Any, Dict
 from flask import current_app
+from sqlalchemy.exc import IntegrityError
 
 from musicround.models import db, Song
 from musicround.helpers.metadata import get_deezer_track_metadata
@@ -55,6 +56,18 @@ def _chunked_query(query, chunk_size, limit=None):
 
 def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
                  sleep_sec: float = 0.1) -> Dict[str, Any]:
+    """Backfill catalog identifiers and audio features in staged batches.
+
+    Args:
+        dry_run: When true, roll back writes and report simulated coverage.
+        limit: Optional maximum number of songs each stage should process.
+        chunk_size: Maximum number of songs or Spotify IDs handled per batch.
+        sleep_sec: Delay between rate-limited external metadata calls.
+
+    Returns:
+        A dictionary containing coverage_before, coverage_after, and per-stage
+        processed/updated counters for stages A, B, and C.
+    """
     app = current_app._get_current_object()
 
     coverage_before = get_coverage()
@@ -69,13 +82,13 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
 
     # --- Stage A: Deezer ISRC + missing metadata ---
     query_a = Song.query.filter(Song.deezer_id.isnot(None), Song.isrc.is_(None))
+    album_cache = {}
 
     for chunk_idx, chunk in enumerate(_chunked_query(query_a, chunk_size, limit), 1):
         if not chunk:
             break
 
         updated_in_chunk = 0
-        album_cache = {}
         for song in chunk:
             if limit and result["stage_a"]["processed"] >= limit:
                 break
@@ -141,22 +154,36 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
 
         result["stage_b"]["processed"] += len(chunk)
         updated_in_chunk = 0
+        chunk_newly_mapped_ids = []
 
         try:
             archive_res = bulk_lookup_spotify_archive_isrcs(app, isrcs)
             isrc_to_spotify = {
                 item["isrc"].upper(): item["spotify_id"] for item in archive_res.get(
                     "results", []) if item.get("spotify_id")}
-
+            candidate_sids = set(isrc_to_spotify.values())
+            assigned_spotify_ids = set()
+            if candidate_sids:
+                assigned_spotify_ids = {
+                    sid for (sid,) in db.session.query(Song.spotify_id)
+                    .filter(Song.spotify_id.in_(candidate_sids))
+                    .all()
+                }
             for song in chunk:
                 if not song.isrc:
                     continue
                 sid = isrc_to_spotify.get(song.isrc.upper())
                 if sid:
+                    if sid in assigned_spotify_ids:
+                        app.logger.warning(
+                            "Stage B skipped duplicate Spotify ID %s for song %s",
+                            sid,
+                            song.id)
+                        continue
                     song.spotify_id = sid
-                    newly_mapped_spotify_ids.append(sid)
+                    assigned_spotify_ids.add(sid)
+                    chunk_newly_mapped_ids.append(sid)
                     updated_in_chunk += 1
-                    result["stage_b"]["updated"] += 1
 
         except SpotifyArchiveError as exc:
             app.logger.warning(f"Stage B archive lookup failed: {exc}")
@@ -164,9 +191,18 @@ def run_backfill(dry_run: bool = False, limit: int = None, chunk_size: int = 50,
         app.logger.info(
             f"Stage B chunk {chunk_idx} - {len(chunk)} songs, {updated_in_chunk} updated")
         if not dry_run:
-            db.session.commit()
+            try:
+                db.session.commit()
+            except IntegrityError as exc:
+                db.session.rollback()
+                app.logger.warning(
+                    f"Stage B commit skipped due to Spotify ID conflict: {exc}")
+                updated_in_chunk = 0
+                chunk_newly_mapped_ids = []
         else:
             db.session.rollback()
+        result["stage_b"]["updated"] += updated_in_chunk
+        newly_mapped_spotify_ids.extend(chunk_newly_mapped_ids)
 
         if limit and result["stage_b"]["processed"] >= limit:
             break
