@@ -99,6 +99,19 @@ ROUND_ARTIFACT_STORAGE_BACKEND=filesystem
 ROUND_MP3_DIR=/data/rounds
 ROUND_PDF_DIR=/data/pdfs
 
+# S3-compatible generated-artifact storage (optional)
+# Keep ROUND_ARTIFACT_STORAGE_BACKEND=filesystem until this bucket has been
+# verified with `python run.py storage readiness --json`.
+# ROUND_ARTIFACT_STORAGE_BACKEND=s3
+# ROUND_ARTIFACT_S3_ENDPOINT_URL=https://s3.example.net
+# ROUND_ARTIFACT_S3_BUCKET=quizzicalbeats-artifacts
+# ROUND_ARTIFACT_S3_PREFIX=production
+# ROUND_ARTIFACT_S3_REGION=eu-central-1
+# ROUND_ARTIFACT_S3_ACCESS_KEY_ID=...
+# ROUND_ARTIFACT_S3_SECRET_ACCESS_KEY=...
+# ROUND_ARTIFACT_S3_ADDRESSING_STYLE=auto
+# ROUND_ARTIFACT_CACHE_DIR=/tmp/quizzicalbeats-artifacts
+
 # For MySQL/MariaDB:
 # SQLALCHEMY_DATABASE_URI=mysql+pymysql://username:password@localhost/musicround
 

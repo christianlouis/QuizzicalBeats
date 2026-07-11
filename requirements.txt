@@ -4,6 +4,7 @@ Flask-SQLAlchemy
 flask_migrate
 psycopg2-binary>=2.9.9
 requests
+boto3
 pydub
 reportlab
 PyJWT>=2.10.1

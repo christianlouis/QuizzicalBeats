@@ -1323,6 +1323,10 @@ def round_mp3(round_id):
         # Export the combined audio to an MP3 file
         try:
             combined_audio.export(mp3_file_path, format="mp3")
+            # The S3 backend uses this ephemeral path only for rendering. Persist
+            # the generated asset through the backend before reporting success.
+            with open(mp3_file_path, "rb") as mp3_file:
+                round_artifact_store().write_bytes("mp3", round_id, mp3_file.read())
             current_app.logger.info(f"MP3 file successfully generated at: {mp3_file_path}")
             
             # Update the round object to indicate MP3 has been generated and update timestamp

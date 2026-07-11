@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+import uuid
 from typing import Any
 
 from flask import current_app
 
 ROUND_ARTIFACT_KINDS = {"mp3", "pdf"}
-SUPPORTED_ROUND_ARTIFACT_BACKENDS = {"filesystem"}
+SUPPORTED_ROUND_ARTIFACT_BACKENDS = {"filesystem", "s3"}
 
 
 class FilesystemRoundArtifactStore:
@@ -82,14 +83,142 @@ class FilesystemRoundArtifactStore:
         return result
 
 
-def round_artifact_store() -> FilesystemRoundArtifactStore:
+def _s3_client():
+    """Build the S3-compatible client only when the object backend is selected."""
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:  # pragma: no cover - dependency is enforced in production builds.
+        raise RuntimeError("The S3 artifact backend requires boto3.") from exc
+
+    addressing_style = current_app.config.get("ROUND_ARTIFACT_S3_ADDRESSING_STYLE", "auto")
+    return boto3.client(
+        "s3",
+        endpoint_url=current_app.config.get("ROUND_ARTIFACT_S3_ENDPOINT_URL") or None,
+        region_name=current_app.config.get("ROUND_ARTIFACT_S3_REGION") or None,
+        aws_access_key_id=current_app.config.get("ROUND_ARTIFACT_S3_ACCESS_KEY_ID") or None,
+        aws_secret_access_key=current_app.config.get("ROUND_ARTIFACT_S3_SECRET_ACCESS_KEY") or None,
+        config=Config(s3={"addressing_style": addressing_style}),
+    )
+
+
+class S3RoundArtifactStore:
+    """S3-compatible round storage with an ephemeral cache for render/download APIs."""
+
+    backend = "s3"
+
+    def __init__(self, client=None):
+        self.client = client or _s3_client()
+        self.bucket = (current_app.config.get("ROUND_ARTIFACT_S3_BUCKET") or "").strip()
+        self.prefix = (current_app.config.get("ROUND_ARTIFACT_S3_PREFIX") or "round-artifacts").strip("/")
+        self.cache_dir = current_app.config.get("ROUND_ARTIFACT_CACHE_DIR", "/tmp/quizzicalbeats-artifacts")
+        if not self.bucket:
+            raise RuntimeError("ROUND_ARTIFACT_S3_BUCKET must be set for the S3 artifact backend.")
+
+    def filename(self, kind: str, round_id: int) -> str:
+        if kind not in ROUND_ARTIFACT_KINDS:
+            raise ValueError(f"Unsupported round artifact kind: {kind}")
+        return f"round_{round_id}.{kind}"
+
+    def key(self, kind: str, round_id: int) -> str:
+        return "/".join(part for part in (self.prefix, kind, self.filename(kind, round_id)) if part)
+
+    def path(self, kind: str, round_id: int) -> str:
+        """Return a local, disposable cache path and hydrate it when the object exists."""
+        path = os.path.join(self.cache_dir, kind, self.filename(kind, round_id))
+        if not os.path.exists(path) and self.exists(kind, round_id):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as artifact_file:
+                self.client.download_fileobj(self.bucket, self.key(kind, round_id), artifact_file)
+        return path
+
+    def exists(self, kind: str, round_id: int) -> bool:
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=self.key(kind, round_id))
+            return True
+        except Exception as exc:
+            response = getattr(exc, "response", {}) or {}
+            status = str((response.get("Error") or {}).get("Code") or "")
+            if status in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+
+    def size(self, kind: str, round_id: int) -> int:
+        response = self.client.head_object(Bucket=self.bucket, Key=self.key(kind, round_id))
+        return int(response["ContentLength"])
+
+    def read_bytes(self, kind: str, round_id: int) -> bytes:
+        response = self.client.get_object(Bucket=self.bucket, Key=self.key(kind, round_id))
+        data = response["Body"].read()
+        path = os.path.join(self.cache_dir, kind, self.filename(kind, round_id))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as artifact_file:
+            artifact_file.write(data)
+        return data
+
+    def write_bytes(self, kind: str, round_id: int, data: bytes) -> str:
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=self.key(kind, round_id),
+            Body=data,
+            ContentType="audio/mpeg" if kind == "mp3" else "application/pdf",
+        )
+        path = os.path.join(self.cache_dir, kind, self.filename(kind, round_id))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as artifact_file:
+            artifact_file.write(data)
+        return path
+
+    def delete(self, kind: str, round_id: int) -> bool:
+        existed = self.exists(kind, round_id)
+        if existed:
+            self.client.delete_object(Bucket=self.bucket, Key=self.key(kind, round_id))
+        path = os.path.join(self.cache_dir, kind, self.filename(kind, round_id))
+        if os.path.exists(path):
+            os.remove(path)
+        return existed
+
+    def inventory(self, kind: str) -> dict[str, Any]:
+        if kind not in ROUND_ARTIFACT_KINDS:
+            raise ValueError(f"Unsupported round artifact kind: {kind}")
+        prefix = "/".join(part for part in (self.prefix, kind) if part) + "/"
+        result: dict[str, Any] = {
+            "kind": kind,
+            "file_count": 0,
+            "total_bytes": 0,
+            "ok": True,
+            "error": None,
+        }
+        try:
+            paginator = self.client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for item in page.get("Contents", []):
+                    if item["Key"].endswith(f".{kind}"):
+                        result["file_count"] += 1
+                        result["total_bytes"] += int(item.get("Size", 0))
+        except Exception as exc:
+            result["ok"] = False
+            result["error"] = str(exc)
+        return result
+
+    def health_check(self) -> dict[str, Any]:
+        key = "/".join(part for part in (self.prefix, ".health", uuid.uuid4().hex) if part)
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=b"")
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+            return {"ok": True, "label": "S3 artifact bucket", "bucket": self.bucket}
+        except Exception as exc:
+            return {"ok": False, "label": "S3 artifact bucket", "bucket": self.bucket, "error": str(exc)}
+
+
+def round_artifact_store() -> FilesystemRoundArtifactStore | S3RoundArtifactStore:
     """Return the configured generated-round artifact store."""
     backend = current_app.config.get("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
     if backend not in SUPPORTED_ROUND_ARTIFACT_BACKENDS:
-        raise RuntimeError(
-            f"Unsupported ROUND_ARTIFACT_STORAGE_BACKEND={backend!r}. "
-            "Only 'filesystem' is available in this deployment."
-        )
+        raise RuntimeError(f"Unsupported ROUND_ARTIFACT_STORAGE_BACKEND={backend!r}.")
+    if backend == "s3":
+        return S3RoundArtifactStore()
     return FilesystemRoundArtifactStore()
 
 
@@ -127,12 +256,12 @@ def round_artifact_storage_capabilities() -> dict[str, Any]:
         "supported": supported,
         "supported_backends": sorted(SUPPORTED_ROUND_ARTIFACT_BACKENDS),
         "artifact_kinds": sorted(ROUND_ARTIFACT_KINDS),
-        "supports_direct_file_paths": backend == "filesystem",
-        "supports_cloud_storage": False,
+        "supports_direct_file_paths": True,
+        "supports_cloud_storage": backend == "s3",
         "supports_background_sync": False,
-        "supports_shared_multi_replica": False,
+        "supports_shared_multi_replica": backend == "s3",
         "mcp_asset_responses_stable": supported,
-        "ha_blocking": backend == "filesystem",
+        "ha_blocking": backend != "s3",
         "configured_paths": {},
         "warnings": [],
     }
@@ -155,6 +284,12 @@ def round_artifact_storage_capabilities() -> dict[str, Any]:
                 ),
             }
         )
+    elif backend == "s3":
+        capabilities["configured_paths"] = {
+            "bucket": current_app.config.get("ROUND_ARTIFACT_S3_BUCKET", ""),
+            "prefix": current_app.config.get("ROUND_ARTIFACT_S3_PREFIX", "round-artifacts"),
+            "cache": current_app.config.get("ROUND_ARTIFACT_CACHE_DIR", "/tmp/quizzicalbeats-artifacts"),
+        }
     elif not supported:
         capabilities["warnings"].append(
             {
@@ -195,7 +330,18 @@ def round_artifact_storage_inventory(
         )
         return inventory
 
-    store = round_artifact_store()
+    try:
+        store = round_artifact_store()
+    except RuntimeError as exc:
+        inventory["ok"] = False
+        inventory["issues"].append(
+            {
+                "code": "artifact_storage_not_configured",
+                "severity": "error",
+                "message": str(exc),
+            }
+        )
+        return inventory
     kinds = []
     if include_mp3:
         kinds.append("mp3")
@@ -312,15 +458,37 @@ def check_round_artifact_storage(
             "hints": [hint],
         }
 
-    checks = []
-    if include_mp3:
-        checks.append(
-            _check_writable_directory(round_mp3_dir(), "Round MP3 directory", create=create)
-        )
-    if include_pdf:
-        checks.append(
-            _check_writable_directory(round_pdf_dir(), "Round PDF directory", create=create)
-        )
+    if backend == "s3":
+        try:
+            check = round_artifact_store().health_check()
+        except RuntimeError as exc:
+            check = {
+                "ok": False,
+                "label": "S3 artifact bucket",
+                "bucket": "",
+                "error": str(exc),
+            }
+        checks = [{
+            "label": check["label"],
+            "path": f"s3://{check.get('bucket', '')}",
+            "exists": check["ok"],
+            "is_dir": None,
+            "writable": check["ok"],
+            "ok": check["ok"],
+            "code": None if check["ok"] else "artifact_storage_not_writable",
+            "message": check.get("error"),
+            "hint": "Verify the S3 bucket, credentials, and write permissions.",
+        }]
+    else:
+        checks = []
+        if include_mp3:
+            checks.append(
+                _check_writable_directory(round_mp3_dir(), "Round MP3 directory", create=create)
+            )
+        if include_pdf:
+            checks.append(
+                _check_writable_directory(round_pdf_dir(), "Round PDF directory", create=create)
+            )
 
     issues = []
     for check in checks:
