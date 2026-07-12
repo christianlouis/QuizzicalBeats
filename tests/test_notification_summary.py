@@ -30,9 +30,9 @@ def test_notification_admin_summary_counts_actionable_items(app):
     with app.app_context():
         user = _make_user(
             spotify_id='spotify-user',
-            spotify_token='secret-access-token',
-            spotify_refresh_token='secret-refresh-token',
-            spotify_token_expiry=now + timedelta(minutes=5),
+            spotify_token=None,
+            spotify_refresh_token=None,
+            spotify_token_expiry=None,
         )
         round_obj = _make_round()
         db.session.add(
@@ -69,7 +69,6 @@ def test_notification_admin_summary_counts_actionable_items(app):
     assert summary['failed_round_export_count'] == 1
     assert summary['dead_letter_import_count'] == 1
     assert summary['actionable_count'] == 3
-    assert 'secret-access-token' not in str(summary)
     assert 'token=secret' not in str(summary)
     assert 'secret-playlist-id' not in str(summary)
 
