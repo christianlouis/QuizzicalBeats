@@ -78,6 +78,13 @@ class TestSeedSourceDashboard:
         assert response.status_code == 200
         assert b'saved 1 review candidates' in response.data
 
+        response = client.get(
+            f'/users/seed-sources/{source_id}/refresh',
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b'Start a source refresh with the Review now button' in response.data
+
     def test_admin_can_review_persisted_catalog_candidate(self, app, client):
         _create_user(app, 'candidate_admin', 'candidateadmin@example.com', is_admin=True)
         with app.app_context():

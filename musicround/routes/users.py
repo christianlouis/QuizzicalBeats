@@ -1595,12 +1595,16 @@ def update_seed_source(source_id):
     return redirect(url_for('users.seed_sources'))
 
 
-@users_bp.route('/seed-sources/<int:source_id>/refresh', methods=['POST'])
+@users_bp.route('/seed-sources/<int:source_id>/refresh', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def refresh_seed_source(source_id):
     """Fetch one source into the review-only candidate pipeline."""
     from musicround.services import automation
+
+    if request.method == 'GET':
+        flash('Start a source refresh with the Review now button on the catalog sources page.', 'info')
+        return redirect(url_for('users.seed_sources'))
 
     source = db.session.get(SeedSource, source_id)
     if not source:
@@ -1610,6 +1614,9 @@ def refresh_seed_source(source_id):
         result = automation.fetch_seed_source_candidates(source_id, limit=100, timeout_seconds=20)
     except AutomationError as exc:
         flash(str(exc), 'danger')
+    except Exception:  # pylint: disable=broad-except
+        current_app.logger.exception('Catalog source refresh failed for source %s', source_id)
+        flash('The source could not be refreshed. No songs were imported.', 'danger')
     else:
         flash(
             f"{source.name}: saved {result['persisted_candidate_count']} review candidates. "
