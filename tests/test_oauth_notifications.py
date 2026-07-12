@@ -18,10 +18,10 @@ def _make_user(username, email, **kwargs):
     return user
 
 
-def test_collect_oauth_token_notifications_respects_preferences_and_redacts_tokens(app):
+def test_collect_oauth_token_notifications_only_warns_when_user_action_is_required(app):
     now = datetime(2026, 7, 8, 10, 0, 0)
     with app.app_context():
-        _make_user(
+        expiring = _make_user(
             'spotifywarn',
             'spotifywarn@example.test',
             spotify_id='spotify-user',
@@ -47,16 +47,8 @@ def test_collect_oauth_token_notifications_respects_preferences_and_redacts_toke
 
         notifications = collect_oauth_token_notifications(now=now)
 
-    assert len(notifications) == 1
-    notification = notifications[0]
-    assert notification.recipient == 'spotifywarn@example.test'
-    assert notification.service == 'spotify'
-    assert notification.issue_code == 'spotify_token_expiring'
-    assert len(notification.dedupe_key) <= 64
-    assert 'secret-access-token' not in notification.body_text
-    assert 'secret-refresh-token' not in notification.body_text
-    assert 'secret-access-token' not in repr(notification)
-    assert 'secret-refresh-token' not in repr(notification)
+    assert notifications == []
+    assert expiring.spotify_refresh_token == 'secret-refresh-token'
 
 
 def test_send_oauth_token_notifications_deduplicates_successful_sends(app):
@@ -66,8 +58,8 @@ def test_send_oauth_token_notifications_deduplicates_successful_sends(app):
             'dropboxwarn',
             'dropboxwarn@example.test',
             dropbox_id='dropbox-user',
-            dropbox_token='dropbox-access-secret',
-            dropbox_refresh_token='dropbox-refresh-secret',
+            dropbox_token=None,
+            dropbox_refresh_token=None,
             dropbox_token_expiry=now - timedelta(minutes=1),
         )
         db.session.commit()
@@ -92,9 +84,9 @@ def test_send_oauth_token_notifications_dry_run_does_not_send_or_mark(app):
             'dryrunspotify',
             'dryrunspotify@example.test',
             spotify_id='spotify-user',
-            spotify_token='spotify-access-secret',
-            spotify_refresh_token='spotify-refresh-secret',
-            spotify_token_expiry=now + timedelta(minutes=5),
+            spotify_token=None,
+            spotify_refresh_token=None,
+            spotify_token_expiry=None,
         )
         db.session.commit()
 

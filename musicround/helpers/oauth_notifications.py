@@ -16,7 +16,10 @@ from musicround.models import SystemSetting, User
 
 
 TOKEN_NOTIFICATION_COOLDOWN_HOURS = 24
-ACTIONABLE_TOKEN_STATUSES = {"expiring", "expired", "reconnect_required", "expiry_unknown"}
+# Expiry is normal for short-lived OAuth access tokens. A refresh token lets the
+# provider helpers recover on demand; only missing credentials require a user
+# action and therefore an email.
+ACTIONABLE_TOKEN_STATUSES = {"reconnect_required"}
 
 
 @dataclass(frozen=True)

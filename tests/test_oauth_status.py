@@ -49,7 +49,7 @@ def test_spotify_status_warns_before_expiry_without_exposing_tokens():
     assert token_notice(status)["message"] == "Refresh or reconnect Spotify before starting a long import."
 
 
-def test_dropbox_status_marks_expired_tokens_as_reconnect_required():
+def test_dropbox_status_marks_expired_access_tokens_as_refreshable():
     now = datetime(2026, 7, 6, 12, 0, 0)
     status = dropbox_token_status(
         _user(
@@ -61,10 +61,10 @@ def test_dropbox_status_marks_expired_tokens_as_reconnect_required():
         now=now,
     )
 
-    assert status["status"] == "expired"
+    assert status["status"] == "refresh_required"
     assert status["expired"] is True
-    assert status["reconnect_required"] is True
-    assert status["message"] == "Reconnect Dropbox before exporting rounds."
+    assert status["reconnect_required"] is False
+    assert status["message"] == "Dropbox will refresh automatically before exporting round packages."
 
 
 def test_service_health_surfaces_machine_readable_token_warnings(app):
@@ -88,5 +88,5 @@ def test_service_health_surfaces_machine_readable_token_warnings(app):
     assert spotify_health["token_status"]["expires_at"].startswith(str(datetime.now().year))
 
     assert dropbox_health["status"] == "warning"
-    assert dropbox_health["issues"][0]["code"] == "dropbox_token_expired"
-    assert dropbox_health["token_status"]["reconnect_required"] is True
+    assert dropbox_health["issues"][0]["code"] == "dropbox_token_refresh_required"
+    assert dropbox_health["token_status"]["reconnect_required"] is False

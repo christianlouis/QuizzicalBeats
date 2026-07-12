@@ -86,12 +86,13 @@ def _token_status(
         payload.update(
             {
                 "expired": True,
-                "reconnect_required": True,
-                "status": "expired",
-                "level": "danger",
-                "title": "Token expired",
-                "message": f"Reconnect {service.title()} before using connected-service workflows.",
-                "issue_code": f"{service}_token_expired",
+                # Both providers support refresh tokens. An expired access token is
+                # therefore expected and is renewed on the next provider request.
+                "status": "refresh_required",
+                "level": "warning",
+                "title": "Access token will refresh",
+                "message": f"{service.title()} will refresh its access token automatically when needed.",
+                "issue_code": f"{service}_token_refresh_required",
             }
         )
     elif expires_at <= current_time + window:
@@ -119,8 +120,8 @@ def spotify_token_status(user: Any, now: datetime | None = None) -> dict[str, An
         expires_at=getattr(user, "spotify_token_expiry", None),
         now=now,
     )
-    if status["status"] == "expired":
-        status["message"] = "Reconnect Spotify before importing playlists or refreshing metadata."
+    if status["status"] == "refresh_required":
+        status["message"] = "Spotify will refresh automatically before playlist imports or metadata lookups."
     elif status["status"] == "expiring":
         status["message"] = "Refresh or reconnect Spotify before starting a long import."
     elif status["status"] == "expiry_unknown":
@@ -138,8 +139,8 @@ def dropbox_token_status(user: Any, now: datetime | None = None) -> dict[str, An
         expires_at=getattr(user, "dropbox_token_expiry", None),
         now=now,
     )
-    if status["status"] == "expired":
-        status["message"] = "Reconnect Dropbox before exporting rounds."
+    if status["status"] == "refresh_required":
+        status["message"] = "Dropbox will refresh automatically before exporting round packages."
     elif status["status"] == "expiring":
         status["message"] = "Refresh or reconnect Dropbox before exporting a round package."
     elif status["status"] == "expiry_unknown":
