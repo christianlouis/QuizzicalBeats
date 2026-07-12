@@ -3515,6 +3515,15 @@ def fetch_seed_source_candidates(
         run['id'] if run else None,
         parsed['candidates'],
     )
+    response_candidates = []
+    for raw_candidate, stored_candidate in zip(parsed['candidates'], persisted['candidates']):
+        candidate = dict(raw_candidate)
+        candidate.update({
+            'id': stored_candidate['id'],
+            'review_status': stored_candidate['review_status'],
+            'review_notes': stored_candidate['review_notes'],
+        })
+        response_candidates.append(candidate)
 
     return {
         "ok": True,
@@ -3522,7 +3531,7 @@ def fetch_seed_source_candidates(
         "provider": source.provider,
         "source_type": source.source_type,
         "count": parsed["count"],
-        "candidates": persisted['candidates'],
+        "candidates": response_candidates,
         "low_confidence_count": parsed["low_confidence_count"],
         "low_confidence": parsed["low_confidence"],
         "ready_for_import": parsed["ready_for_import"],
