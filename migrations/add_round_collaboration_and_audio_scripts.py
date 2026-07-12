@@ -71,7 +71,7 @@ def run_migration():
                 conn.execute(
                     text(
                         f"ALTER TABLE {round_table} "
-                        "ADD COLUMN public_token_created_at DATETIME"
+                        "ADD COLUMN public_token_created_at TIMESTAMP"
                     )
                 )
                 changes_made = True
@@ -79,7 +79,7 @@ def run_migration():
                 conn.execute(
                     text(
                         f"ALTER TABLE {round_table} "
-                        "ADD COLUMN public_token_expires_at DATETIME"
+                        "ADD COLUMN public_token_expires_at TIMESTAMP"
                     )
                 )
                 changes_made = True
@@ -93,7 +93,7 @@ def run_migration():
                             round_id INTEGER NOT NULL,
                             user_id INTEGER NOT NULL,
                             role VARCHAR(20) NOT NULL DEFAULT 'viewer',
-                            created_at DATETIME,
+                            created_at TIMESTAMP,
                             UNIQUE(round_id, user_id)
                         )
                         """
@@ -115,11 +115,11 @@ def run_migration():
                             tone VARCHAR(200),
                             theme VARCHAR(200),
                             cue_position INTEGER,
-                            quiz_date DATETIME,
+                            quiz_date TIMESTAMP,
                             selected BOOLEAN NOT NULL DEFAULT 0,
                             generated_mp3_path VARCHAR(500),
-                            created_at DATETIME,
-                            updated_at DATETIME
+                            created_at TIMESTAMP,
+                            updated_at TIMESTAMP
                         )
                         """
                     )
@@ -138,7 +138,7 @@ def run_migration():
                             action VARCHAR(40) NOT NULL,
                             role VARCHAR(20),
                             details TEXT,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )
                         """
                     )
