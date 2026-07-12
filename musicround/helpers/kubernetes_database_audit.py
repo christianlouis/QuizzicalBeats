@@ -30,7 +30,6 @@ WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
 EXPECTED_WORKLOADS = {
     "quizzicalbeats": "web",
     "quizzicalbeats-mcp": "mcp",
-    "quizzicalbeats-backup": "backup",
 }
 
 
@@ -660,6 +659,7 @@ def audit_kubernetes_database_manifests(paths: Iterable[str | Path]) -> dict[str
                     hint="Use RollingUpdate after SQLite/RWO coupling has been removed.",
                 )
             )
+    for summary in workload_summaries.values():
         if summary["requires_web_pod_affinity"]:
             issues.append(
                 _issue(
@@ -684,7 +684,7 @@ def audit_kubernetes_database_manifests(paths: Iterable[str | Path]) -> dict[str
                     details={"concurrency_policy": summary["concurrency_policy"] or "Allow"},
                 )
             )
-        if label == "backup" and managed_guard_enabled and summary["runs_application_backup"]:
+        if managed_guard_enabled and summary["runs_application_backup"]:
             issues.append(
                 _issue(
                     "application_backup_scheduler_for_managed_db",

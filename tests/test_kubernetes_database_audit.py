@@ -307,6 +307,26 @@ def test_manifest_audit_accepts_managed_guard_and_shared_env(tmp_path):
     } == {"quizzicalbeats", "quizzicalbeats-mcp", "quizzicalbeats-backup"}
 
 
+def test_manifest_audit_accepts_managed_database_without_app_backup_cronjob(tmp_path):
+    manifest = tmp_path / "qb.yaml"
+    manifest.write_text(
+        READY_MANIFEST.split(
+            "\n---\napiVersion: batch/v1\nkind: CronJob\nmetadata:\n"
+            "  name: quizzicalbeats-backup\n",
+            1,
+        )[0],
+        encoding="utf-8",
+    )
+
+    result = audit_kubernetes_database_manifests([manifest])
+
+    assert result["ok"] is True
+    assert {item["name"] for item in result["workloads"]} == {
+        "quizzicalbeats",
+        "quizzicalbeats-mcp",
+    }
+
+
 def test_manifest_audit_blocks_sensitive_database_configmap_without_leaking_values(tmp_path):
     manifest = tmp_path / "qb.yaml"
     manifest.write_text(
