@@ -23,6 +23,7 @@ from musicround.models import (
     RoundExport,
     RoundShare,
     SeedSource,
+    SeedSourceCandidate,
     SeedSourceRun,
     Song,
     SongTag,
@@ -3819,6 +3820,31 @@ class TestAgentPlanningAutomation:
             assert result["run"]["songs_seen"] == 2
             assert result["run"]["songs_imported"] == 0
             assert SeedSourceRun.query.count() == 1
+
+    def test_seed_source_candidates_are_idempotent_and_linked_to_latest_run(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name='Persistent candidate list',
+                source_type='chart',
+                provider='manual',
+            )['seed_source']
+
+            first = automation.fetch_seed_source_candidates(
+                source['id'], text='Chappell Roan - Good Luck, Babe!'
+            )
+            second = automation.fetch_seed_source_candidates(
+                source['id'], text='Chappell Roan - Good Luck, Babe!'
+            )
+
+            candidate = SeedSourceCandidate.query.one()
+            assert first['created_candidate_count'] == 1
+            assert first['updated_candidate_count'] == 0
+            assert second['created_candidate_count'] == 0
+            assert second['updated_candidate_count'] == 1
+            assert candidate.review_status == 'pending'
+            assert candidate.seed_source_run_id == second['run']['id']
+            assert SeedSourceRun.query.count() == 2
+            assert Song.query.count() == 0
 
     def test_fetch_seed_source_candidates_reads_json_payload(self, app):
         with app.app_context():

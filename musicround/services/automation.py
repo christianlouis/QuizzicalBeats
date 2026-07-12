@@ -9,6 +9,7 @@ import json
 import math
 import secrets
 import tempfile
+import hashlib
 from html import unescape
 from io import StringIO
 from copy import deepcopy
@@ -74,6 +75,7 @@ from musicround.models import (
     RoundExport,
     RoundShare,
     SeedSource,
+    SeedSourceCandidate,
     SeedSourceRun,
     Song,
     SystemSetting,
@@ -3155,6 +3157,100 @@ def record_seed_source_run(
     }
 
 
+def _seed_source_candidate_key(candidate: Mapping[str, Any]) -> str:
+    """Build a stable source-local identity without trusting display text alone."""
+    for name in ('isrc', 'spotify_id', 'omdb_track_id'):
+        value = str(candidate.get(name) or '').strip()
+        if value:
+            return f'{name}:{value.casefold()}'
+    identity = {
+        'title': str(candidate.get('title') or '').strip().casefold(),
+        'artist': str(candidate.get('artist') or '').strip().casefold(),
+        'album_name': str(candidate.get('album_name') or '').strip().casefold(),
+        'year': candidate.get('year'),
+        'source_rank': candidate.get('source_rank'),
+    }
+    encoded = json.dumps(identity, sort_keys=True, ensure_ascii=True).encode('utf-8')
+    return f'text:{hashlib.sha256(encoded).hexdigest()}'
+
+
+def _seed_source_candidate_summary(candidate: SeedSourceCandidate) -> dict[str, Any]:
+    return {
+        'id': candidate.id,
+        'seed_source_id': candidate.seed_source_id,
+        'seed_source_run_id': candidate.seed_source_run_id,
+        'title': candidate.title,
+        'artist': candidate.artist,
+        'album_name': candidate.album_name,
+        'year': candidate.year,
+        'duration_seconds': candidate.duration_seconds,
+        'spotify_id': candidate.spotify_id,
+        'isrc': candidate.isrc,
+        'source_rank': candidate.source_rank,
+        'popularity': candidate.popularity,
+        'needs_review': candidate.needs_review,
+        'review_status': candidate.review_status,
+        'review_notes': candidate.review_notes,
+        'first_seen_at': _datetime_payload(candidate.first_seen_at),
+        'last_seen_at': _datetime_payload(candidate.last_seen_at),
+        'reviewed_at': _datetime_payload(candidate.reviewed_at),
+    }
+
+
+def persist_seed_source_candidates(
+    source: SeedSource,
+    run_id: int | None,
+    candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Upsert a bounded review queue without importing catalog songs."""
+    created_count = 0
+    updated_count = 0
+    stored: list[SeedSourceCandidate] = []
+    now = datetime.utcnow()
+    fields = (
+        'title', 'artist', 'album_name', 'year', 'duration_seconds', 'spotify_id',
+        'isrc', 'source_rank', 'popularity',
+    )
+    for payload in candidates:
+        external_key = _seed_source_candidate_key(payload)
+        candidate = SeedSourceCandidate.query.filter_by(
+            seed_source_id=source.id,
+            external_key=external_key,
+        ).first()
+        if candidate is None:
+            candidate = SeedSourceCandidate(
+                seed_source_id=source.id,
+                external_key=external_key,
+                title=str(payload.get('title') or '').strip() or 'Untitled candidate',
+                first_seen_at=now,
+                needs_review=bool(payload.get('needs_review')),
+                review_status='pending',
+            )
+            db.session.add(candidate)
+            created_count += 1
+        else:
+            updated_count += 1
+        for field in fields:
+            value = payload.get(field)
+            if field in {'title', 'artist', 'album_name', 'spotify_id', 'isrc'}:
+                value = str(value).strip() if value is not None else None
+            if field == 'title' and not value:
+                continue
+            setattr(candidate, field, value)
+        candidate.seed_source_run_id = run_id
+        candidate.raw_metadata = json.dumps(dict(payload), sort_keys=True, ensure_ascii=True)
+        candidate.last_seen_at = now
+        if candidate.review_status == 'pending':
+            candidate.needs_review = bool(payload.get('needs_review'))
+        stored.append(candidate)
+    db.session.commit()
+    return {
+        'created_count': created_count,
+        'updated_count': updated_count,
+        'candidates': [_seed_source_candidate_summary(candidate) for candidate in stored],
+    }
+
+
 def _seed_source_candidate_from_mapping(
     row: dict[str, Any],
     line_number: int,
@@ -3414,6 +3510,11 @@ def fetch_seed_source_candidates(
             notes="Fetched candidates only; no songs were imported.",
             completed=True,
         )["run"]
+    persisted = persist_seed_source_candidates(
+        source,
+        run['id'] if run else None,
+        parsed['candidates'],
+    )
 
     return {
         "ok": True,
@@ -3421,15 +3522,18 @@ def fetch_seed_source_candidates(
         "provider": source.provider,
         "source_type": source.source_type,
         "count": parsed["count"],
-        "candidates": parsed["candidates"],
+        "candidates": persisted['candidates'],
         "low_confidence_count": parsed["low_confidence_count"],
         "low_confidence": parsed["low_confidence"],
         "ready_for_import": parsed["ready_for_import"],
         "imported": False,
         "run": run,
+        "persisted_candidate_count": len(persisted['candidates']),
+        "created_candidate_count": persisted['created_count'],
+        "updated_candidate_count": persisted['updated_count'],
         "hints": [
             "This read-only step does not import songs.",
-            "Review candidates, resolve low-confidence rows, then use explicit import or round-creation tools.",
+            "Review persisted candidates, resolve low-confidence rows, then use explicit import or round-creation tools.",
         ],
     }
 

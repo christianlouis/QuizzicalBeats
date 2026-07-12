@@ -15,6 +15,7 @@ from musicround.models import (
     RoundExport,
     RoundShare,
     SeedSource,
+    SeedSourceCandidate,
     SeedSourceRun,
     Song,
     UserPreferences,
@@ -633,6 +634,38 @@ def test_add_seed_source_registry_to_legacy_database(tmp_path):
     assert "idx_seed_source_run_source_status" in {
         index.name for index in SeedSourceRun.__table__.indexes
     }
+
+
+def test_add_seed_source_candidates_to_legacy_database(tmp_path):
+    """Review-only external candidates are persisted with stable indexes."""
+    database_path = tmp_path / "legacy-seed-candidates.db"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            "CREATE TABLE seed_source (id INTEGER PRIMARY KEY, name VARCHAR(200) NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE seed_source_run (id INTEGER PRIMARY KEY, seed_source_id INTEGER NOT NULL)"
+        )
+
+    app = _legacy_app(database_path)
+    with app.app_context():
+        from migrations import add_seed_source_candidates
+
+        assert add_seed_source_candidates.run_migration() is True
+        assert add_seed_source_candidates.run_migration() is None
+
+    assert "seed_source_candidate" in _table_names(database_path)
+    assert {
+        "seed_source_id",
+        "seed_source_run_id",
+        "external_key",
+        "review_status",
+        "raw_metadata",
+    }.issubset(_column_names(database_path, "seed_source_candidate"))
+    assert "idx_seed_source_candidate_review" in _index_names(
+        database_path, "seed_source_candidate"
+    )
+    assert SeedSourceCandidate.__tablename__ == "seed_source_candidate"
 
 
 def test_add_seed_source_registry_rebuilds_existing_run_table_with_foreign_key(tmp_path):

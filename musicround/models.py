@@ -568,6 +568,12 @@ class SeedSource(db.Model):
     )
 
     runs = db.relationship('SeedSourceRun', back_populates='seed_source', lazy='dynamic', cascade='all, delete-orphan')
+    candidates = db.relationship(
+        'SeedSourceCandidate',
+        back_populates='seed_source',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+    )
 
     def __repr__(self):
         return (
@@ -597,11 +603,58 @@ class SeedSourceRun(db.Model):
     )
 
     seed_source = db.relationship('SeedSource', back_populates='runs')
+    candidates = db.relationship('SeedSourceCandidate', back_populates='seed_source_run', lazy='dynamic')
 
     def __repr__(self):
         return (
             f"SeedSourceRun(seed_source_id={self.seed_source_id}, "
             f"status='{self.status}', imported={self.songs_imported})"
+        )
+
+
+class SeedSourceCandidate(db.Model):
+    """A review-only track candidate discovered from an external catalog source."""
+
+    __tablename__ = 'seed_source_candidate'
+
+    id = db.Column(db.Integer, primary_key=True)
+    seed_source_id = db.Column(
+        db.Integer, db.ForeignKey('seed_source.id', ondelete='CASCADE'), nullable=False
+    )
+    seed_source_run_id = db.Column(
+        db.Integer, db.ForeignKey('seed_source_run.id', ondelete='SET NULL'), nullable=True
+    )
+    external_key = db.Column(db.String(128), nullable=False)
+    title = db.Column(db.String(300), nullable=False)
+    artist = db.Column(db.String(300), nullable=True)
+    album_name = db.Column(db.String(300), nullable=True)
+    year = db.Column(db.Integer, nullable=True)
+    duration_seconds = db.Column(db.Integer, nullable=True)
+    spotify_id = db.Column(db.String(64), nullable=True)
+    isrc = db.Column(db.String(20), nullable=True)
+    source_rank = db.Column(db.Integer, nullable=True)
+    popularity = db.Column(db.Integer, nullable=True)
+    needs_review = db.Column(db.Boolean, default=True, nullable=False)
+    review_status = db.Column(db.String(20), default='pending', nullable=False)
+    review_notes = db.Column(db.Text, nullable=True)
+    raw_metadata = db.Column(db.Text, nullable=True)
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('seed_source_id', 'external_key', name='uq_seed_source_candidate_key'),
+        db.Index('idx_seed_source_candidate_review', 'seed_source_id', 'review_status', 'last_seen_at'),
+        db.Index('idx_seed_source_candidate_identifiers', 'isrc', 'spotify_id'),
+    )
+
+    seed_source = db.relationship('SeedSource', back_populates='candidates')
+    seed_source_run = db.relationship('SeedSourceRun', back_populates='candidates')
+
+    def __repr__(self):
+        return (
+            f"SeedSourceCandidate(seed_source_id={self.seed_source_id}, "
+            f"external_key='{self.external_key}', status='{self.review_status}')"
         )
 
 

@@ -3,7 +3,7 @@ import json
 import re
 import pytest
 from musicround.helpers.import_queue import ImportQueue
-from musicround.models import db, ImportJobRecord, SeedSource, User, Role, Song, Tag
+from musicround.models import db, ImportJobRecord, SeedSource, SeedSourceCandidate, User, Role, Song, Tag
 
 
 def _create_user(app, username, email, password='TestPass123!', is_admin=False):
@@ -68,7 +68,7 @@ class TestSeedSourceDashboard:
 
         monkeypatch.setattr(
             'musicround.services.automation.fetch_seed_source_candidates',
-            lambda *_args, **_kwargs: {'count': 1},
+            lambda *_args, **_kwargs: {'persisted_candidate_count': 1},
         )
         response = client.post(
             f'/users/seed-sources/{source_id}/refresh',
@@ -76,7 +76,46 @@ class TestSeedSourceDashboard:
             follow_redirects=True,
         )
         assert response.status_code == 200
-        assert b'reviewed 1 candidates' in response.data
+        assert b'saved 1 review candidates' in response.data
+
+    def test_admin_can_review_persisted_catalog_candidate(self, app, client):
+        _create_user(app, 'candidate_admin', 'candidateadmin@example.com', is_admin=True)
+        with app.app_context():
+            source = SeedSource(name='Review chart', source_type='chart', provider='example')
+            db.session.add(source)
+            db.session.flush()
+            candidate = SeedSourceCandidate(
+                seed_source_id=source.id,
+                external_key='spotify_id:example',
+                title='Example Candidate',
+                artist='Example Artist',
+            )
+            db.session.add(candidate)
+            db.session.commit()
+            candidate_id = candidate.id
+        _login(app, client, 'candidate_admin')
+
+        response = client.get('/users/seed-candidates')
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'Catalog Candidates' in body
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', body).group(1)
+
+        response = client.post(
+            f'/users/seed-candidates/{candidate_id}/review',
+            data={
+                'csrf_token': csrf_token,
+                'review_status': 'approved',
+                'review_notes': 'Suitable for an 2020s round.',
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b'No song was imported' in response.data
+        with app.app_context():
+            candidate = db.session.get(SeedSourceCandidate, candidate_id)
+            assert candidate.review_status == 'approved'
+            assert candidate.needs_review is False
 
 
 class TestStorageStatus:

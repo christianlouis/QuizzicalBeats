@@ -9,7 +9,10 @@
             <h1 class="text-2xl font-semibold text-navy-800">Catalog Sources</h1>
             <p class="mt-2 max-w-3xl text-sm text-gray-600">External charts and line-ups help with discovery. They never add songs automatically: every result remains a review candidate until a quizmaster chooses how to use it.</p>
         </div>
-        <div class="text-sm text-gray-500">{{ sources|length }} configured sources</div>
+        <div class="flex items-center gap-3 text-sm text-gray-500">
+            <a class="font-medium text-teal-700 hover:underline" href="{{ url_for('users.seed_candidates') }}">Review candidates</a>
+            <span>{{ sources|length }} configured sources</span>
+        </div>
     </div>
 
     <div class="mt-6 grid gap-4 md:grid-cols-3">

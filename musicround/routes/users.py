@@ -12,7 +12,10 @@ from flask_login import login_user, current_user, logout_user, login_required  #
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
 
-from musicround.models import db, User, Role, SeedSource, SeedSourceRun, SystemSetting, UserPreferences
+from musicround.models import (
+    db, User, Role, SeedSource, SeedSourceCandidate, SeedSourceRun, SystemSetting,
+    UserPreferences,
+)
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
@@ -1608,8 +1611,66 @@ def refresh_seed_source(source_id):
     except AutomationError as exc:
         flash(str(exc), 'danger')
     else:
-        flash(f"{source.name}: reviewed {result['count']} candidates. No songs were imported.", 'success')
+        flash(
+            f"{source.name}: saved {result['persisted_candidate_count']} review candidates. "
+            'No songs were imported.',
+            'success',
+        )
     return redirect(url_for('users.seed_sources'))
+
+
+@users_bp.route('/seed-candidates')
+@login_required
+@admin_required
+def seed_candidates():
+    """Show persisted catalog candidates without exposing an import action."""
+    review_status = (request.args.get('status') or 'pending').strip().lower()
+    if review_status not in {'pending', 'approved', 'rejected', 'all'}:
+        review_status = 'pending'
+    source_id = request.args.get('source_id', type=int)
+    query = SeedSourceCandidate.query
+    if review_status != 'all':
+        query = query.filter(SeedSourceCandidate.review_status == review_status)
+    if source_id:
+        query = query.filter(SeedSourceCandidate.seed_source_id == source_id)
+    candidates = query.order_by(
+        SeedSourceCandidate.last_seen_at.desc(),
+        SeedSourceCandidate.id.desc(),
+    ).limit(250).all()
+    sources = SeedSource.query.order_by(SeedSource.name.asc()).all()
+    return render_template(
+        'admin/seed_candidates.html',
+        candidates=candidates,
+        sources=sources,
+        selected_source_id=source_id,
+        review_status=review_status,
+    )
+
+
+@users_bp.route('/seed-candidates/<int:candidate_id>/review', methods=['POST'])
+@login_required
+@admin_required
+def review_seed_candidate(candidate_id):
+    """Record an editorial decision without importing a song into the library."""
+    candidate = db.session.get(SeedSourceCandidate, candidate_id)
+    if not candidate:
+        flash('Catalog candidate was not found.', 'danger')
+        return redirect(url_for('users.seed_candidates'))
+    review_status = (request.form.get('review_status') or '').strip().lower()
+    if review_status not in {'pending', 'approved', 'rejected'}:
+        flash('Choose pending, approved, or rejected.', 'danger')
+        return redirect(url_for('users.seed_candidates'))
+    notes = (request.form.get('review_notes') or '').strip()
+    if len(notes) > 2000:
+        flash('Review notes must be 2,000 characters or fewer.', 'danger')
+        return redirect(url_for('users.seed_candidates'))
+    candidate.review_status = review_status
+    candidate.needs_review = review_status == 'pending'
+    candidate.review_notes = notes or None
+    candidate.reviewed_at = datetime.utcnow() if review_status != 'pending' else None
+    db.session.commit()
+    flash('Candidate review saved. No song was imported.', 'success')
+    return redirect(url_for('users.seed_candidates', status=review_status))
 
 @users_bp.route('/create-backup', methods=['POST'])
 @automation_or_admin_required
