@@ -3,9 +3,11 @@ import logging
 import importlib.util
 import json
 import gzip
+from contextlib import contextmanager
 from flask import Flask, session, redirect, url_for, request
 from flask_login import LoginManager, current_user
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -32,6 +34,7 @@ csrf = CSRFProtect()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 DEFAULT_DATABASE_DIR = '/data'
+POSTGRES_MIGRATION_LOCK_ID = 716_245_001
 DEFAULT_COMPRESSIBLE_MIMETYPES = {
     'application/javascript',
     'application/json',
@@ -257,7 +260,42 @@ def _install_static_asset_cache(app):
         return response
 
 
+def _migration_engine():
+    """Return the engine used to coordinate process-wide migration startup."""
+    return db.engine
+
+
+@contextmanager
+def _migration_execution_lock():
+    """Serialize the complete migration pass across PostgreSQL app processes."""
+    engine = _migration_engine()
+    if engine.dialect.name != 'postgresql':
+        yield
+        return
+
+    with engine.connect() as connection:
+        logger.info("Waiting for the PostgreSQL migration advisory lock")
+        connection.execute(
+            text("SELECT pg_advisory_lock(:lock_id)"),
+            {"lock_id": POSTGRES_MIGRATION_LOCK_ID},
+        )
+        try:
+            logger.info("Acquired the PostgreSQL migration advisory lock")
+            yield
+        finally:
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_id)"),
+                {"lock_id": POSTGRES_MIGRATION_LOCK_ID},
+            )
+
+
 def run_migrations():
+    """Run migrations once at a time when the application uses PostgreSQL."""
+    with _migration_execution_lock():
+        _run_migrations()
+
+
+def _run_migrations():
     """
     Run all migration scripts in the migrations directory
     """

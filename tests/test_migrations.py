@@ -254,6 +254,55 @@ def test_oauth_migrations_share_postgres_advisory_lock():
         ]
 
 
+def test_application_migration_pass_uses_one_postgres_advisory_lock(monkeypatch):
+    """The app factory serializes its complete migration pass across workers."""
+    import musicround
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _Connection:
+        def __init__(self):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, params=None):
+            self.calls.append((str(statement), params))
+
+    class _Engine:
+        dialect = _Dialect()
+
+        def __init__(self, connection):
+            self.connection = connection
+
+        def connect(self):
+            return self.connection
+
+    connection = _Connection()
+    monkeypatch.setattr(musicround, "_migration_engine", lambda: _Engine(connection))
+    migration_passes = []
+    monkeypatch.setattr(musicround, "_run_migrations", lambda: migration_passes.append(True))
+
+    musicround.run_migrations()
+
+    assert migration_passes == [True]
+    assert connection.calls == [
+        (
+            "SELECT pg_advisory_lock(:lock_id)",
+            {"lock_id": musicround.POSTGRES_MIGRATION_LOCK_ID},
+        ),
+        (
+            "SELECT pg_advisory_unlock(:lock_id)",
+            {"lock_id": musicround.POSTGRES_MIGRATION_LOCK_ID},
+        ),
+    ]
+
+
 def test_add_round_generation_status_adds_model_columns_to_legacy_round_table(tmp_path):
     """Legacy round tables get generated-asset status columns."""
     database_path = tmp_path / "legacy-round.db"
