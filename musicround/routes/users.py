@@ -18,6 +18,7 @@ from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_o
 from musicround.helpers.oauth_status import dropbox_token_status, spotify_token_status, token_notice
 from musicround.helpers.email_helper import send_account_verification_email
 from musicround.helpers.paths import app_data_dir, backup_dir
+from musicround.helpers.service_health import artifact_storage_service_health
 from musicround.helpers.spotify_helper import (
     clear_manual_spotify_bearer_token,
     get_spotify_token,
@@ -1534,6 +1535,15 @@ def backup_manager():
         notification=notification,
         config_suggestion=config_suggestion
     )
+
+
+@users_bp.route('/storage')
+@login_required
+@admin_required
+def storage_status():
+    """Show credential-safe generated-artifact storage status for administrators."""
+    storage = artifact_storage_service_health()
+    return render_template('admin/storage_status.html', storage=storage)
 
 
 @users_bp.route('/seed-sources')

@@ -79,6 +79,19 @@ class TestSeedSourceDashboard:
         assert b'reviewed 1 candidates' in response.data
 
 
+class TestStorageStatus:
+    def test_admin_can_view_artifact_storage_status(self, app, client):
+        _create_user(app, 'storage_admin', 'storageadmin@example.com', is_admin=True)
+        _login(app, client, 'storage_admin')
+
+        response = client.get('/users/storage')
+
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert 'Artifact Storage' in body
+        assert 'Generated MP3 and PDF files' in body
+
+
 class TestSetupRoute:
     """Tests for /users/setup route."""
 
