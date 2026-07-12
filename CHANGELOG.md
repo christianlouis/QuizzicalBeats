@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a fail-closed trusted catalog ingestion workflow with verified adapters
+  for Deezer charts, NDR 2 airplay, ListenBrainz weekly recordings, Official
+  Singles, and the Spotify Top 10,000 snapshot. Candidates retain provider IDs,
+  source evidence, editorial state, bulk review/import actions, and scheduled
+  review-only refreshes before any explicit catalog import.
 - Added `run.py catalog backfill-isrc` CLI command to orchestrate idempotent backfill of Deezer metadata, exact-ISRC Spotify offline mapping, and audio features.
 - Added batched, exact-ISRC metadata backfill from the optional offline Spotify
   archive. It fills missing stable fields and records snapshot provenance while

@@ -17,8 +17,8 @@
 
     <div class="mt-6 grid gap-4 md:grid-cols-3">
         <div class="border border-teal-200 bg-teal-50 p-4">
-            <div class="text-sm font-medium text-teal-900">1. Enable deliberately</div>
-            <p class="mt-1 text-sm text-teal-800">Only enabled sources may be picked up by a scheduled review run.</p>
+            <div class="text-sm font-medium text-teal-900">1. Use verified adapters</div>
+            <p class="mt-1 text-sm text-teal-800">Enabled verified sources are read on their review plan. Reads only create candidates.</p>
         </div>
         <div class="border border-blue-200 bg-blue-50 p-4">
             <div class="text-sm font-medium text-blue-900">2. Review candidates</div>
@@ -37,7 +37,7 @@
                     <th class="px-4 py-3">Source</th>
                     <th class="px-4 py-3">Purpose</th>
                     <th class="px-4 py-3">Status</th>
-                    <th class="px-4 py-3">Cadence</th>
+                    <th class="px-4 py-3">Review plan</th>
                     <th class="px-4 py-3">Last result</th>
                     <th class="px-4 py-3 text-right">Actions</th>
                 </tr>
@@ -45,9 +45,11 @@
             <tbody class="divide-y divide-gray-100">
                 {% for source in sources %}
                 {% set latest = latest_runs.get(source.id) %}
+                {% set capability = source_capabilities.get(source.id) %}
                 <tr>
                     <td class="px-4 py-4 align-top">
                         <div class="font-medium text-navy-800">{{ source.name }}</div>
+                        <div class="mt-1 text-xs {% if capability.refreshable %}text-green-700{% else %}text-amber-700{% endif %}">{{ capability.detail }}</div>
                         {% if source.url %}<a class="mt-1 inline-block text-xs text-teal-700 hover:underline" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">Open source</a>{% endif %}
                     </td>
                     <td class="max-w-sm px-4 py-4 align-top text-gray-600">{{ source.notes or 'External discovery source for themed rounds.' }}</td>
@@ -57,11 +59,11 @@
                     <td class="px-4 py-4 align-top">
                         <form method="post" action="{{ url_for('users.update_seed_source', source_id=source.id) }}" class="flex items-center gap-2">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <label class="inline-flex items-center" title="Enable this source for scheduled review reads">
-                                <input class="h-4 w-4 accent-teal-600" type="checkbox" name="active" {% if source.active %}checked{% endif %}>
+                            <label class="inline-flex items-center" title="Allow manual reads from this verified adapter">
+                                <input class="h-4 w-4 accent-teal-600" type="checkbox" name="active" {% if source.active %}checked{% endif %} {% if not capability.refreshable %}disabled{% endif %}>
                             </label>
                             <select name="cadence" class="border border-gray-300 bg-white px-2 py-1 text-sm">
-                                {% for value in ['manual', 'daily', 'weekly'] %}<option value="{{ value }}" {% if source.cadence == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+                                {% for value in ['manual', 'hourly', 'daily', 'weekly'] %}<option value="{{ value }}" {% if source.cadence == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
                             </select>
                             <button class="text-teal-700 hover:text-teal-900" type="submit" title="Save source settings"><i class="fas fa-save"></i></button>
                         </form>
@@ -72,7 +74,7 @@
                     <td class="px-4 py-4 text-right align-top">
                         <form method="post" action="{{ url_for('users.refresh_seed_source', source_id=source.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <button class="inline-flex items-center gap-2 border border-teal-600 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit"><i class="fas fa-sync-alt"></i><span>Review now</span></button>
+                            <button class="inline-flex items-center gap-2 border px-3 py-1.5 text-sm font-medium {% if capability.refreshable %}border-teal-600 text-teal-700 hover:bg-teal-50{% else %}cursor-not-allowed border-gray-300 text-gray-400{% endif %}" type="submit" {% if not capability.refreshable %}disabled title="{{ capability.detail }}"{% endif %}><i class="fas fa-sync-alt"></i><span>Review now</span></button>
                         </form>
                     </td>
                 </tr>

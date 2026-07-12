@@ -717,6 +717,19 @@ def fetch_seed_source_candidates(
 
 
 @mcp.tool()
+def refresh_due_seed_sources(
+    max_sources: int = 10,
+    candidate_limit: int = 100,
+) -> dict[str, Any]:
+    """Refresh due verified sources into review candidates without importing songs."""
+    return _with_app_context(
+        automation.refresh_due_seed_sources,
+        max_sources=max_sources,
+        candidate_limit=candidate_limit,
+    )
+
+
+@mcp.tool()
 def omdb_catalog_status() -> dict[str, Any]:
     """Return credential-safe readiness for the optional OMDB catalog mirror."""
     return _with_app_context(automation.omdb_catalog_status)

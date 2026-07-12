@@ -631,8 +631,11 @@ class SeedSourceCandidate(db.Model):
     year = db.Column(db.Integer, nullable=True)
     duration_seconds = db.Column(db.Integer, nullable=True)
     spotify_id = db.Column(db.String(64), nullable=True)
+    deezer_id = db.Column(db.String(64), nullable=True)
     isrc = db.Column(db.String(20), nullable=True)
+    recording_mbid = db.Column(db.String(36), nullable=True)
     source_rank = db.Column(db.Integer, nullable=True)
+    source_score = db.Column(db.BigInteger, nullable=True)
     popularity = db.Column(db.Integer, nullable=True)
     needs_review = db.Column(db.Boolean, default=True, nullable=False)
     review_status = db.Column(db.String(20), default='pending', nullable=False)
@@ -645,7 +648,10 @@ class SeedSourceCandidate(db.Model):
     __table_args__ = (
         db.UniqueConstraint('seed_source_id', 'external_key', name='uq_seed_source_candidate_key'),
         db.Index('idx_seed_source_candidate_review', 'seed_source_id', 'review_status', 'last_seen_at'),
-        db.Index('idx_seed_source_candidate_identifiers', 'isrc', 'spotify_id'),
+        db.Index(
+            'idx_seed_source_candidate_identifiers',
+            'isrc', 'spotify_id', 'deezer_id', 'recording_mbid',
+        ),
     )
 
     seed_source = db.relationship('SeedSource', back_populates='candidates')

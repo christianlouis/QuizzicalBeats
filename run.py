@@ -218,6 +218,22 @@ def main():
         help='Print machine-readable processing results.',
     )
 
+    catalog_sources_parser = subparsers.add_parser(
+        'catalog-sources',
+        help='Trusted external catalog source jobs',
+    )
+    catalog_sources_subparsers = catalog_sources_parser.add_subparsers(
+        dest='catalog_sources_action',
+        help='Catalog source action to perform',
+    )
+    refresh_due_sources_parser = catalog_sources_subparsers.add_parser(
+        'refresh-due',
+        help='Refresh due verified sources into the review queue',
+    )
+    refresh_due_sources_parser.add_argument('--max-sources', type=int, default=10)
+    refresh_due_sources_parser.add_argument('--candidate-limit', type=int, default=100)
+    refresh_due_sources_parser.add_argument('--json', action='store_true', dest='json_output')
+
     deployment_parser = subparsers.add_parser('deployment', help='Deployment smoke checks')
     deployment_subparsers = deployment_parser.add_subparsers(
         dest='deployment_action',
@@ -743,6 +759,25 @@ def main():
                         f"{result['processed_count']} export(s) processed."
                     )
                 return 0
+    elif args.command == 'catalog-sources':
+        if args.catalog_sources_action == 'refresh-due':
+            with contextlib.redirect_stdout(sys.stderr):
+                app = create_app()
+            with app.app_context():
+                from musicround.services.automation import refresh_due_seed_sources
+
+                result = refresh_due_seed_sources(
+                    max_sources=args.max_sources,
+                    candidate_limit=args.candidate_limit,
+                )
+                if args.json_output:
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                else:
+                    print(
+                        "Catalog source refresh complete: "
+                        f"{result['processed_count']} source(s), {result['failed_count']} failed."
+                    )
+                return 0 if result['ok'] else 1
     elif args.command == 'deployment':
         if args.deployment_action == 'smoke':
             from musicround.helpers.deployment_smoke import run_deployment_smoke

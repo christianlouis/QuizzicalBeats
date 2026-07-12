@@ -661,6 +661,9 @@ def test_add_seed_source_candidates_to_legacy_database(tmp_path):
         "external_key",
         "review_status",
         "raw_metadata",
+        "deezer_id",
+        "recording_mbid",
+        "source_score",
     }.issubset(_column_names(database_path, "seed_source_candidate"))
     assert "idx_seed_source_candidate_review" in _index_names(
         database_path, "seed_source_candidate"

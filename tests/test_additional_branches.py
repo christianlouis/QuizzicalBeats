@@ -31,7 +31,7 @@ class TestSeedSourceDashboard:
             source = SeedSource(
                 name='Example Chart',
                 source_type='chart',
-                provider='example',
+                provider='official-charts',
                 url='https://example.test/chart',
                 active=True,
                 cadence='weekly',
@@ -85,7 +85,7 @@ class TestSeedSourceDashboard:
         assert response.status_code == 200
         assert b'Start a source refresh with the Review now button' in response.data
 
-    def test_admin_can_review_persisted_catalog_candidate(self, app, client):
+    def test_admin_can_review_persisted_catalog_candidate(self, app, client, monkeypatch):
         _create_user(app, 'candidate_admin', 'candidateadmin@example.com', is_admin=True)
         with app.app_context():
             source = SeedSource(name='Review chart', source_type='chart', provider='example')
@@ -96,6 +96,7 @@ class TestSeedSourceDashboard:
                 external_key='spotify_id:example',
                 title='Example Candidate',
                 artist='Example Artist',
+                spotify_id='example',
             )
             db.session.add(candidate)
             db.session.commit()
@@ -123,6 +124,27 @@ class TestSeedSourceDashboard:
             candidate = db.session.get(SeedSourceCandidate, candidate_id)
             assert candidate.review_status == 'approved'
             assert candidate.needs_review is False
+
+        def import_candidate(candidate_id, **_kwargs):
+            candidate = db.session.get(SeedSourceCandidate, candidate_id)
+            candidate.review_status = 'imported'
+            db.session.commit()
+            return {'imported': True}
+
+        monkeypatch.setattr(
+            'musicround.services.automation.import_seed_source_candidate',
+            import_candidate,
+        )
+        response = client.post(
+            f'/users/seed-candidates/{candidate_id}/import',
+            data={'csrf_token': csrf_token},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b'was imported into the song library' in response.data
+        with app.app_context():
+            candidate = db.session.get(SeedSourceCandidate, candidate_id)
+            assert candidate.review_status == 'imported'
 
 
 class TestStorageStatus:

@@ -15,7 +15,7 @@
     <form class="mt-6 flex flex-wrap items-end gap-3" method="get">
         <label class="block text-sm font-medium text-gray-700">Review state
             <select class="mt-1 block border border-gray-300 bg-white px-3 py-2 text-sm" name="status">
-                {% for value in ['pending', 'approved', 'rejected', 'all'] %}<option value="{{ value }}" {% if review_status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+                {% for value in ['pending', 'approved', 'imported', 'rejected', 'all'] %}<option value="{{ value }}" {% if review_status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
             </select>
         </label>
         <label class="block text-sm font-medium text-gray-700">Source
@@ -27,18 +27,49 @@
         <button class="border border-teal-600 px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit">Apply</button>
     </form>
 
+    <form id="bulk-candidate-action" class="mt-4 flex flex-wrap items-center gap-2" method="post" action="{{ url_for('users.bulk_seed_candidates') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <span class="text-sm text-gray-600">Selected:</span>
+        <button class="border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50" type="submit" name="action" value="resolve">Resolve</button>
+        <button class="border border-teal-600 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit" name="action" value="approve">Approve</button>
+        <button class="border border-red-600 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50" type="submit" name="action" value="reject">Reject</button>
+        <button class="border border-green-600 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50" type="submit" name="action" value="import">Import approved</button>
+    </form>
+
     <div class="mt-6 overflow-x-auto border border-gray-200 bg-white">
         <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500"><tr><th class="px-4 py-3">Candidate</th><th class="px-4 py-3">Source evidence</th><th class="px-4 py-3">Review</th><th class="px-4 py-3 text-right">Decision</th></tr></thead>
+            <thead class="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500"><tr><th class="px-4 py-3">Select</th><th class="px-4 py-3">Candidate</th><th class="px-4 py-3">Source evidence</th><th class="px-4 py-3">Review</th><th class="px-4 py-3 text-right">Decision</th></tr></thead>
             <tbody class="divide-y divide-gray-100">
                 {% for candidate in candidates %}
                 <tr>
+                    <td class="px-4 py-4 align-top"><input class="h-4 w-4 accent-teal-600" type="checkbox" name="candidate_ids" value="{{ candidate.id }}" form="bulk-candidate-action" aria-label="Select {{ candidate.title }}"></td>
                     <td class="px-4 py-4 align-top"><div class="font-medium text-navy-800">{{ candidate.title }}</div><div class="text-gray-600">{{ candidate.artist or 'Unknown artist' }}</div>{% if candidate.album_name %}<div class="mt-1 text-xs text-gray-500">{{ candidate.album_name }}{% if candidate.year %} · {{ candidate.year }}{% endif %}</div>{% endif %}</td>
-                    <td class="px-4 py-4 align-top text-xs text-gray-600"><div class="font-medium text-gray-700">{{ candidate.seed_source.name }}</div>{% if candidate.source_rank %}<div>Rank {{ candidate.source_rank }}</div>{% endif %}{% if candidate.popularity is not none %}<div>Popularity {{ candidate.popularity }}/100</div>{% endif %}{% if candidate.isrc %}<div>ISRC {{ candidate.isrc }}</div>{% endif %}{% if candidate.spotify_id %}<div>Spotify {{ candidate.spotify_id }}</div>{% endif %}</td>
-                    <td class="px-4 py-4 align-top"><span class="inline-flex px-2 py-1 text-xs font-medium {% if candidate.review_status == 'approved' %}bg-green-100 text-green-800{% elif candidate.review_status == 'rejected' %}bg-red-100 text-red-800{% else %}bg-amber-100 text-amber-800{% endif %}">{{ candidate.review_status|capitalize }}</span><div class="mt-2 text-xs text-gray-500">Last seen {{ candidate.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</div>{% if candidate.review_notes %}<div class="mt-2 max-w-xs text-xs text-gray-600">{{ candidate.review_notes }}</div>{% endif %}</td>
-                    <td class="px-4 py-4 align-top text-right"><form method="post" action="{{ url_for('users.review_seed_candidate', candidate_id=candidate.id) }}" class="inline-flex flex-col items-stretch gap-2 text-left"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><select class="border border-gray-300 bg-white px-2 py-1 text-sm" name="review_status">{% for value in ['pending', 'approved', 'rejected'] %}<option value="{{ value }}" {% if candidate.review_status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}</select><input class="border border-gray-300 px-2 py-1 text-sm" name="review_notes" maxlength="2000" value="{{ candidate.review_notes or '' }}" placeholder="Review note"><button class="border border-teal-600 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit">Save review</button></form></td>
+                    <td class="px-4 py-4 align-top text-xs text-gray-600"><div class="font-medium text-gray-700">{{ candidate.seed_source.name }}</div>{% if candidate.source_rank %}<div>Rank {{ candidate.source_rank }}</div>{% endif %}{% if candidate.source_score is not none %}<div>Source score {{ '{:,}'.format(candidate.source_score) }}</div>{% endif %}{% if candidate.popularity is not none %}<div>Popularity {{ candidate.popularity }}/100</div>{% endif %}{% if candidate.isrc %}<div>ISRC {{ candidate.isrc }}</div>{% endif %}{% if candidate.spotify_id %}<div>Spotify {{ candidate.spotify_id }}</div>{% endif %}{% if candidate.deezer_id %}<div>Deezer {{ candidate.deezer_id }}</div>{% endif %}{% if candidate.recording_mbid %}<div>MusicBrainz {{ candidate.recording_mbid }}</div>{% endif %}</td>
+                    <td class="px-4 py-4 align-top"><span class="inline-flex px-2 py-1 text-xs font-medium {% if candidate.review_status in ['approved', 'imported'] %}bg-green-100 text-green-800{% elif candidate.review_status == 'rejected' %}bg-red-100 text-red-800{% else %}bg-amber-100 text-amber-800{% endif %}">{{ candidate.review_status|capitalize }}</span><div class="mt-2 text-xs text-gray-500">Last seen {{ candidate.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</div>{% if candidate.review_notes %}<div class="mt-2 max-w-xs text-xs text-gray-600">{{ candidate.review_notes }}</div>{% endif %}</td>
+                    <td class="px-4 py-4 align-top text-right">
+                        <div class="inline-flex flex-col items-stretch gap-2 text-left">
+                            {% if not candidate.spotify_id and candidate.review_status != 'imported' %}
+                            <form method="post" action="{{ url_for('users.resolve_seed_candidate', candidate_id=candidate.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button class="w-full border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50" type="submit">Find exact Spotify track</button>
+                            </form>
+                            {% endif %}
+                            <form method="post" action="{{ url_for('users.review_seed_candidate', candidate_id=candidate.id) }}" class="inline-flex flex-col items-stretch gap-2">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <select class="border border-gray-300 bg-white px-2 py-1 text-sm" name="review_status" {% if candidate.review_status == 'imported' %}disabled{% endif %}>{% for value in ['pending', 'approved', 'rejected'] %}<option value="{{ value }}" {% if candidate.review_status == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}</select>
+                                <input class="border border-gray-300 px-2 py-1 text-sm" name="review_notes" maxlength="2000" value="{{ candidate.review_notes or '' }}" placeholder="Review note" {% if candidate.review_status == 'imported' %}disabled{% endif %}>
+                                <button class="border border-teal-600 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-50" type="submit" {% if candidate.review_status == 'imported' %}disabled{% endif %}>Save review</button>
+                            </form>
+                            {% if candidate.review_status == 'approved' %}
+                            <form method="post" action="{{ url_for('users.import_seed_candidate', candidate_id=candidate.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button class="w-full border border-green-600 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50" type="submit">Import track</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
                 </tr>
-                {% else %}<tr><td class="px-4 py-8 text-center text-gray-500" colspan="4">No candidates match this review filter.</td></tr>{% endfor %}
+                {% else %}<tr><td class="px-4 py-8 text-center text-gray-500" colspan="5">No candidates match this review filter.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

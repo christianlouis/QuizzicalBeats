@@ -3779,7 +3779,7 @@ class TestAgentPlanningAutomation:
         with app.app_context():
             first = automation.seed_default_seed_sources()
             second = automation.seed_default_seed_sources()
-            listed = automation.list_seed_sources(active=True, limit=50)
+            listed = automation.list_seed_sources(active=None, limit=50)
 
             names = {source["name"] for source in listed["sources"]}
             source_types = {source["source_type"] for source in listed["sources"]}
@@ -3796,6 +3796,13 @@ class TestAgentPlanningAutomation:
             assert "Wacken Open Air Line-Up" in names
             assert {"chart", "festival"}.issubset(source_types)
             assert {"billboard", "spotify-annas-archive", "graspop", "wacken"}.issubset(providers)
+            active_names = {source["name"] for source in listed["sources"] if source["active"]}
+            assert "Official Singles Chart" in active_names
+            assert "Spotify Top 10,000 Songs by Popularity" in active_names
+            assert "Official Albums Chart" not in active_names
+            assert "Billboard Hot 100" not in active_names
+            assert "Graspop Metal Meeting Line-Up" not in active_names
+            assert "OMDB Lite Catalog" not in active_names
             assert SeedSource.query.count() == first["count"]
 
     def test_fetch_seed_source_candidates_from_manual_text_records_read_only_run(self, app):
@@ -3851,7 +3858,7 @@ class TestAgentPlanningAutomation:
             source = automation.register_seed_source(
                 name="Chart JSON",
                 source_type="chart",
-                provider="example",
+                provider="official-charts",
                 url="https://example.test/chart.json",
             )["seed_source"]
 
@@ -3868,7 +3875,10 @@ class TestAgentPlanningAutomation:
             with patch("musicround.services.automation.requests.get", return_value=response) as mock_get:
                 result = automation.fetch_seed_source_candidates(source["id"], limit=10)
 
-            mock_get.assert_called_once_with("https://example.test/chart.json", timeout=20.0)
+            mock_get.assert_called_once()
+            assert mock_get.call_args.args == ("https://example.test/chart.json",)
+            assert mock_get.call_args.kwargs["timeout"] == 20.0
+            assert "User-Agent" in mock_get.call_args.kwargs["headers"]
             assert result["count"] == 2
             assert [item["artist"] for item in result["candidates"]] == [
                 "Chappell Roan",
@@ -3917,12 +3927,265 @@ class TestAgentPlanningAutomation:
             assert candidate["album_name"] == "Die With A Smile"
             assert candidate["needs_review"] is False
 
+    def test_fetch_seed_source_candidates_reads_official_charts_html(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Official Singles Chart",
+                source_type="chart",
+                provider="official-charts",
+                url="https://example.test/official-chart",
+            )["seed_source"]
+            response = type("Response", (), {})()
+            response.status_code = 200
+            response.headers = {"content-type": "text/html; charset=utf-8"}
+            response.text = '''
+                <div class="chart-item relative">
+                  <a class="chart-name font-bold"><span>Example Song</span></a>
+                  <a class="chart-artist text-lg"><span>Example Artist</span></a>
+                </div>
+            '''
+            with patch("musicround.services.automation.requests.get", return_value=response):
+                result = automation.fetch_seed_source_candidates(source["id"], limit=10)
+
+            assert result["count"] == 1
+            assert result["candidates"][0]["title"] == "Example Song"
+            assert result["candidates"][0]["artist"] == "Example Artist"
+            assert result["candidates"][0]["source_rank"] == 1
+            assert result["run"]["status"] == "partial"
+
+    @pytest.mark.parametrize(
+        ("provider", "content_type", "payload", "expected"),
+        [
+            (
+                "ndr-airplay",
+                "text/html",
+                '<html><li class="titlelistentry"><h3><span class="artist">Shakira</span> - '
+                '<span class="title">Dai Dai</span></h3></li></html>',
+                {"title": "Dai Dai", "artist": "Shakira"},
+            ),
+            (
+                "deezer-chart",
+                "application/json",
+                '{"data":[{"id":401,"title":"Dai Dai","duration":223,"rank":990000,'
+                '"position":1,"artist":{"name":"Shakira"},"album":{"title":"Dai Dai"}}]}',
+                {"deezer_id": "401", "popularity": 99, "source_score": 990000},
+            ),
+            (
+                "listenbrainz",
+                "application/json",
+                '{"payload":{"recordings":[{"track_name":"SWIM","artist_name":"BTS",'
+                '"recording_mbid":"6f33dc05-cdc0-4a2f-8039-e8fed082eec6",'
+                '"release_name":"ARIRANG","listen_count":232050}]}}',
+                {
+                    "recording_mbid": "6f33dc05-cdc0-4a2f-8039-e8fed082eec6",
+                    "source_score": 232050,
+                },
+            ),
+        ],
+    )
+    def test_verified_source_adapters_preserve_provider_identity(
+        self, app, provider, content_type, payload, expected
+    ):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name=f"{provider} fixture",
+                source_type="airplay" if provider == "ndr-airplay" else "chart",
+                provider=provider,
+                url=f"https://example.test/{provider}",
+            )["seed_source"]
+            response = type("Response", (), {})()
+            response.status_code = 200
+            response.headers = {"content-type": content_type}
+            response.text = payload
+            with patch("musicround.services.automation.requests.get", return_value=response):
+                result = automation.fetch_seed_source_candidates(source["id"], limit=10)
+
+            assert result["count"] == 1
+            for field, value in expected.items():
+                assert result["candidates"][0][field] == value
+
+    def test_resolve_candidate_requires_one_exact_offline_spotify_match(self, app):
+        with app.app_context():
+            source = SeedSource(name="Resolve chart", source_type="chart", provider="official-charts")
+            db.session.add(source)
+            db.session.flush()
+            candidate = SeedSourceCandidate(
+                seed_source_id=source.id,
+                external_key="text:resolve",
+                title="Dai Dai",
+                artist="Shakira, Burna Boy",
+            )
+            db.session.add(candidate)
+            db.session.commit()
+            class FakeDeezer:
+                @staticmethod
+                def search_tracks(_query, limit=10):
+                    assert limit == 10
+                    return [{
+                        "id": 401,
+                        "title": "Dai Dai",
+                        "artist": {"name": "Shakira"},
+                        "isrc": "USABC2600001",
+                        "rank": 990000,
+                        "duration": 223,
+                        "album": {"title": "Dai Dai"},
+                    }]
+
+                @staticmethod
+                def get_track(_track_id):
+                    raise AssertionError("Detailed lookup is not needed when ISRC is present")
+
+            app.config["deezer"] = FakeDeezer()
+            with patch(
+                "musicround.services.automation.search_spotify_archive_catalog",
+                return_value={
+                    "snapshot": "spotify_archive_2025_07",
+                    "query_mode": "text",
+                    "results": [{
+                        "spotify_id": "spotify-track",
+                        "isrc": "USABC2600001",
+                        "title": "Dai Dai",
+                        "artists": "Shakira",
+                        "album_name": "Dai Dai",
+                        "year": 2026,
+                        "duration_ms": 223000,
+                        "popularity": 110,
+                    }],
+                },
+            ):
+                result = automation.resolve_seed_source_candidate(candidate.id)
+
+            assert result["candidate"]["spotify_id"] == "spotify-track"
+            assert result["candidate"]["isrc"] == "USABC2600001"
+            assert result["candidate"]["popularity"] == 100
+            assert result["candidate"]["review_status"] == "pending"
+
+    def test_import_candidate_tags_existing_song_with_reviewed_source_evidence(self, app):
+        with app.app_context():
+            source = SeedSource(
+                name="Official Singles Chart",
+                source_type="chart",
+                provider="official-charts",
+            )
+            song = Song(
+                title="Existing Song",
+                artist="Existing Artist",
+                spotify_id="spotify-existing",
+                year=1999,
+            )
+            db.session.add_all([source, song])
+            db.session.flush()
+            candidate = SeedSourceCandidate(
+                seed_source_id=source.id,
+                external_key="spotify_id:spotify-existing",
+                title=song.title,
+                artist=song.artist,
+                spotify_id=song.spotify_id,
+                source_rank=5,
+                review_status="approved",
+                needs_review=False,
+            )
+            db.session.add(candidate)
+            db.session.commit()
+            with patch(
+                "musicround.services.automation.import_catalog_item",
+                return_value={"result": {
+                    "imported_count": 0,
+                    "skipped_count": 1,
+                    "error_count": 0,
+                    "errors": [],
+                    "song_id": song.id,
+                }},
+            ):
+                result = automation.import_seed_source_candidate(candidate.id)
+
+            assert result["candidate"]["review_status"] == "imported"
+            assert {
+                "source:official-charts",
+                "signal:chart",
+                "country:gb",
+                "chart:top-10",
+                "chart:top-40",
+                "chart:top-100",
+                "decade:1990s",
+            }.issubset(set(result["tags"]))
+
+    def test_refresh_due_seed_sources_skips_manual_and_recent_sources(self, app):
+        with app.app_context():
+            now = datetime(2026, 7, 12, 12, 0, 0)
+            due = SeedSource(
+                name="Due NDR",
+                source_type="airplay",
+                provider="ndr-airplay",
+                cadence="hourly",
+                active=True,
+                priority=1,
+            )
+            recent = SeedSource(
+                name="Recent chart",
+                source_type="chart",
+                provider="deezer-chart",
+                cadence="daily",
+                active=True,
+                priority=2,
+            )
+            manual = SeedSource(
+                name="Manual chart",
+                source_type="chart",
+                provider="listenbrainz",
+                cadence="manual",
+                active=True,
+                priority=3,
+            )
+            db.session.add_all([due, recent, manual])
+            db.session.flush()
+            db.session.add(SeedSourceRun(
+                seed_source_id=recent.id,
+                status="success",
+                started_at=now - timedelta(hours=1),
+                completed_at=now - timedelta(hours=1),
+            ))
+            db.session.commit()
+            with patch(
+                "musicround.services.automation.fetch_seed_source_candidates",
+                return_value={
+                    "run": {"status": "partial"},
+                    "persisted_candidate_count": 10,
+                },
+            ) as fetch:
+                result = automation.refresh_due_seed_sources(now=now)
+
+            fetch.assert_called_once_with(due.id, limit=100)
+            assert result["processed_count"] == 1
+            assert result["imported"] is False
+            assert {item["reason"] for item in result["skipped"]} == {"manual", "not_due"}
+
+    def test_fetch_seed_source_candidates_rejects_unverified_html_provider(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Unverified Chart",
+                source_type="chart",
+                provider="unverified",
+                url="https://example.test/chart",
+            )["seed_source"]
+            response = type("Response", (), {})()
+            response.status_code = 200
+            response.headers = {"content-type": "text/html"}
+            response.text = "<html><body>navigation and marketing text</body></html>"
+            with patch("musicround.services.automation.requests.get", return_value=response) as mock_get:
+                with pytest.raises(automation.AutomationError, match="No verified parser"):
+                    automation.fetch_seed_source_candidates(source["id"])
+            mock_get.assert_not_called()
+
+            assert SeedSourceCandidate.query.count() == 0
+            assert SeedSourceRun.query.one().status == "failed"
+
     def test_fetch_seed_source_candidates_hides_provider_fetch_error_body(self, app):
         with app.app_context():
             source = automation.register_seed_source(
                 name="Broken chart",
                 source_type="chart",
-                provider="example",
+                provider="official-charts",
                 url="https://example.test/private-token-chart",
             )["seed_source"]
             response = type("Response", (), {})()
@@ -3939,6 +4202,28 @@ class TestAgentPlanningAutomation:
             assert run.status == "failed"
             assert run.error_message == automation.AUTOMATION_SEED_SOURCE_FETCH_ERROR
             assert "provider-secret-token" not in run.error_message
+
+    def test_candidate_persistence_failure_marks_recorded_run_failed(self, app):
+        with app.app_context():
+            source = automation.register_seed_source(
+                name="Persistence failure fixture",
+                source_type="chart",
+                provider="manual",
+            )["seed_source"]
+            with patch(
+                "musicround.services.automation.persist_seed_source_candidates",
+                side_effect=RuntimeError("database detail must stay private"),
+            ):
+                with pytest.raises(automation.AutomationError) as exc_info:
+                    automation.fetch_seed_source_candidates(
+                        source["id"], text="Example Artist - Example Song"
+                    )
+
+            assert str(exc_info.value) == automation.AUTOMATION_SEED_SOURCE_FETCH_ERROR
+            run = SeedSourceRun.query.one()
+            assert run.status == "failed"
+            assert "database detail" not in run.error_message
+            assert SeedSourceCandidate.query.count() == 0
 
     def test_quizmaster_context_includes_preferences_and_recent_usage(self, app):
         with app.app_context():

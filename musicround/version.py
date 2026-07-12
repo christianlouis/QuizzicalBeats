@@ -5,10 +5,10 @@ This module provides version details that can be displayed in both CLI and UI.
 
 # Version information
 VERSION_INFO = {
-    "version": "1.10.0",
-    "release_name": "Import Infrastructure",
-    "release_date": "2025-05-27",
-    "build_number": "20250527001"
+    "version": "1.11.0",
+    "release_name": "Trusted Catalog Sources",
+    "release_date": "2026-07-12",
+    "build_number": "20260712001"
 }
 
 def get_version_str(include_build=False):

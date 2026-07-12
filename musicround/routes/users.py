@@ -1554,6 +1554,8 @@ def storage_status():
 @admin_required
 def seed_sources():
     """Show external catalog sources and their review-only ingestion status."""
+    from musicround.services.automation import seed_source_capability
+
     sources = SeedSource.query.order_by(SeedSource.priority.desc(), SeedSource.name.asc()).all()
     recent_runs = (
         SeedSourceRun.query
@@ -1570,6 +1572,7 @@ def seed_sources():
         sources=sources,
         recent_runs=recent_runs,
         latest_runs=latest_runs,
+        source_capabilities={source.id: seed_source_capability(source.provider, source.url) for source in sources},
     )
 
 
@@ -1578,15 +1581,22 @@ def seed_sources():
 @admin_required
 def update_seed_source(source_id):
     """Enable or pause a source and set its operator-approved read cadence."""
+    from musicround.services.automation import seed_source_capability
+
     source = db.session.get(SeedSource, source_id)
     if not source:
         flash('Catalog source was not found.', 'danger')
         return redirect(url_for('users.seed_sources'))
-    cadence = (request.form.get('cadence') or 'manual').strip().lower()
-    if cadence not in {'manual', 'daily', 'weekly'}:
-        flash('Choose manual, daily, or weekly cadence.', 'danger')
+    requested_active = request.form.get('active') == 'on'
+    capability = seed_source_capability(source.provider, source.url)
+    if requested_active and not capability['refreshable']:
+        flash(f"{source.name}: {capability['detail']}.", 'warning')
         return redirect(url_for('users.seed_sources'))
-    source.active = request.form.get('active') == 'on'
+    cadence = (request.form.get('cadence') or 'manual').strip().lower()
+    if cadence not in {'manual', 'hourly', 'daily', 'weekly'}:
+        flash('Choose manual, hourly, daily, or weekly cadence.', 'danger')
+        return redirect(url_for('users.seed_sources'))
+    source.active = requested_active
     source.cadence = cadence
     source.updated_at = datetime.utcnow()
     db.session.commit()
@@ -1610,6 +1620,10 @@ def refresh_seed_source(source_id):
     if not source:
         flash('Catalog source was not found.', 'danger')
         return redirect(url_for('users.seed_sources'))
+    capability = automation.seed_source_capability(source.provider, source.url)
+    if not capability['refreshable']:
+        flash(f"{source.name}: {capability['detail']}.", 'warning')
+        return redirect(url_for('users.seed_sources'))
     try:
         result = automation.fetch_seed_source_candidates(source_id, limit=100, timeout_seconds=20)
     except AutomationError as exc:
@@ -1632,7 +1646,7 @@ def refresh_seed_source(source_id):
 def seed_candidates():
     """Show persisted catalog candidates without exposing an import action."""
     review_status = (request.args.get('status') or 'pending').strip().lower()
-    if review_status not in {'pending', 'approved', 'rejected', 'all'}:
+    if review_status not in {'pending', 'approved', 'rejected', 'imported', 'all'}:
         review_status = 'pending'
     source_id = request.args.get('source_id', type=int)
     query = SeedSourceCandidate.query
@@ -1667,6 +1681,9 @@ def review_seed_candidate(candidate_id):
     if review_status not in {'pending', 'approved', 'rejected'}:
         flash('Choose pending, approved, or rejected.', 'danger')
         return redirect(url_for('users.seed_candidates'))
+    if review_status == 'approved' and not (candidate.spotify_id or candidate.deezer_id):
+        flash('Resolve this candidate to one verified provider track before approval.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
     notes = (request.form.get('review_notes') or '').strip()
     if len(notes) > 2000:
         flash('Review notes must be 2,000 characters or fewer.', 'danger')
@@ -1678,6 +1695,130 @@ def review_seed_candidate(candidate_id):
     db.session.commit()
     flash('Candidate review saved. No song was imported.', 'success')
     return redirect(url_for('users.seed_candidates', status=review_status))
+
+
+@users_bp.route('/seed-candidates/<int:candidate_id>/resolve', methods=['POST'])
+@login_required
+@admin_required
+def resolve_seed_candidate(candidate_id):
+    """Resolve a candidate against the read-only offline Spotify archive."""
+    from musicround.services import automation
+
+    try:
+        result = automation.resolve_seed_source_candidate(candidate_id)
+    except AutomationError as exc:
+        flash(str(exc), 'warning')
+    except Exception:  # pylint: disable=broad-except
+        current_app.logger.exception('Catalog candidate resolution failed for %s', candidate_id)
+        flash('The offline Spotify candidate lookup failed.', 'danger')
+    else:
+        candidate = result['candidate']
+        flash(
+            f"Resolved {candidate['artist']} - {candidate['title']} to an offline Spotify record. "
+            'Review is still required.',
+            'success',
+        )
+    return redirect(url_for('users.seed_candidates'))
+
+
+@users_bp.route('/seed-candidates/<int:candidate_id>/import', methods=['POST'])
+@login_required
+@admin_required
+def import_seed_candidate(candidate_id):
+    """Import one explicitly approved, provider-addressable track."""
+    from musicround.services import automation
+
+    candidate = db.session.get(SeedSourceCandidate, candidate_id)
+    if not candidate:
+        flash('Catalog candidate was not found.', 'danger')
+        return redirect(url_for('users.seed_candidates'))
+    if candidate.review_status != 'approved':
+        flash('Approve the candidate before importing it.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
+    if not (candidate.spotify_id or candidate.deezer_id):
+        flash('This candidate needs a verified Spotify or Deezer track ID before import.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
+    try:
+        automation.import_seed_source_candidate(candidate.id, user_id=current_user.id)
+    except AutomationError as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('users.seed_candidates'))
+    except Exception:  # pylint: disable=broad-except
+        current_app.logger.exception('Approved catalog candidate import failed for %s', candidate.id)
+        flash('The approved track could not be imported. The candidate remains approved.', 'danger')
+        return redirect(url_for('users.seed_candidates'))
+    flash(f'{candidate.artist} - {candidate.title} was imported into the song library.', 'success')
+    return redirect(url_for('users.seed_candidates', status='imported'))
+
+
+@users_bp.route('/seed-candidates/bulk', methods=['POST'])
+@login_required
+@admin_required
+def bulk_seed_candidates():
+    """Apply one bounded editorial action to selected review candidates."""
+    from musicround.services import automation
+
+    action = (request.form.get('action') or '').strip().lower()
+    raw_ids = request.form.getlist('candidate_ids')
+    try:
+        candidate_ids = list(dict.fromkeys(int(value) for value in raw_ids))
+    except ValueError:
+        candidate_ids = []
+    if not candidate_ids or len(candidate_ids) > 100:
+        flash('Select between 1 and 100 candidates.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
+    if action not in {'resolve', 'approve', 'reject', 'import'}:
+        flash('Choose a supported bulk action.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
+    if action == 'resolve' and len(candidate_ids) > 25:
+        flash('Resolve at most 25 candidates at once.', 'warning')
+        return redirect(url_for('users.seed_candidates'))
+
+    candidates = SeedSourceCandidate.query.filter(
+        SeedSourceCandidate.id.in_(candidate_ids)
+    ).all()
+    completed = 0
+    skipped = 0
+    for candidate in candidates:
+        if action == 'resolve':
+            try:
+                automation.resolve_seed_source_candidate(candidate.id)
+            except AutomationError:
+                skipped += 1
+            else:
+                completed += 1
+        elif action == 'approve':
+            if candidate.review_status == 'imported' or not (
+                candidate.spotify_id or candidate.deezer_id
+            ):
+                skipped += 1
+                continue
+            candidate.review_status = 'approved'
+            candidate.needs_review = False
+            candidate.reviewed_at = datetime.utcnow()
+            completed += 1
+        elif action == 'reject':
+            if candidate.review_status == 'imported':
+                skipped += 1
+                continue
+            candidate.review_status = 'rejected'
+            candidate.needs_review = False
+            candidate.reviewed_at = datetime.utcnow()
+            completed += 1
+        else:
+            if candidate.review_status != 'approved':
+                skipped += 1
+                continue
+            try:
+                automation.import_seed_source_candidate(candidate.id, user_id=current_user.id)
+            except Exception:  # pylint: disable=broad-except
+                current_app.logger.exception('Bulk catalog candidate import failed for %s', candidate.id)
+                skipped += 1
+                continue
+            completed += 1
+    db.session.commit()
+    flash(f'Bulk {action}: {completed} completed, {skipped} skipped.', 'success')
+    return redirect(url_for('users.seed_candidates'))
 
 @users_bp.route('/create-backup', methods=['POST'])
 @automation_or_admin_required

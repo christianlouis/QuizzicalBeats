@@ -48,6 +48,7 @@ from musicround.helpers.spotify_archive import (
     bulk_lookup_spotify_archive_audio_features,
     bulk_lookup_spotify_archive_isrcs,
     lookup_spotify_archive_isrcs,
+    search_spotify_archive_catalog,
 )
 from musicround.helpers.round_notifications import send_round_blocked_notification
 from musicround.helpers.paths import app_data_path
@@ -127,6 +128,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 10,
         "notes": "US mainstream singles chart for broad recognizability.",
+        "active": False,
     },
     {
         "name": "Billboard 200",
@@ -136,6 +138,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 20,
         "notes": "US albums chart for artist and album-era research.",
+        "active": False,
     },
     {
         "name": "Official Singles Chart",
@@ -154,6 +157,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 40,
         "notes": "UK albums chart for recurring artist and album context.",
+        "active": False,
     },
     {
         "name": "Offizielle Deutsche Charts Singles",
@@ -163,6 +167,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 50,
         "notes": "German singles chart for local mainstream coverage.",
+        "active": False,
     },
     {
         "name": "Spotify Charts",
@@ -172,6 +177,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "weekly",
         "priority": 60,
         "notes": "Streaming chart entry point for current-popularity research.",
+        "active": False,
     },
     {
         "name": "Spotify Top 10,000 Songs by Popularity",
@@ -186,6 +192,53 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         ),
     },
     {
+        "name": "Deezer Top Tracks",
+        "source_type": "chart",
+        "provider": "deezer-chart",
+        "url": "https://api.deezer.com/chart/0/tracks?limit=100",
+        "cadence": "hourly",
+        "priority": 75,
+        "notes": "Structured global Deezer chart with stable Deezer track IDs and rank.",
+    },
+    {
+        "name": "NDR 2 Airplay",
+        "source_type": "airplay",
+        "provider": "ndr-airplay",
+        "url": "https://www.ndr.de/ndr2/programm/ndr2-playlist,radioplaylist-ndr2-100.html",
+        "cadence": "daily",
+        "priority": 76,
+        "notes": "Recently played NDR 2 tracks for German mainstream airplay discovery.",
+    },
+    {
+        "name": "ListenBrainz Weekly Recordings",
+        "source_type": "chart",
+        "provider": "listenbrainz",
+        "url": "https://api.listenbrainz.org/1/stats/sitewide/recordings?range=week&count=100",
+        "cadence": "weekly",
+        "priority": 77,
+        "notes": "Structured weekly listens with MusicBrainz recording IDs and listen counts.",
+    },
+    {
+        "name": "RADIO BOB! Airplay",
+        "source_type": "airplay",
+        "provider": "radio-bob",
+        "url": "https://www.radiobob.de/musik/playlist",
+        "cadence": "manual",
+        "priority": 78,
+        "notes": "Research only until a stable, permitted playlist endpoint is verified.",
+        "active": False,
+    },
+    {
+        "name": "setlist.fm Concert Setlists",
+        "source_type": "setlist",
+        "provider": "setlist-fm",
+        "url": "https://api.setlist.fm/docs/1.0/index.html",
+        "cadence": "manual",
+        "priority": 79,
+        "notes": "Research signal for live staples; requires an API key and recording resolution.",
+        "active": False,
+    },
+    {
         "name": "OMDB Lite Catalog",
         "source_type": "curated",
         "provider": "omdb",
@@ -195,6 +248,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
             "Optional local Openmusic Database mirror for high-view candidate discovery. "
             "Candidates must be resolved through Deezer/MusicBrainz/Spotify before import."
         ),
+        "active": False,
     },
     {
         "name": "Wacken Open Air Line-Up",
@@ -204,6 +258,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "annual",
         "priority": 110,
         "notes": "Metal and hard-rock festival source for headliner research.",
+        "active": False,
     },
     {
         "name": "Graspop Metal Meeting Line-Up",
@@ -213,6 +268,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "annual",
         "priority": 120,
         "notes": "Metal festival source for European headliner research.",
+        "active": False,
     },
     {
         "name": "Download Festival Line-Up",
@@ -222,6 +278,7 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "annual",
         "priority": 130,
         "notes": "UK rock and metal festival source for headliner research.",
+        "active": False,
     },
     {
         "name": "Rock am Ring Line-Up",
@@ -231,8 +288,33 @@ DEFAULT_SEED_SOURCE_DEFINITIONS = [
         "cadence": "annual",
         "priority": 140,
         "notes": "German rock festival source for local and international headliners.",
+        "active": False,
     },
 ]
+
+VERIFIED_SEED_SOURCE_PROVIDERS = {
+    "deezer-chart": "Structured chart API with Deezer track IDs",
+    "listenbrainz": "Structured weekly listen chart with MusicBrainz recording IDs",
+    "ndr-airplay": "Verified NDR 2 airplay page adapter",
+    "official-charts": "Verified track chart adapter",
+    "spotify-annas-archive": "Verified Spotify snapshot adapter with identifiers",
+}
+
+
+def seed_source_capability(provider: str | None, url: str | None = None) -> dict[str, Any]:
+    """Return an operator-facing capability without implying generic HTML support."""
+    normalized = (provider or "").strip().casefold()
+    if normalized == "official-charts" and "/albums-chart/" in (url or ""):
+        return {
+            "refreshable": False,
+            "status": "research_only",
+            "detail": "Research only: albums need a separate track-selection step",
+        }
+    if normalized in VERIFIED_SEED_SOURCE_PROVIDERS:
+        return {"refreshable": True, "status": "verified", "detail": VERIFIED_SEED_SOURCE_PROVIDERS[normalized]}
+    if normalized == "omdb":
+        return {"refreshable": False, "status": "query_only", "detail": "Available only through a specific catalog search"}
+    return {"refreshable": False, "status": "unsupported", "detail": "No verified parser for the current source page"}
 
 
 def _round_song_ids(round_obj: Round) -> list[int]:
@@ -3045,8 +3127,13 @@ def register_seed_source(
     normalized_provider = (provider or "").strip() or None
     if not normalized_name:
         raise AutomationError("name must not be empty.")
-    if normalized_type not in {"chart", "festival", "editorial", "curated", "playlist"}:
-        raise AutomationError("source_type must be chart, festival, editorial, curated, or playlist.")
+    allowed_source_types = {
+        "airplay", "chart", "editorial", "festival", "curated", "playlist", "setlist",
+    }
+    if normalized_type not in allowed_source_types:
+        raise AutomationError(
+            "source_type must be airplay, chart, editorial, festival, curated, playlist, or setlist."
+        )
     if priority < 0 or priority > 1000:
         raise AutomationError("priority must be between 0 and 1000.")
 
@@ -3159,7 +3246,7 @@ def record_seed_source_run(
 
 def _seed_source_candidate_key(candidate: Mapping[str, Any]) -> str:
     """Build a stable source-local identity without trusting display text alone."""
-    for name in ('isrc', 'spotify_id', 'omdb_track_id'):
+    for name in ('isrc', 'spotify_id', 'deezer_id', 'recording_mbid', 'omdb_track_id'):
         value = str(candidate.get(name) or '').strip()
         if value:
             return f'{name}:{value.casefold()}'
@@ -3168,7 +3255,6 @@ def _seed_source_candidate_key(candidate: Mapping[str, Any]) -> str:
         'artist': str(candidate.get('artist') or '').strip().casefold(),
         'album_name': str(candidate.get('album_name') or '').strip().casefold(),
         'year': candidate.get('year'),
-        'source_rank': candidate.get('source_rank'),
     }
     encoded = json.dumps(identity, sort_keys=True, ensure_ascii=True).encode('utf-8')
     return f'text:{hashlib.sha256(encoded).hexdigest()}'
@@ -3185,8 +3271,11 @@ def _seed_source_candidate_summary(candidate: SeedSourceCandidate) -> dict[str, 
         'year': candidate.year,
         'duration_seconds': candidate.duration_seconds,
         'spotify_id': candidate.spotify_id,
+        'deezer_id': candidate.deezer_id,
         'isrc': candidate.isrc,
+        'recording_mbid': candidate.recording_mbid,
         'source_rank': candidate.source_rank,
+        'source_score': candidate.source_score,
         'popularity': candidate.popularity,
         'needs_review': candidate.needs_review,
         'review_status': candidate.review_status,
@@ -3209,7 +3298,8 @@ def persist_seed_source_candidates(
     now = datetime.utcnow()
     fields = (
         'title', 'artist', 'album_name', 'year', 'duration_seconds', 'spotify_id',
-        'isrc', 'source_rank', 'popularity',
+        'deezer_id', 'isrc', 'recording_mbid', 'source_rank', 'source_score',
+        'popularity',
     )
     for payload in candidates:
         external_key = _seed_source_candidate_key(payload)
@@ -3232,7 +3322,10 @@ def persist_seed_source_candidates(
             updated_count += 1
         for field in fields:
             value = payload.get(field)
-            if field in {'title', 'artist', 'album_name', 'spotify_id', 'isrc'}:
+            if field in {
+                'title', 'artist', 'album_name', 'spotify_id', 'deezer_id',
+                'isrc', 'recording_mbid',
+            }:
                 value = str(value).strip() if value is not None else None
             if field == 'title' and not value:
                 continue
@@ -3369,11 +3462,174 @@ def _seed_source_candidates_from_spotify_top_html(
     return candidates
 
 
-def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) -> dict[str, Any]:
+def _seed_source_candidates_from_official_charts_html(
+    text: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Parse Official Charts track rows while ignoring navigation and page copy."""
+    title_pattern = re.compile(
+        r'<a\b[^>]*class="[^"]*\bchart-name\b[^"]*"[^>]*>(.*?)</a>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    artist_pattern = re.compile(
+        r'class="chart-artist[^\"]*"[^>]*>.*?<span[^>]*>(.*?)</span>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    titles = []
+    for anchor_html in title_pattern.findall(text):
+        span_values = [
+            _strip_html_fragment(value)
+            for value in re.findall(r'<span[^>]*>(.*?)</span>', anchor_html, flags=re.IGNORECASE | re.DOTALL)
+        ]
+        titles.append(next((value for value in reversed(span_values) if value), ""))
+    artists = [_strip_html_fragment(value) for value in artist_pattern.findall(text)]
+    candidates = []
+    for rank, (title, artist) in enumerate(zip(titles, artists), start=1):
+        if len(candidates) >= limit:
+            break
+        candidate = _playlist_candidate(
+            rank,
+            f"{artist} - {title}",
+            title,
+            artist,
+            issues=["provider_identity_requires_resolution"],
+        )
+        if candidate:
+            candidate["source_rank"] = rank
+            candidates.append(candidate)
+    return candidates
+
+
+def _seed_source_candidates_from_ndr_airplay_html(
+    text: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Parse NDR playlist entries that are rendered in the server response."""
+    row_pattern = re.compile(
+        r'<li\b[^>]*class="[^"]*\btitlelistentry\b[^"]*"[^>]*>(.*?)</li>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    candidates = []
+    for row_number, row_html in enumerate(row_pattern.findall(text), start=1):
+        if len(candidates) >= limit:
+            break
+        artist_match = re.search(
+            r'<span\b[^>]*class="artist"[^>]*>(.*?)</span>',
+            row_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        title_match = re.search(
+            r'<span\b[^>]*class="title"[^>]*>(.*?)</span>',
+            row_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not artist_match or not title_match:
+            continue
+        artist = _strip_html_fragment(artist_match.group(1))
+        title = _strip_html_fragment(title_match.group(1))
+        candidate = _playlist_candidate(
+            row_number,
+            f"{artist} - {title}",
+            title,
+            artist,
+            issues=["provider_identity_requires_resolution"],
+        )
+        if candidate:
+            candidate["source_rank"] = row_number
+            candidates.append(candidate)
+    return candidates
+
+
+def _seed_source_candidates_from_deezer_chart(
+    payload: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Parse Deezer's structured chart response with stable track identifiers."""
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    candidates = []
+    for row_number, row in enumerate(rows, start=1):
+        if len(candidates) >= limit:
+            break
+        if not isinstance(row, dict):
+            continue
+        artist = row.get("artist") if isinstance(row.get("artist"), dict) else {}
+        album = row.get("album") if isinstance(row.get("album"), dict) else {}
+        title = str(row.get("title") or "").strip()
+        artist_name = str(artist.get("name") or "").strip()
+        candidate = _playlist_candidate(
+            row_number,
+            f"{artist_name} - {title}",
+            title,
+            artist_name,
+            issues=["isrc_requires_resolution"],
+        )
+        if candidate:
+            candidate.update({
+                "deezer_id": str(row.get("id")) if row.get("id") is not None else None,
+                "source_rank": int(row.get("position") or row_number),
+                "popularity": normalize_deezer_rank(row.get("rank")),
+                "duration_seconds": row.get("duration"),
+                "album_name": str(album.get("title") or "").strip() or None,
+                "source_score": row.get("rank"),
+            })
+            candidates.append(candidate)
+    return candidates
+
+
+def _seed_source_candidates_from_listenbrainz(
+    payload: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Parse ListenBrainz site-wide recording statistics."""
+    body = payload.get("payload") if isinstance(payload, dict) else None
+    rows = body.get("recordings") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return []
+    candidates = []
+    for row_number, row in enumerate(rows, start=1):
+        if len(candidates) >= limit:
+            break
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("track_name") or "").strip()
+        artist = str(row.get("artist_name") or "").strip()
+        candidate = _playlist_candidate(
+            row_number,
+            f"{artist} - {title}",
+            title,
+            artist,
+            issues=["provider_identity_requires_resolution"],
+        )
+        if candidate:
+            candidate.update({
+                "recording_mbid": str(row.get("recording_mbid") or "").strip() or None,
+                "source_rank": row_number,
+                "album_name": str(row.get("release_name") or "").strip() or None,
+                "source_score": row.get("listen_count"),
+            })
+            candidates.append(candidate)
+    return candidates
+
+
+def _parse_seed_source_payload(
+    text: str,
+    content_type: str | None,
+    limit: int,
+    provider: str | None = None,
+) -> dict[str, Any]:
     content_type = (content_type or "").casefold()
+    normalized_provider = (provider or "").strip().casefold()
     if "json" in content_type or text.lstrip().startswith(("{", "[")):
         try:
-            candidates = _seed_source_candidates_from_json_payload(json.loads(text), limit)
+            payload = json.loads(text)
+            if normalized_provider == "deezer-chart":
+                candidates = _seed_source_candidates_from_deezer_chart(payload, limit)
+            elif normalized_provider == "listenbrainz":
+                candidates = _seed_source_candidates_from_listenbrainz(payload, limit)
+            else:
+                candidates = _seed_source_candidates_from_json_payload(payload, limit)
         except json.JSONDecodeError:
             candidates = []
         if candidates:
@@ -3386,20 +3642,29 @@ def _parse_seed_source_payload(text: str, content_type: str | None, limit: int) 
                 "ready_for_import": bool(candidates) and not low_confidence,
                 "hints": ["Review source candidates before importing songs."],
             }
-    if "html" in content_type or "<table" in text.casefold():
-        candidates = _seed_source_candidates_from_spotify_top_html(text, limit)
+    if "html" in content_type or "<html" in text.casefold() or "<table" in text.casefold():
+        if normalized_provider == "spotify-annas-archive":
+            candidates = _seed_source_candidates_from_spotify_top_html(text, limit)
+        elif normalized_provider == "official-charts":
+            candidates = _seed_source_candidates_from_official_charts_html(text, limit)
+        elif normalized_provider == "ndr-airplay":
+            candidates = _seed_source_candidates_from_ndr_airplay_html(text, limit)
+        else:
+            raise AutomationError("This source does not have a verified HTML parser.")
         if candidates:
+            low_confidence = [candidate for candidate in candidates if candidate["needs_review"]]
             return {
                 "count": len(candidates),
                 "candidates": candidates,
-                "low_confidence_count": 0,
-                "low_confidence": [],
-                "ready_for_import": True,
+                "low_confidence_count": len(low_confidence),
+                "low_confidence": low_confidence,
+                "ready_for_import": not low_confidence,
                 "hints": [
                     "Review source candidates before importing songs.",
                     "Spotify IDs and ISRCs are source hints; provider import still verifies metadata.",
                 ],
             }
+        raise AutomationError("The verified source parser found no track rows.")
     return parse_text_playlist(text, limit=limit)
 
 
@@ -3460,19 +3725,29 @@ def fetch_seed_source_candidates(
 
     content_type = None
     payload_text = (text or "").strip()
+    capability = seed_source_capability(source.provider, source.url)
     try:
+        if not payload_text and source.provider != "omdb" and not capability["refreshable"]:
+            raise AutomationError(capability["detail"] + ".")
         if source.provider == "omdb" and not payload_text:
             parsed = _omdb_candidates(query or "", limit)
         else:
             if not payload_text:
                 if not source.url:
                     raise AutomationError("seed source has no URL; pass text for manual review.")
-                response = requests.get(source.url, timeout=timeout_seconds)
+                response = requests.get(
+                    source.url,
+                    timeout=timeout_seconds,
+                    headers={
+                        "Accept": "text/html,application/json;q=0.9,*/*;q=0.5",
+                        "User-Agent": "QuizzicalBeats/1.0 (+https://qb.kaufdeinquiz.com)",
+                    },
+                )
                 if response.status_code >= 400:
                     raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR)
                 content_type = response.headers.get("content-type")
                 payload_text = response.text
-            parsed = _parse_seed_source_payload(payload_text, content_type, limit)
+            parsed = _parse_seed_source_payload(payload_text, content_type, limit, source.provider)
     except OmdbError as exc:
         if record_run:
             record_seed_source_run(source.id, status="failed", error_message=str(exc), completed=True)
@@ -3510,11 +3785,29 @@ def fetch_seed_source_candidates(
             notes="Fetched candidates only; no songs were imported.",
             completed=True,
         )["run"]
-    persisted = persist_seed_source_candidates(
-        source,
-        run['id'] if run else None,
-        parsed['candidates'],
-    )
+    try:
+        persisted = persist_seed_source_candidates(
+            source,
+            run['id'] if run else None,
+            parsed['candidates'],
+        )
+    except Exception as exc:
+        db.session.rollback()
+        if run:
+            failed_run = db.session.get(SeedSourceRun, run['id'])
+            if failed_run:
+                failed_run.status = 'failed'
+                failed_run.error_message = AUTOMATION_SEED_SOURCE_FETCH_ERROR
+                failed_run.notes = 'Candidate persistence failed; no songs were imported.'
+                failed_run.completed_at = datetime.utcnow()
+                db.session.commit()
+        current_app.logger.error(
+            'Seed source candidate persistence failed for %s: %s',
+            source.id,
+            exc,
+            exc_info=True,
+        )
+        raise AutomationError(AUTOMATION_SEED_SOURCE_FETCH_ERROR) from exc
     response_candidates = []
     for raw_candidate, stored_candidate in zip(parsed['candidates'], persisted['candidates']):
         candidate = dict(raw_candidate)
@@ -3543,6 +3836,316 @@ def fetch_seed_source_candidates(
         "hints": [
             "This read-only step does not import songs.",
             "Review persisted candidates, resolve low-confidence rows, then use explicit import or round-creation tools.",
+        ],
+    }
+
+
+def refresh_due_seed_sources(
+    now: datetime | None = None,
+    max_sources: int = 10,
+    candidate_limit: int = 100,
+) -> dict[str, Any]:
+    """Refresh due verified sources without importing any candidate songs."""
+    if max_sources < 1 or max_sources > 50:
+        raise AutomationError("max_sources must be between 1 and 50.")
+    if candidate_limit < 1 or candidate_limit > 500:
+        raise AutomationError("candidate_limit must be between 1 and 500.")
+    current_time = now or datetime.utcnow()
+    intervals = {
+        "hourly": timedelta(hours=1),
+        "daily": timedelta(days=1),
+        "weekly": timedelta(days=7),
+    }
+    processed = []
+    skipped = []
+    sources = (
+        SeedSource.query
+        .filter_by(active=True)
+        .order_by(SeedSource.priority.asc(), SeedSource.id.asc())
+        .all()
+    )
+    for source in sources:
+        if len(processed) >= max_sources:
+            break
+        capability = seed_source_capability(source.provider, source.url)
+        cadence = (source.cadence or "manual").strip().lower()
+        if not capability["refreshable"]:
+            skipped.append({"source_id": source.id, "reason": "unsupported"})
+            continue
+        if cadence == "manual":
+            skipped.append({"source_id": source.id, "reason": "manual"})
+            continue
+        latest = source.runs.order_by(
+            SeedSourceRun.started_at.desc(), SeedSourceRun.id.desc()
+        ).first()
+        if cadence == "snapshot":
+            if latest and latest.status in {"success", "partial"}:
+                skipped.append({"source_id": source.id, "reason": "snapshot_complete"})
+                continue
+        elif cadence in intervals:
+            if latest and latest.started_at > current_time - intervals[cadence]:
+                skipped.append({"source_id": source.id, "reason": "not_due"})
+                continue
+        else:
+            skipped.append({"source_id": source.id, "reason": "unknown_cadence"})
+            continue
+        try:
+            result = fetch_seed_source_candidates(source.id, limit=candidate_limit)
+        except AutomationError as exc:
+            processed.append({
+                "source_id": source.id,
+                "source_name": source.name,
+                "status": "failed",
+                "error": str(exc),
+            })
+        else:
+            processed.append({
+                "source_id": source.id,
+                "source_name": source.name,
+                "status": result["run"]["status"] if result.get("run") else "success",
+                "candidate_count": result["persisted_candidate_count"],
+            })
+    return {
+        "ok": not any(item["status"] == "failed" for item in processed),
+        "processed_count": len(processed),
+        "failed_count": sum(item["status"] == "failed" for item in processed),
+        "processed": processed,
+        "skipped": skipped,
+        "imported": False,
+    }
+
+
+def _catalog_identity(value: Any) -> str:
+    """Normalize provider display text for conservative identity comparisons."""
+    return re.sub(r"[^a-z0-9]+", "", unescape(str(value or "")).casefold())
+
+
+def _candidate_artist_matches(candidate_artist: str | None, provider_artist: str | None) -> bool:
+    """Accept a provider primary artist only when it is explicitly credited."""
+    candidate_identity = _catalog_identity(candidate_artist)
+    provider_identity = _catalog_identity(provider_artist)
+    if not candidate_identity or not provider_identity:
+        return False
+    if candidate_identity == provider_identity:
+        return True
+    credited_parts = re.split(
+        r"\s*(?:,|/|&|\bx\b|\bfeat(?:uring)?\.?\b|\bwith\b)\s*",
+        str(candidate_artist or ""),
+        flags=re.IGNORECASE,
+    )
+    return provider_identity in {_catalog_identity(part) for part in credited_parts if part.strip()}
+
+
+def _resolve_candidate_with_deezer(candidate: SeedSourceCandidate) -> dict[str, Any]:
+    """Resolve title/artist to one Deezer recording and its ISRC."""
+    deezer_client = current_app.config.get("deezer")
+    if not deezer_client:
+        raise AutomationError("Deezer candidate resolution is not configured.")
+    if candidate.deezer_id:
+        rows = [deezer_client.get_track(candidate.deezer_id)]
+    else:
+        query = f'artist:"{candidate.artist or ""}" track:"{candidate.title}"'
+        rows = deezer_client.search_tracks(query, limit=10)
+
+    title_identity = _catalog_identity(candidate.title)
+    exact_rows = []
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("error"):
+            continue
+        row_artist = row.get("artist") if isinstance(row.get("artist"), dict) else {}
+        if (
+            _catalog_identity(row.get("title")) == title_identity
+            and _candidate_artist_matches(candidate.artist, row_artist.get("name"))
+            and row.get("id")
+        ):
+            exact_rows.append(row)
+    if not exact_rows:
+        raise AutomationError("No exact Deezer title and artist match was found.")
+
+    detailed_rows = []
+    for row in sorted(exact_rows, key=lambda item: int(item.get("rank") or 0), reverse=True)[:5]:
+        detail = row if row.get("isrc") else deezer_client.get_track(row["id"])
+        if isinstance(detail, dict) and not detail.get("error"):
+            detailed_rows.append(detail)
+    if not detailed_rows:
+        raise AutomationError("The Deezer matches have no usable recording identity.")
+    # Deezer can return several same-title editions. Rank selects the canonical
+    # candidate, while editorial review remains mandatory before import.
+    match = max(detailed_rows, key=lambda item: int(item.get("rank") or 0))
+    resolved_isrc = _normalize_provider_isrc(match.get("isrc"))
+
+    album = match.get("album") if isinstance(match.get("album"), dict) else {}
+    candidate.deezer_id = str(match["id"])
+    candidate.isrc = resolved_isrc or candidate.isrc
+    candidate.album_name = str(album.get("title") or "").strip() or candidate.album_name
+    if match.get("duration") is not None:
+        candidate.duration_seconds = max(0, int(match["duration"]))
+    normalized_popularity = normalize_deezer_rank(match.get("rank"))
+    if normalized_popularity is not None:
+        candidate.popularity = normalized_popularity
+    return match
+
+
+def resolve_seed_source_candidate(candidate_id: int) -> dict[str, Any]:
+    """Resolve one candidate through Deezer, then exact offline Spotify ISRC lookup."""
+    candidate = db.session.get(SeedSourceCandidate, candidate_id)
+    if not candidate:
+        raise AutomationError(f"Seed source candidate {candidate_id} was not found.")
+    if candidate.spotify_id:
+        return {"resolved": True, "candidate": _seed_source_candidate_summary(candidate)}
+
+    deezer_match = _resolve_candidate_with_deezer(candidate)
+    archive = {"results": [], "snapshot": None, "query_mode": None}
+    if candidate.isrc:
+        try:
+            archive = search_spotify_archive_catalog(current_app, candidate.isrc, limit=50)
+        except SpotifyArchiveError as exc:
+            current_app.logger.info("Offline Spotify resolution unavailable for candidate %s: %s", candidate.id, exc)
+    spotify_matches = [
+        row for row in archive.get("results", [])
+        if str(row.get("isrc") or "").strip().upper() == candidate.isrc
+        and row.get("spotify_id")
+    ]
+    if spotify_matches:
+        match = max(
+            spotify_matches,
+            key=lambda row: (int(row.get("popularity") or 0), str(row.get("spotify_id"))),
+        )
+        candidate.spotify_id = str(match["spotify_id"])
+        candidate.album_name = str(match.get("album_name") or "").strip() or candidate.album_name
+        candidate.year = match.get("year") or candidate.year
+        duration_ms = match.get("duration_ms")
+        if duration_ms is not None:
+            candidate.duration_seconds = max(0, round(int(duration_ms) / 1000))
+        popularity = match.get("popularity")
+        if popularity is not None:
+            candidate.popularity = max(0, min(100, int(popularity)))
+    raw_metadata = {}
+    if candidate.raw_metadata:
+        try:
+            raw_metadata = json.loads(candidate.raw_metadata)
+        except (TypeError, ValueError):
+            raw_metadata = {}
+    raw_metadata["offline_spotify_resolution"] = {
+        "snapshot": archive.get("snapshot"),
+        "query_mode": archive.get("query_mode"),
+        "spotify_id": candidate.spotify_id,
+        "isrc": candidate.isrc,
+    }
+    raw_metadata["deezer_resolution"] = {
+        "deezer_id": candidate.deezer_id,
+        "isrc": candidate.isrc,
+        "rank": deezer_match.get("rank"),
+    }
+    candidate.raw_metadata = json.dumps(raw_metadata, sort_keys=True, ensure_ascii=True)
+    candidate.needs_review = True
+    candidate.review_status = "pending"
+    candidate.last_seen_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "resolved": True,
+        "snapshot": archive.get("snapshot"),
+        "spotify_match": bool(candidate.spotify_id),
+        "candidate": _seed_source_candidate_summary(candidate),
+    }
+
+
+def _candidate_song(candidate: SeedSourceCandidate) -> Song | None:
+    if candidate.spotify_id:
+        song = Song.query.filter_by(spotify_id=candidate.spotify_id).first()
+        if song:
+            return song
+    if candidate.deezer_id:
+        try:
+            return Song.query.filter_by(deezer_id=int(candidate.deezer_id)).first()
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _candidate_signal_tags(candidate: SeedSourceCandidate, song: Song) -> list[str]:
+    provider = re.sub(r"[^a-z0-9]+", "-", candidate.seed_source.provider.casefold()).strip("-")
+    tags = [f"source:{provider}", f"signal:{candidate.seed_source.source_type}"]
+    country_by_provider = {
+        "ndr-airplay": "de",
+        "official-charts": "gb",
+    }
+    country = country_by_provider.get(candidate.seed_source.provider)
+    if country:
+        tags.append(f"country:{country}")
+    if candidate.source_rank:
+        if candidate.source_rank <= 10:
+            tags.append("chart:top-10")
+        if candidate.source_rank <= 40:
+            tags.append("chart:top-40")
+        if candidate.source_rank <= 100:
+            tags.append("chart:top-100")
+    if song.year and 1900 <= song.year <= 2100:
+        tags.append(f"decade:{song.year // 10 * 10}s")
+    return tags
+
+
+def import_seed_source_candidate(candidate_id: int, user_id: int | None = None) -> dict[str, Any]:
+    """Import and tag one approved candidate using its stable provider identity."""
+    candidate = db.session.get(SeedSourceCandidate, candidate_id)
+    if not candidate:
+        raise AutomationError(f"Seed source candidate {candidate_id} was not found.")
+    if candidate.review_status != "approved":
+        raise AutomationError("Approve the candidate before importing it.")
+    service_name = "spotify" if candidate.spotify_id else "deezer"
+    provider_id = candidate.spotify_id or candidate.deezer_id
+    if not provider_id:
+        raise AutomationError("Candidate has no verified Spotify or Deezer track ID.")
+
+    result = import_catalog_item(service_name, "track", provider_id, user_id=user_id)
+    import_result = result.get("result", {})
+    handled_count = int(import_result.get("imported_count") or 0) + int(
+        import_result.get("skipped_count") or 0
+    )
+    if handled_count < 1:
+        raise AutomationError("The provider did not return an importable track.")
+    song = _candidate_song(candidate)
+    if not song:
+        raise AutomationError("The provider import completed without a matching catalog song.")
+
+    _attach_tags(song, _candidate_signal_tags(candidate, song))
+    candidate.review_status = "imported"
+    candidate.needs_review = False
+    candidate.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    return {
+        "imported": True,
+        "candidate": _seed_source_candidate_summary(candidate),
+        "song": _song_summary(song),
+        "tags": sorted(tag.name for tag in song.tags),
+        "provider_result": import_result,
+    }
+
+
+def reviewed_seed_source_signals(limit: int = 25) -> dict[str, Any]:
+    """Expose only editorially reviewed source evidence to planning clients."""
+    if limit < 1 or limit > 100:
+        raise AutomationError("limit must be between 1 and 100.")
+    candidates = (
+        SeedSourceCandidate.query
+        .filter(SeedSourceCandidate.review_status.in_(["approved", "imported"]))
+        .order_by(
+            SeedSourceCandidate.source_rank.asc().nullslast(),
+            SeedSourceCandidate.last_seen_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": len(candidates),
+        "candidates": [
+            {
+                **_seed_source_candidate_summary(candidate),
+                "source_name": candidate.seed_source.name,
+                "source_type": candidate.seed_source.source_type,
+                "provider": candidate.seed_source.provider,
+            }
+            for candidate in candidates
         ],
     }
 
@@ -6258,6 +6861,7 @@ def quizmaster_context(user_id: int, months: int = 3) -> dict[str, Any]:
             limit=25,
             repeat_cooldown_weeks=preferences["repeat_cooldown_weeks"],
         ),
+        "external_catalog_signals": reviewed_seed_source_signals(limit=25),
     }
 
 
