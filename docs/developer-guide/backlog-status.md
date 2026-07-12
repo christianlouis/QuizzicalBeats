@@ -24,14 +24,16 @@ issue after verification or continue with the remaining follow-up.
 | Issue | Status | Evidence in repo | Remaining work |
 | --- | --- | --- | --- |
 | #239 Backfill Deezer ISRC metadata and offline Spotify identifiers | Ready to close | `musicround/helpers/catalog_backfill.py` implements the 3 stages, `run.py catalog backfill-isrc` CLI command added, tests provided in `tests/test_catalog_backfill.py`. | None. |
-| #12 Remove SQLite/RWO singleton | Operational / partial | Production no longer uses SQLite as the application database, CNPG PostgreSQL is live, SQLite rows were migrated, Web/MCP/scheduled email use PostgreSQL, rollout strategy avoids RWO replacement deadlocks, backup readiness fails closed for managed SQL, artifact storage capabilities flag filesystem storage as HA-blocking, storage inventory is visible in service health/admin health, and `run.py storage readiness` gives agents a fail-closed HA gate | Generated MP3/PDF artifacts still depend on `/data` RWO storage, web is still one replica, and database-native backup/snapshot handling still needs validation before the host-loss HA acceptance criteria can close. |
+| #12 Remove SQLite/RWO singleton | Closed | Production uses CNPG PostgreSQL, artifacts use S3, and the web tier runs two stateless replicas with RollingUpdate, node spread, startup/readiness/liveness probes, and a PDB. The legacy SQLite backup CronJob is removed; CNPG continuous archiving and scheduled S3 backups are verified. | The former `/data` PVC is retained unmounted as a rollback reserve and is not part of the runtime path. |
 | #32 External Music Data and chart ingestion | Milestone / open | Seed-source registry, candidate previewing, idempotent default seed sources, Spotify Top 10,000 HTML candidate parsing, Deezer-first enrichment, normalized 0-100 popularity repair, Openmusic/OMDB review-only candidate search, and an optional offline Spotify archive discovery path exist | Scheduled ingestion, normalization into planning metadata, source-rate-limit governance, and production acceptance for external sources remain. |
 | #33 Alert Amplifier notifications | Milestone / mostly complete | Import-job status emails, per-user notification preferences, OAuth token warning email CLI, quality-gate repair emails, SMTP verification CLI, and admin digest with service-health and backup-readiness findings exist | Optional push channels and any future in-product digest UI remain. |
-| #34 Storage Sanctuary multi-provider storage | Milestone / open | Storage health checks gate MP3/PDF generation and delivery; filesystem paths are configurable through `ROUND_MP3_DIR`, `ROUND_PDF_DIR`, and `DATA_DIR`; service health, admin health, and `run.py storage readiness` expose backend capabilities, HA-blocking warnings, and generated artifact inventory totals | Add object/cloud backend support, backup export storage, admin sync controls, and stable MCP asset responses independent of the backend. |
+| #34 Storage Sanctuary multi-provider storage | Closed | Generated MP3/PDF artifacts use private Hetzner S3 via External Secrets; 58 existing artifacts were migrated and verified. Storage Status exposes backend/readiness/inventory, and CNPG backups use the same object storage. | None. |
 
 ## Recently Closed From This Crosswalk
 
 - #31 Server Stability production hardening
+- #12 Remove SQLite/RWO singleton
+- #34 Storage Sanctuary multi-provider storage
 - #36 Performance Pulse
 - #29 Search Supercharge
 - #25 Asset preview and approval page before email delivery
