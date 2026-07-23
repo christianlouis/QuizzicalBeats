@@ -98,6 +98,9 @@ DATA_DIR=/data
 ROUND_ARTIFACT_STORAGE_BACKEND=filesystem
 ROUND_MP3_DIR=/data/rounds
 ROUND_PDF_DIR=/data/pdfs
+ROUND_PREVIEW_TARGET_DBFS=-16.0
+ROUND_PREVIEW_PEAK_DBFS=-1.0
+ROUND_PREVIEW_MAX_BOOST_DB=12.0
 
 # S3-compatible generated-artifact storage (optional)
 # Keep ROUND_ARTIFACT_STORAGE_BACKEND=filesystem until this bucket has been
@@ -126,6 +129,11 @@ ROUND_PDF_DIR=/data/pdfs
 # PGUSER=quizzicalbeats
 # PGPASSWORD=change-me
 ```
+
+Song previews are leveled before the two round playthroughs are assembled. The
+defaults target `-16 dBFS` average loudness, keep peaks at or below `-1 dBFS`,
+and limit amplification of unusually quiet source files to `12 dB`. Intro,
+replay, number, hint, and outro audio is not changed by these settings.
 
 When `SQLALCHEMY_DATABASE_URI` is omitted, the local SQLite fallback is created
 as `song_data.db` inside `DATA_DIR`. Production deployments should configure

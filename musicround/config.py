@@ -18,6 +18,13 @@ def _int_from_env(name, default):
         return default
 
 
+def _float_from_env(name, default):
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 class Config:
     # Debug settings
     DEBUG = os.getenv("DEBUG", "False") == "True"
@@ -90,6 +97,9 @@ class Config:
     DATA_DIR = os.getenv("DATA_DIR", "/data")
     ROUND_MP3_DIR = os.getenv("ROUND_MP3_DIR", "/data/rounds")
     ROUND_PDF_DIR = os.getenv("ROUND_PDF_DIR", "/data/pdfs")
+    ROUND_PREVIEW_TARGET_DBFS = _float_from_env("ROUND_PREVIEW_TARGET_DBFS", -16.0)
+    ROUND_PREVIEW_PEAK_DBFS = _float_from_env("ROUND_PREVIEW_PEAK_DBFS", -1.0)
+    ROUND_PREVIEW_MAX_BOOST_DB = _float_from_env("ROUND_PREVIEW_MAX_BOOST_DB", 12.0)
     ROUND_ARTIFACT_STORAGE_BACKEND = os.getenv("ROUND_ARTIFACT_STORAGE_BACKEND", "filesystem")
     ROUND_ARTIFACT_CACHE_DIR = os.getenv("ROUND_ARTIFACT_CACHE_DIR", "/tmp/quizzicalbeats-artifacts")
     ROUND_ARTIFACT_S3_ENDPOINT_URL = os.getenv("ROUND_ARTIFACT_S3_ENDPOINT_URL", "")

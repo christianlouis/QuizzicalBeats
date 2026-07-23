@@ -10,6 +10,7 @@ import re
 import zipfile
 import io
 import json
+import math
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
@@ -52,6 +53,30 @@ ROUND_SHARE_EDIT_ROLES = {'editor', 'producer', 'admin'}
 ROUND_SHARE_PRODUCE_ROLES = {'producer', 'admin'}
 ROUND_SHARE_MANAGE_ROLES = {'admin'}
 ROUND_SHARE_COMMENT_ROLES = {'comment', 'editor', 'producer', 'admin'}
+
+
+def _level_song_preview(audio, *, target_dbfs=-16.0, peak_dbfs=-1.0, max_boost_db=12.0):
+    """Level a song preview by RMS loudness while enforcing a peak ceiling."""
+    if not audio or not math.isfinite(audio.dBFS) or not math.isfinite(audio.max_dBFS):
+        return audio
+
+    peak_dbfs = min(float(peak_dbfs), 0.0)
+    target_dbfs = min(float(target_dbfs), peak_dbfs)
+    max_boost_db = max(float(max_boost_db), 0.0)
+    target_gain = target_dbfs - audio.dBFS
+    peak_limited_gain = peak_dbfs - audio.max_dBFS
+    gain_db = min(target_gain, peak_limited_gain, max_boost_db)
+    return audio.apply_gain(gain_db)
+
+
+def _level_song_preview_for_round(audio):
+    """Apply the configured music-round preview level settings."""
+    return _level_song_preview(
+        audio,
+        target_dbfs=current_app.config.get('ROUND_PREVIEW_TARGET_DBFS', -16.0),
+        peak_dbfs=current_app.config.get('ROUND_PREVIEW_PEAK_DBFS', -1.0),
+        max_boost_db=current_app.config.get('ROUND_PREVIEW_MAX_BOOST_DB', 12.0),
+    )
 
 
 def _int_arg(name, default=None, minimum=None, maximum=None):
@@ -1281,7 +1306,16 @@ def round_mp3(round_id):
                         for chunk in response.iter_content(chunk_size=8192):
                             temp_song_file.write(chunk)
 
-                    song_audio = AudioSegment.from_mp3(temp_song_path)
+                    source_audio = AudioSegment.from_mp3(temp_song_path)
+                    song_audio = _level_song_preview_for_round(source_audio)
+                    current_app.logger.info(
+                        "Leveled preview for song %s: %.2f dBFS / %.2f dB peak -> %.2f dBFS / %.2f dB peak",
+                        song.id,
+                        source_audio.dBFS,
+                        source_audio.max_dBFS,
+                        song_audio.dBFS,
+                        song_audio.max_dBFS,
+                    )
                     song_segments.append(song_audio)
                     
                     # Add to the combined audio for first playthrough

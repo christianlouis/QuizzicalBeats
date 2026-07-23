@@ -1,13 +1,19 @@
 """Tests for rounds blueprint routes."""
 import json
 import os
+import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch, mock_open
 from flask import jsonify
 from pydub import AudioSegment
+from pydub.generators import Sine
 from musicround.helpers.paths import app_data_path
 from musicround.models import db, PlannedQuizRound, User, Song, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, SystemSetting
-from musicround.routes.rounds import ROUND_QUALITY_SESSION_REPORT_MAX_CHARS, _session_quality_report
+from musicround.routes.rounds import (
+    ROUND_QUALITY_SESSION_REPORT_MAX_CHARS,
+    _level_song_preview,
+    _session_quality_report,
+)
 from musicround.services.automation import AutomationError
 
 
@@ -86,6 +92,37 @@ class _DeezerPreviewStub:
 
     def get_track(self, deezer_id):
         return {'id': deezer_id, 'preview': self.preview_url}
+
+
+class TestRoundPreviewLeveling:
+    def test_quiet_and_loud_previews_reach_the_same_loudness_target(self):
+        loud = Sine(440).to_audio_segment(duration=1000).apply_gain(-6)
+        quiet = Sine(440).to_audio_segment(duration=1000).apply_gain(-24)
+
+        leveled_loud = _level_song_preview(loud)
+        leveled_quiet = _level_song_preview(quiet)
+
+        assert leveled_loud.dBFS == pytest.approx(-16.0, abs=0.1)
+        assert leveled_quiet.dBFS == pytest.approx(-16.0, abs=0.1)
+        assert leveled_loud.max_dBFS <= -1.0
+        assert leveled_quiet.max_dBFS <= -1.0
+
+    def test_peak_ceiling_limits_gain_for_a_dynamic_preview(self):
+        quiet_bed = Sine(440).to_audio_segment(duration=1000).apply_gain(-30)
+        loud_peak = Sine(440).to_audio_segment(duration=20).apply_gain(-0.1)
+        dynamic = quiet_bed.overlay(loud_peak, position=500)
+
+        leveled = _level_song_preview(dynamic)
+
+        assert leveled.max_dBFS == pytest.approx(-1.0, abs=0.1)
+        assert leveled.dBFS <= -16.0
+
+    def test_silent_preview_is_left_unchanged(self):
+        silent = AudioSegment.silent(duration=1000)
+
+        leveled = _level_song_preview(silent)
+
+        assert leveled.raw_data == silent.raw_data
 
 
 def _user_id(app, username):
@@ -1754,7 +1791,12 @@ class TestLegacyEmptyRoundRoutes:
         ) as mock_from_mp3, patch(
             'musicround.routes.rounds.requests.get',
             return_value=_PreviewResponse(),
-        ), patch('pydub.audio_segment.AudioSegment.export', fake_export):
+        ), patch(
+            'musicround.routes.rounds._level_song_preview_for_round',
+            side_effect=lambda audio: audio,
+        ) as mock_level_preview, patch(
+            'pydub.audio_segment.AudioSegment.export', fake_export,
+        ):
             response = client.post(
                 f'/rounds/round/{round_id}/mp3',
                 headers={'X-Requested-With': 'XMLHttpRequest'},
@@ -1765,6 +1807,7 @@ class TestLegacyEmptyRoundRoutes:
         assert response.get_json()['message'] == 'MP3 file successfully generated'
         assert response.get_json()['mp3_status'] == 'generated'
         assert mock_from_mp3.called
+        mock_level_preview.assert_called_once()
         with open(mp3_path, 'rb') as handle:
             assert handle.read() == b'NEW'
 
