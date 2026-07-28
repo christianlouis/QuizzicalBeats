@@ -22,7 +22,7 @@ authlib>=1.6.5
 Flask-Caching
 gunicorn
 psutil
-mcp[cli]
+mcp[cli]<2
 
 # Testing dependencies
 pytest>=7.4.0
