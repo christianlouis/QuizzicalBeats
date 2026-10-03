@@ -486,17 +486,32 @@ def serve_user_audio(filepath):
     """
     Serve user custom audio files from the data directory
     """
+    # This endpoint is exclusively for per-user uploaded audio. Never expose
+    # the database, backups, or other files from the application data volume.
+    parts = filepath.split('/')
+    if (
+        len(parts) < 3
+        or parts[0] != 'custommp3'
+        or any(not part or part in {'.', '..'} for part in parts)
+    ):
+        abort(404)
+
     # Resolve the real path to prevent path traversal attacks
     base_dir = os.path.realpath(app_data_dir())
+    custom_root = os.path.realpath(app_data_path('custommp3'))
+    user_dir = os.path.realpath(app_data_path('custommp3', parts[1]))
+    expected_custom_root = os.path.join(base_dir, 'custommp3')
+    expected_user_dir = os.path.join(custom_root, parts[1])
     requested_path = os.path.realpath(app_data_path(filepath))
-    if not requested_path.startswith(base_dir + os.sep) and requested_path != base_dir:
+    if (
+        custom_root != expected_custom_root
+        or user_dir != expected_user_dir
+        or not requested_path.startswith(user_dir + os.sep)
+    ):
         abort(404)
         
-    if 'custommp3/' in filepath:
-        parts = filepath.split('/')
-        if len(parts) >= 2 and parts[0] == 'custommp3':
-            username = parts[1]
-            if username != current_user.username and not current_user.is_admin:
-                abort(403)
+    username = parts[1]
+    if username != current_user.username and not current_user.is_admin:
+        abort(403)
     
     return send_from_directory(app_data_dir(), filepath)
