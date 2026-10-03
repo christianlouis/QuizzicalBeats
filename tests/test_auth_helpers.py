@@ -146,7 +146,7 @@ class TestFindOrCreateUserEmailLinking:
             assert found is None
             assert User.query.get(user.id).google_id is None
 
-    def test_spotify_email_match_links_without_verified_claim(self, app):
+    def test_spotify_email_match_without_verified_claim_does_not_link(self, app):
         with app.app_context():
             user = _make_user()
 
@@ -160,5 +160,5 @@ class TestFindOrCreateUserEmailLinking:
                 'spotify',
             )
 
-            assert found.id == user.id
-            assert User.query.get(user.id).spotify_id == 'spotify-user-123'
+            assert found is None
+            assert User.query.get(user.id).spotify_id is None

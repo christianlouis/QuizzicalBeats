@@ -155,7 +155,10 @@ def _oauth_email_is_verified(user_info):
 
 def _oauth_email_can_link(user_info, auth_provider):
     """Return whether an OAuth email can safely attach to an existing account."""
-    return auth_provider == 'spotify' or _oauth_email_is_verified(user_info)
+    # Spotify's profile response contains an email but no verifiable
+    # email_verified assertion. Treating it as identity proof enables account
+    # takeover by linking an attacker-controlled Spotify identity by email.
+    return _oauth_email_is_verified(user_info)
 
 
 def get_spotify_user_info(token):

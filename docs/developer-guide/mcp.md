@@ -29,6 +29,13 @@ environment variables you use for the web app, including `SECRET_KEY`,
 Deezer, OpenAI, AWS Polly, or ElevenLabs credentials needed by the tools you
 plan to call.
 
+The generic datastore MCP surface is deliberately read-only and catalog-scoped:
+`datastore_schema`, `list_datastore_objects`, and `get_datastore_object` expose
+only `song`, `tag`, and `song_tag`. Sensitive fields are never returned through
+these tools, and generic create, update, and delete operations are disabled.
+Use the purpose-built workflow tools below for supported catalog or round
+mutations.
+
 ## Tools
 
 The MCP server exposes these tools:
@@ -42,14 +49,14 @@ The MCP server exposes these tools:
 | `normalize_catalog_popularity` | Audit or repair legacy popularity values so every catalog score is normalized to 0-100. |
 | `enrich_songs_from_deezer` | Fill incomplete catalog rows from Deezer only, with rate limiting and dry-run support. |
 | `export_song_isrc_catalog` | Export catalog song IDs, ISRCs, and provider IDs as CSV text. |
-| `datastore_schema` | Describe all mapped datastore object types, columns, and primary keys. |
+| `datastore_schema` | Describe the catalog datastore object types, columns, and primary keys available for read access. |
 | `database_configuration_summary` | Report credential-safe database backend, managed-DB guard, and PG* readiness for cutover checks. |
 | `database_cutover_plan` | Return credential-safe managed database cutover steps and the next blocked or ready action. |
 | `list_datastore_objects` | List persisted objects with optional exact-match filters, ordering, limit, and offset. |
 | `get_datastore_object` | Fetch one persisted object by primary key. |
-| `create_datastore_object` | Create one persisted object from scalar column fields. |
-| `update_datastore_object` | Update scalar column fields on one persisted object. |
-| `delete_datastore_object` | Delete one persisted object by primary key. |
+| `create_datastore_object` | Disabled: generic datastore creation is not exposed through MCP. |
+| `update_datastore_object` | Disabled: generic datastore updates are not exposed through MCP. |
+| `delete_datastore_object` | Disabled: generic datastore deletion is not exposed through MCP. |
 | `import_catalog_item` | Import a Spotify or Deezer track, album, or playlist. |
 | `import_progress_events` | Return queue and job progress for polling clients. |
 | `retry_import_job` | Requeue a failed or dead-letter import job for manual recovery. |
@@ -116,12 +123,11 @@ The MCP server exposes these tools:
 songs have already appeared in rounds and avoid tracks without playable
 previews.
 
-The generic datastore CRUD tools operate on mapped SQLAlchemy models, including
-`song`, `round`, `round_share`, `round_access_event`, `round_audio_script`,
-`tag`, `song_tag`, `user`, `role`, `user_preferences`, `planned_quiz_round`, `round_export`,
-`system_setting`, and `import_job_record`. Read results redact fields whose
-names contain `password`, `token`, or `secret` unless `include_sensitive` is
-explicitly set.
+The generic datastore read tools operate only on `song`, `tag`, and `song_tag`.
+They reject authentication, authorization, settings, round, and job models;
+they also reject `include_sensitive=true`. Generic datastore writes are
+disabled to prevent agent access to credentials, account roles, tokens, and
+destructive database operations.
 
 ## Intended Workflow
 

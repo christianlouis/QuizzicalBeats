@@ -17,6 +17,21 @@ from musicround.services import automation
 
 mcp = FastMCP("Quizzical Beats")
 
+# Generic datastore access is intentionally limited to the public catalog.
+# Authentication and settings models contain credentials and authorization
+# state and must never be agent-addressable through MCP.
+_MCP_READ_MODELS = frozenset({'song', 'tag', 'song_tag'})
+
+
+def _require_mcp_read_model(object_type: str) -> str:
+    """Validate the narrow, read-only MCP datastore surface."""
+    normalized = (object_type or '').strip().lower()
+    if normalized not in _MCP_READ_MODELS:
+        raise ValueError(
+            "MCP datastore access is limited to the song, tag, and song_tag catalog models."
+        )
+    return normalized
+
 
 @lru_cache(maxsize=1)
 def _app():
@@ -223,8 +238,13 @@ def export_song_isrc_catalog(
 
 @mcp.tool()
 def datastore_schema() -> dict[str, Any]:
-    """Describe every datastore object type available to generic CRUD tools."""
-    return _with_app_context(automation.datastore_schema)
+    """Describe the catalog models available to MCP read tools."""
+    schema = _with_app_context(automation.datastore_schema)
+    schema['objects'] = [
+        item for item in schema['objects'] if item['object_type'] in _MCP_READ_MODELS
+    ]
+    schema['object_types'] = [item['object_type'] for item in schema['objects']]
+    return schema
 
 
 @mcp.tool()
@@ -248,7 +268,10 @@ def list_datastore_objects(
     order_by: str | None = None,
     include_sensitive: bool = False,
 ) -> dict[str, Any]:
-    """List datastore objects such as songs, rounds, users, tags, exports, and settings."""
+    """List persisted catalog objects with optional exact-match filters."""
+    _require_mcp_read_model(object_type)
+    if include_sensitive:
+        raise ValueError("MCP datastore responses never include sensitive fields.")
     return _with_app_context(
         automation.list_datastore_objects,
         object_type=object_type,
@@ -266,7 +289,10 @@ def get_datastore_object(
     object_id: Any,
     include_sensitive: bool = False,
 ) -> dict[str, Any]:
-    """Fetch one datastore object by primary key."""
+    """Fetch one persisted catalog object by primary key."""
+    _require_mcp_read_model(object_type)
+    if include_sensitive:
+        raise ValueError("MCP datastore responses never include sensitive fields.")
     return _with_app_context(
         automation.get_datastore_object,
         object_type=object_type,
@@ -281,13 +307,8 @@ def create_datastore_object(
     fields: dict[str, Any],
     include_sensitive: bool = False,
 ) -> dict[str, Any]:
-    """Create one datastore object from scalar column fields."""
-    return _with_app_context(
-        automation.create_datastore_object,
-        object_type=object_type,
-        fields=fields,
-        include_sensitive=include_sensitive,
-    )
+    """Reject unrestricted datastore creation through MCP."""
+    raise ValueError("MCP datastore mutation tools are disabled; use a scoped workflow tool.")
 
 
 @mcp.tool()
@@ -297,24 +318,14 @@ def update_datastore_object(
     fields: dict[str, Any],
     include_sensitive: bool = False,
 ) -> dict[str, Any]:
-    """Update scalar column fields on one datastore object."""
-    return _with_app_context(
-        automation.update_datastore_object,
-        object_type=object_type,
-        object_id=object_id,
-        fields=fields,
-        include_sensitive=include_sensitive,
-    )
+    """Reject unrestricted datastore updates through MCP."""
+    raise ValueError("MCP datastore mutation tools are disabled; use a scoped workflow tool.")
 
 
 @mcp.tool()
 def delete_datastore_object(object_type: str, object_id: Any) -> dict[str, Any]:
-    """Delete one datastore object by primary key."""
-    return _with_app_context(
-        automation.delete_datastore_object,
-        object_type=object_type,
-        object_id=object_id,
-    )
+    """Reject unrestricted datastore deletion through MCP."""
+    raise ValueError("MCP datastore mutation tools are disabled; use a scoped workflow tool.")
 
 
 @mcp.tool()
