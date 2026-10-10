@@ -29,6 +29,32 @@ class TestCoreRoutes:
         assert response.status_code == 302
         assert 'login' in response.headers['Location'].lower()
 
+    def test_data_route_only_serves_owned_custom_audio(self, app, client, tmp_path):
+        """Authenticated users can fetch their audio but not other DATA_DIR files."""
+        app.config['DATA_DIR'] = str(tmp_path)
+        own_audio = tmp_path / 'custommp3' / 'audio-user' / 'intro.mp3'
+        own_audio.parent.mkdir(parents=True)
+        own_audio.write_bytes(b'custom audio')
+        (tmp_path / 'song_data.db').write_bytes(b'SQLite format 3\\x00secret')
+
+        with app.app_context():
+            user = User(username='audio-user', email='audio-user@example.com')
+            user.password = 'TestPass123!'
+            db.session.add(user)
+            db.session.commit()
+        client.post(
+            '/users/login',
+            data={'username': 'audio-user', 'password': 'TestPass123!'},
+        )
+
+        audio_response = client.get('/data/custommp3/audio-user/intro.mp3')
+        database_response = client.get('/data/song_data.db')
+
+        assert audio_response.status_code == 200
+        assert audio_response.data == b'custom audio'
+        assert database_response.status_code == 404
+        assert b'SQLite format' not in database_response.data
+
 
 class TestUserRoutes:
     """Tests for user-related routes."""
