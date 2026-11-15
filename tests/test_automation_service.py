@@ -2199,6 +2199,8 @@ class TestAssetInspection:
             options = add_call.kwargs["options"]
             assert isinstance(options, automation.AdditionalSongSuggestionOptions)
             assert options.limit == 4
+            assert options.query is None
+            assert options.require_deezer_id is True
             assert options.verify_previews is True
             assert options.min_preview_seconds == 21.5
 
