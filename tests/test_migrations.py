@@ -22,6 +22,27 @@ from musicround.models import (
 )
 
 
+def test_legacy_sqlite_migrations_noop_for_non_sqlite_backend(monkeypatch):
+    """PostgreSQL startup must not probe the historical SQLite database path."""
+    from musicround import migration_helpers
+    from migrations import (
+        add_preview_urls,
+        add_song_fields,
+        add_spotify_audio_features,
+        add_tag_system,
+    )
+
+    monkeypatch.setattr(migration_helpers, "using_sqlite_database", lambda: False)
+
+    for migration in (
+        add_preview_urls,
+        add_song_fields,
+        add_spotify_audio_features,
+        add_tag_system,
+    ):
+        assert migration.run_migration() is None
+
+
 def _legacy_app(database_path):
     app = Flask(__name__)
     app.config.update(

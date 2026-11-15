@@ -57,6 +57,11 @@ def run_migration():
     
     logger = logging.getLogger(__name__)
     logger.info("Running migration: add_tag_system")
+
+    from musicround.migration_helpers import using_sqlite_database
+    if using_sqlite_database() is False:
+        logger.info("Skipping legacy SQLite migration on non-SQLite database")
+        return None
     
     # Try to get the database path from Flask config first
     try:
