@@ -891,7 +891,10 @@ class TestRoundAutomation:
                 song_ids=[in_round.id],
             )["round"]["id"]
 
-            result = automation.suggest_additional_songs(round_id, limit=5)
+            result = automation.suggest_additional_songs(
+                round_id,
+                automation.AdditionalSongSuggestionOptions(limit=5),
+            )
 
             suggestion_ids = [song["id"] for song in result["suggestions"]]
             assert addition.id in suggestion_ids

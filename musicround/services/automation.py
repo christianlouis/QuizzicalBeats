@@ -14,6 +14,7 @@ from html import unescape
 from io import StringIO
 from copy import deepcopy
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import RLock
 from time import monotonic, sleep
@@ -87,6 +88,17 @@ from musicround.models import (
 
 class AutomationError(ValueError):
     """Raised when an automation request cannot be completed."""
+
+
+@dataclass(frozen=True)
+class AdditionalSongSuggestionOptions:
+    """Filters and preview policy for catalog suggestions."""
+
+    limit: int = 10
+    query: str | None = None
+    require_deezer_id: bool = True
+    verify_previews: bool = False
+    min_preview_seconds: float = 20.0
 
     def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -4553,13 +4565,15 @@ def suggest_replacement_songs(
 
 def suggest_additional_songs(
     round_id: int,
-    limit: int = 10,
-    query: str | None = None,
-    require_deezer_id: bool = True,
-    verify_previews: bool = False,
-    min_preview_seconds: float = 20.0,
+    options: AdditionalSongSuggestionOptions | None = None,
 ) -> dict[str, Any]:
     """Suggest catalog songs that can be added to an incomplete round."""
+    options = options or AdditionalSongSuggestionOptions()
+    limit = options.limit
+    query = options.query
+    require_deezer_id = options.require_deezer_id
+    verify_previews = options.verify_previews
+    min_preview_seconds = options.min_preview_seconds
     if limit < 1 or limit > 50:
         raise AutomationError("limit must be between 1 and 50.")
 
@@ -5807,9 +5821,11 @@ def round_repair_plan(
     if missing_song_count:
         additional_songs = suggest_additional_songs(
             round_id=round_id,
-            limit=max(additional_limit, missing_song_count),
-            verify_previews=verify_previews,
-            min_preview_seconds=min_preview_seconds,
+            options=AdditionalSongSuggestionOptions(
+                limit=max(additional_limit, missing_song_count),
+                verify_previews=verify_previews,
+                min_preview_seconds=min_preview_seconds,
+            ),
         )
 
     next_actions = []

@@ -825,11 +825,13 @@ def suggest_additional_songs(
     return _with_app_context(
         automation.suggest_additional_songs,
         round_id=round_id,
-        limit=limit,
-        query=query,
-        require_deezer_id=require_deezer_id,
-        verify_previews=verify_previews,
-        min_preview_seconds=min_preview_seconds,
+        options=automation.AdditionalSongSuggestionOptions(
+            limit=limit,
+            query=query,
+            require_deezer_id=require_deezer_id,
+            verify_previews=verify_previews,
+            min_preview_seconds=min_preview_seconds,
+        ),
     )
 
 
