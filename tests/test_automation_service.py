@@ -2192,12 +2192,15 @@ class TestAssetInspection:
                 verify_previews=True,
                 min_preview_seconds=21.5,
             )
-            mock_add.assert_called_once_with(
-                round_id=42,
-                limit=4,
-                verify_previews=True,
-                min_preview_seconds=21.5,
-            )
+            mock_add.assert_called_once()
+            add_call = mock_add.call_args
+            assert add_call.args == ()
+            assert add_call.kwargs["round_id"] == 42
+            options = add_call.kwargs["options"]
+            assert isinstance(options, automation.AdditionalSongSuggestionOptions)
+            assert options.limit == 4
+            assert options.verify_previews is True
+            assert options.min_preview_seconds == 21.5
 
     def test_round_repair_plan_uses_unresolved_action_positions_without_adding_songs(self, app):
         with app.app_context():
