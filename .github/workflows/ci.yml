@@ -93,6 +93,7 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: quizzicalbeats:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -103,4 +104,4 @@ jobs:
           inventory="$(docker run --rm quizzicalbeats:ci sh -c \
             'set -eu; cat /etc/os-release; python --version; for package in perl perl-base perl-modules-5.40 libperl5.40 libsqlite3-0 sqlite3; do status="$(dpkg-query -W -f="\${Status}" "$package" 2>/dev/null || true)"; if [ "$status" = "install ok installed" ]; then dpkg-query -W -f="\${Package} \${Version}\\n" "$package"; else echo "$package: not installed ($status)"; fi; done')"
           printf '### QuizzicalBeats runtime inventory\n\n```text\n%s\n```\n' "$inventory" >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\\n' "$inventory"
+          printf '%s\n' "$inventory"
