@@ -89,6 +89,10 @@ from musicround.models import (
 class AutomationError(ValueError):
     """Raised when an automation request cannot be completed."""
 
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
+
 
 @dataclass(frozen=True)
 class AdditionalSongSuggestionOptions:
@@ -99,10 +103,6 @@ class AdditionalSongSuggestionOptions:
     require_deezer_id: bool = True
     verify_previews: bool = False
     min_preview_seconds: float = 20.0
-
-    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.details = details or {}
 
 
 AUTOMATION_STORAGE_ERROR = "Round artifact storage is unhealthy."

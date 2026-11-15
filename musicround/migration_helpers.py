@@ -9,9 +9,13 @@ def using_sqlite_database() -> bool | None:
     their historical direct-SQLite fallback in that case.
     """
 
-    try:
-        from musicround import db
+    from flask import current_app, has_app_context
+    from sqlalchemy.engine import make_url
 
-        return db.engine.dialect.name.lower() == "sqlite"
-    except Exception:
+    if not has_app_context():
         return None
+
+    database_uri = current_app.config.get("SQLALCHEMY_DATABASE_URI")
+    if not database_uri:
+        return None
+    return make_url(database_uri).get_backend_name().lower() == "sqlite"

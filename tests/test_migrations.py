@@ -32,15 +32,20 @@ def test_legacy_sqlite_migrations_noop_for_non_sqlite_backend(monkeypatch):
         add_tag_system,
     )
 
-    monkeypatch.setattr(migration_helpers, "using_sqlite_database", lambda: False)
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg://user:pass@db/app"
+    monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("legacy migration attempted SQLite access")
+    ))
 
-    for migration in (
-        add_preview_urls,
-        add_song_fields,
-        add_spotify_audio_features,
-        add_tag_system,
-    ):
-        assert migration.run_migration() is None
+    with app.app_context():
+        for migration in (
+            add_preview_urls,
+            add_song_fields,
+            add_spotify_audio_features,
+            add_tag_system,
+        ):
+            assert migration.run_migration() is None
 
 
 def _legacy_app(database_path):

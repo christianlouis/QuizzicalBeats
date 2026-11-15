@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 import tempfile
+import inspect
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -34,6 +35,34 @@ from musicround.models import (
     db,
 )
 from musicround.services import automation
+
+
+def test_automation_error_preserves_message_and_details():
+    error = automation.AutomationError("failed", {"code": "bad_input"})
+
+    assert str(error) == "failed"
+    assert error.details == {"code": "bad_input"}
+
+
+def test_additional_song_suggestion_options_defaults_and_overrides():
+    defaults = automation.AdditionalSongSuggestionOptions()
+    custom = automation.AdditionalSongSuggestionOptions(
+        limit=3,
+        query="rock",
+        require_deezer_id=False,
+        verify_previews=True,
+        min_preview_seconds=15.0,
+    )
+
+    assert defaults.limit == 10
+    assert defaults.require_deezer_id is True
+    assert custom.query == "rock"
+    assert custom.verify_previews is True
+    assert custom.min_preview_seconds == 15.0
+    assert list(inspect.signature(automation.suggest_additional_songs).parameters) == [
+        "round_id",
+        "options",
+    ]
 
 
 def _create_user(username="agentuser", email="agent@example.com"):
