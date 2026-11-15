@@ -99,5 +99,8 @@ jobs:
 
       - name: Inventory runtime packages (read-only)
         run: |
-          docker run --rm quizzicalbeats:ci sh -c \
-            'cat /etc/os-release; python --version; dpkg-query -W -f="${Package} ${Version}\\n" perl "libsqlite3-0" sqlite3 2>/dev/null || true'
+          set -Eeuo pipefail
+          inventory="$(docker run --rm quizzicalbeats:ci sh -c \
+            'set -eu; cat /etc/os-release; python --version; dpkg-query -W -f="\${Package} \${Version}\\n" perl libsqlite3-0; if dpkg-query -W -f="\${Package} \${Version}\\n" sqlite3; then :; else echo "sqlite3 CLI package: not installed"; fi')"
+          printf '### QuizzicalBeats runtime inventory\\n\\n```text\\n%s\\n```\\n' "$inventory" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\\n' "$inventory"
