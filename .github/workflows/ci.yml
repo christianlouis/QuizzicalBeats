@@ -101,6 +101,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           inventory="$(docker run --rm quizzicalbeats:ci sh -c \
-            'set -eu; cat /etc/os-release; python --version; dpkg-query -W -f="\${Package} \${Version}\\n" perl libsqlite3-0; if dpkg-query -W -f="\${Package} \${Version}\\n" sqlite3; then :; else echo "sqlite3 CLI package: not installed"; fi')"
+            'set -eu; cat /etc/os-release; python --version; for package in perl libsqlite3-0 sqlite3; do status="$(dpkg-query -W -f="\${Status}" "$package" 2>/dev/null || true)"; if [ "$status" = "install ok installed" ]; then dpkg-query -W -f="\${Package} \${Version}\\n" "$package"; else echo "$package: not installed ($status)"; fi; done')"
           printf '### QuizzicalBeats runtime inventory\\n\\n```text\\n%s\\n```\\n' "$inventory" >> "$GITHUB_STEP_SUMMARY"
           printf '%s\\n' "$inventory"
