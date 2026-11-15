@@ -96,3 +96,8 @@ jobs:
           tags: quizzicalbeats:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Inventory runtime packages (read-only)
+        run: |
+          docker run --rm quizzicalbeats:ci sh -c \
+            'cat /etc/os-release; python --version; dpkg-query -W -f="${Package} ${Version}\\n" perl "libsqlite3-0" sqlite3 2>/dev/null || true'
