@@ -20,12 +20,16 @@ GAP_MS = 5_000
 
 def render_local_round(input_manifest: Path, output: Path, manifest_output: Path | None = None) -> dict:
     payload = json.loads(input_manifest.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("input manifest must be a JSON object")
     cues = payload.get("cues")
     if not isinstance(cues, list) or not cues:
         raise ValueError("input manifest must contain a non-empty cues array")
     master = AudioSegment.empty()
     rendered = []
     for index, cue in enumerate(cues, 1):
+        if not isinstance(cue, dict) or not isinstance(cue.get("path"), str) or not cue["path"]:
+            raise ValueError(f"cue {index} must contain a non-empty string path")
         source = Path(cue["path"])
         if not source.is_file():
             raise FileNotFoundError(source)
