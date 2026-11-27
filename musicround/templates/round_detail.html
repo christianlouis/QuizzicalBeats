@@ -406,7 +406,7 @@
     {% if playlist_controls %}
     <section id="streaming-playlists" aria-labelledby="playlists-heading" class="bg-white shadow-md rounded-lg p-6 mb-6">
         <h2 id="playlists-heading" class="text-2xl font-bold text-navy-800 font-montserrat">Playlists</h2>
-        <p class="mt-1 text-sm text-gray-600">Create a private playlist in your account using this round’s saved song order.</p>
+        <p class="mt-1 text-sm text-gray-600">Export the songs in this round in their saved order.</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
             {% for item in playlist_controls %}
             {% set notice = playlist_notice if playlist_notice and playlist_notice.provider == item.provider else none %}
@@ -424,7 +424,13 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if connect %}
+                {% if item.provider == 'deezer' and not configured %}
+                <div class="mt-4">
+                    <p class="text-sm text-gray-700">Download the round, then select the file in TuneMyMusic to import it into your Deezer account.</p>
+                    <a href="{{ url_for('rounds.download_deezer_playlist_file', round_id=round.id) }}" class="inline-block mt-2 bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md">Download Deezer playlist file</a>
+                    <a href="https://www.tunemymusic.com/transfer/file-to-deezer" target="_blank" rel="noreferrer noopener" class="inline-block mt-3 text-teal-700 underline">Import file into Deezer via TuneMyMusic</a>
+                </div>
+                {% elif connect %}
                 <form method="post" action="{{ url_for('users.spotify_link' if item.provider == 'spotify' else 'deezer.link_deezer') }}" class="mt-2">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="round_id" value="{{ round.id }}">

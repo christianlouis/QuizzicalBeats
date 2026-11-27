@@ -11,6 +11,7 @@ import zipfile
 import io
 import json
 import math
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
@@ -18,6 +19,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import contains_eager, joinedload
+from werkzeug.utils import secure_filename
 from musicround.models import PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, Song, SystemSetting, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
@@ -57,6 +59,21 @@ ROUND_SHARE_EDIT_ROLES = {'editor', 'producer', 'admin'}
 ROUND_SHARE_PRODUCE_ROLES = {'producer', 'admin'}
 ROUND_SHARE_MANAGE_ROLES = {'admin'}
 ROUND_SHARE_COMMENT_ROLES = {'comment', 'editor', 'producer', 'admin'}
+_INVALID_XML_CHARACTERS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')
+
+
+def _round_xspf(round_obj, songs):
+    """Build a UTF-8 XSPF file while retaining the round's song order."""
+    playlist = ET.Element('playlist', {'version': '1', 'xmlns': 'http://xspf.org/ns/0/'})
+    title = round_obj.name or f'Music round {round_obj.id}'
+    ET.SubElement(playlist, 'title').text = _INVALID_XML_CHARACTERS.sub('', title)
+    ET.SubElement(playlist, 'creator').text = 'Quizzical Beats'
+    track_list = ET.SubElement(playlist, 'trackList')
+    for song in songs:
+        track = ET.SubElement(track_list, 'track')
+        ET.SubElement(track, 'title').text = _INVALID_XML_CHARACTERS.sub('', song.title or '')
+        ET.SubElement(track, 'creator').text = _INVALID_XML_CHARACTERS.sub('', song.artist or '')
+    return ET.tostring(playlist, encoding='utf-8', xml_declaration=True)
 
 
 def _level_song_preview(audio, *, target_dbfs=-16.0, peak_dbfs=-1.0, max_boost_db=12.0):
@@ -749,6 +766,38 @@ def export_streaming_playlist(round_id, provider):
                                             user_id=current_user.id, provider=provider)
     return redirect(url_for('rounds.round_detail', round_id=round_id,
                             _anchor='streaming-playlists'), code=303)
+
+
+@rounds_bp.get('/<int:round_id>/playlists/deezer-file')
+@login_required
+def download_deezer_playlist_file(round_id):
+    """Download a producer-only XSPF fallback for Deezer import."""
+    rnd = _get_producible_round_or_404(round_id)
+    song_ids = rnd.song_id_list
+    songs = rnd.song_list
+    if not songs:
+        flash('This round has no saved songs to export.', 'warning')
+        return redirect(url_for('rounds.round_detail', round_id=round_id,
+                                _anchor='streaming-playlists'), code=303)
+    missing_count = len(song_ids) - len(songs)
+    if missing_count:
+        flash(
+            f'{missing_count} saved song could not be included because it is missing from the catalog.'
+            if missing_count == 1 else
+            f'{missing_count} saved songs could not be included because they are missing from the catalog.',
+            'warning',
+        )
+    filename = secure_filename(rnd.name or f'music-round-{rnd.id}') or f'music-round-{rnd.id}'
+    response = send_file(
+        io.BytesIO(_round_xspf(rnd, songs)),
+        mimetype='application/xspf+xml',
+        as_attachment=True,
+        download_name=f'{filename}.xspf',
+        max_age=0,
+    )
+    response.cache_control.private = True
+    response.cache_control.no_store = True
+    return response
 
 
 @rounds_bp.route('/<int:round_id>/bundle-review')

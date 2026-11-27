@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from unittest.mock import Mock
+import xml.etree.ElementTree as ET
 
 import pytest
 from flask import redirect
@@ -57,12 +58,16 @@ def endpoint(rnd, service='spotify'):
     return f'/rounds/{rnd.id}/playlists/{service}'
 
 
+def deezer_file_endpoint(rnd):
+    return f'/rounds/{rnd.id}/playlists/deezer-file'
+
+
 def test_round_detail_and_sync_use_saved_order_and_same_personal_playlist(round_data, client, provider):
     rnd, owner = round_data
     login(client, owner)
     detail = client.get(f'/rounds/{rnd.id}')
     assert b'Create Spotify playlist' in detail.data
-    assert b'Connect Deezer' in detail.data
+    assert b'Download Deezer playlist file' in detail.data
     response = client.post(endpoint(rnd), follow_redirects=True)
     assert b'Created your Spotify playlist with 3 of 3 songs.' in response.data
     assert b'Open Spotify playlist' in response.data
@@ -77,6 +82,52 @@ def test_round_detail_and_sync_use_saved_order_and_same_personal_playlist(round_
     provider.sync_tracks.assert_called_with('spotify', 'token-owner', 'P' * 22, [ordered[0], ordered[2]],
                                              account_id='spotify-owner')
     provider.create_playlist.assert_called_once_with('spotify', 'token-owner', 'Quiz Night')
+
+
+def test_deezer_fallback_download_preserves_order_duplicates_and_utf8(round_data, client, app):
+    rnd, owner = round_data
+    first, second, _ = rnd.song_list
+    first.title = 'Über\x0b & Only <Live>'
+    first.artist = 'Beyoncé & B'
+    rnd.songs = f'{first.id},{second.id},{first.id}'
+    db.session.commit()
+    login(client, owner)
+
+    response = client.get(deezer_file_endpoint(rnd))
+
+    assert response.status_code == 200
+    assert response.content_type.startswith(('application/xspf+xml', 'application/x-xspf+xml'))
+    assert response.headers['Content-Disposition'].endswith('filename=Quiz_Night.xspf')
+    assert response.cache_control.private and response.cache_control.no_store
+    root = ET.fromstring(response.data)
+    namespace = {'x': 'http://xspf.org/ns/0/'}
+    tracks = root.findall('x:trackList/x:track', namespace)
+    assert [(track.findtext('x:creator', namespaces=namespace), track.findtext('x:title', namespaces=namespace))
+            for track in tracks] == [
+                ('Beyoncé & B', 'Über & Only <Live>'), ('Band', 'Two'), ('Beyoncé & B', 'Über & Only <Live>')
+            ]
+    assert response.data.startswith(b'<?xml')
+    assert b'\xc3\x9cber &amp; Only' in response.data
+    assert 'Beyoncé'.encode('utf-8') in response.data
+
+
+def test_deezer_fallback_is_offered_without_credentials(round_data, client):
+    rnd, owner = round_data
+    login(client, owner)
+    response = client.get(f'/rounds/{rnd.id}')
+    assert b'Download Deezer playlist file' in response.data
+    assert b'https://www.tunemymusic.com/transfer/file-to-deezer' in response.data
+    assert b'rel="noreferrer noopener"' in response.data
+
+
+def test_deezer_fallback_empty_round_redirects_with_warning(round_data, client):
+    rnd, owner = round_data
+    rnd.songs = ''
+    db.session.commit()
+    login(client, owner)
+    response = client.get(deezer_file_endpoint(rnd), follow_redirects=True)
+    assert response.status_code == 200
+    assert b'no saved songs to export' in response.data
 
 
 def test_retry_after_failed_sync_keeps_remote_id(round_data, client, provider):
@@ -103,8 +154,10 @@ def test_uncertain_create_checks_library_before_retry(round_data, client, provid
     assert RoundPlaylist.query.one().status == 'ready'
 
 
-def test_missing_track_and_repetitions_on_deezer_need_partial_opt_in(round_data, client, provider):
+def test_missing_track_and_repetitions_on_deezer_need_partial_opt_in(round_data, app, client, provider):
     rnd, owner = round_data
+    app.config['DEEZER_APP_ID'] = 'local-app'
+    app.config['DEEZER_APP_SECRET'] = 'local-secret'
     save_deezer_account(owner.id, '42', 'personal-deezer')
     first = rnd.song_list[0]
     rnd.songs = f'{first.id},987654,{first.id}'
@@ -207,6 +260,7 @@ def test_viewer_and_unshared_user_cannot_export(round_data, client, provider, ro
     response = client.get(f'/rounds/{rnd.id}')
     assert b'id="streaming-playlists"' not in response.data
     assert client.post(endpoint(rnd)).status_code in (403, 404)
+    assert client.get(deezer_file_endpoint(rnd)).status_code in (403, 404)
     provider.create_playlist.assert_not_called()
 
 

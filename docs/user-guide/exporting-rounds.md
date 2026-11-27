@@ -17,6 +17,13 @@ Quizzical Beats currently supports the following export options:
 2. Under **Playlists**, connect your personal Spotify or Deezer account if prompted.
 3. Click **Create Spotify playlist** or **Create Deezer playlist**. Use **Open playlist** to listen in the service.
 
+If Deezer account linking is not configured, the round page offers **Download Deezer
+playlist file**. This downloads a UTF-8 XSPF file containing the saved song order and
+repeated songs. Open **Import file into Deezer via TuneMyMusic**, upload the file there,
+and review the playlist name and selected tracks before confirming the transfer to your
+Deezer account. You control the upload. To transfer a changed round, download a fresh
+file. The round page reports any saved songs missing from the local catalog.
+
 The playlist takes the round's name. **Update** synchronizes its tracks and order with the
 saved round, including removing tracks you took out. Each provider and each linked account
 gets its own playlist. Changes made directly to that playlist can be replaced on the next update.
