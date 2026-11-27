@@ -295,3 +295,24 @@ def test_unlinked_account_csrf_and_login_are_enforced(round_data, app, client, p
     app.config['WTF_CSRF_ENABLED'] = True
     assert client.post(endpoint(rnd)).status_code == 400
     provider.create_playlist.assert_not_called()
+
+
+def test_quizarium_export_preserves_running_order_and_producer_access(round_data, client):
+    """The quiz transfer uses the saved order and omits private provider data."""
+    rnd, owner = round_data
+    login(client, owner)
+    response = client.get(f'/rounds/{rnd.id}/quizarium.json')
+    assert response.status_code == 200
+    assert response.cache_control.no_store
+    pack = response.get_json()
+    assert (pack['format'], pack['version']) == ('quizarium', 1)
+    assert [q['correctAnswer'] for q in pack['questions']] == [
+        'Band', 'Three', 'Band', 'Two', 'Band', 'One']
+    assert pack['rounds'][0]['questionIds'] == [q['id'] for q in pack['questions']]
+    assert pack['quizzes'][0]['roundIds'] == [pack['rounds'][0]['id']]
+    assert 'spotify' not in response.get_data(as_text=True).lower()
+
+    other = make_user('other-exporter')
+    client.get('/users/logout')
+    login(client, other)
+    assert client.get(f'/rounds/{rnd.id}/quizarium.json').status_code in (403, 404)

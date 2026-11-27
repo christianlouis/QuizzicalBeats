@@ -111,3 +111,11 @@ After the export completes successfully, you will see shared links to access eac
 1. Ensure all songs in the round have valid preview URLs
 2. Try regenerating the round MP3 by clicking the "Generate MP3" button on the round page
 3. If some songs lack preview URLs, you may need to edit those songs to add valid URLs
+
+## Playing a saved music round in Quizarium
+
+Open the saved round and select **Download for Quizarium** under **Export Options**.
+In the Quizarium admin panel, open **Content exchange**, choose the JSON file, and
+import it. Each recording keeps its saved position, with one point each for the
+artist and song title. The host sees the running order and plays the recordings
+from their own source. The file contains the answer key and belongs with the host.

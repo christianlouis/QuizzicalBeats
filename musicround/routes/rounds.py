@@ -768,6 +768,41 @@ def export_streaming_playlist(round_id, provider):
                             _anchor='streaming-playlists'), code=303)
 
 
+@rounds_bp.get('/<int:round_id>/quizarium.json')
+@login_required
+def download_quizarium_round(round_id):
+    """Export the saved running order and answer key for a Quizarium producer."""
+    rnd = _get_producible_round_or_404(round_id)
+    songs = rnd.song_list
+    if not songs or len(songs) != len(rnd.song_id_list):
+        return jsonify(error='An export needs a complete saved song list.'), 409
+    title = rnd.name or f'Music round {rnd.id}'
+    prefix = f'qb-{rnd.id}'
+    questions = []
+    for position, song in enumerate(songs, start=1):
+        for field, prompt, german in (
+            ('artist', 'Who is the artist?', 'Von wem ist die Aufnahme?'),
+            ('title', 'What is the song title?', 'Wie heißt das Lied?'),
+        ):
+            questions.append({
+                'id': f'{prefix}-{position}-{field}', 'type': 'text', 'points': 1,
+                'questionText': f'Track {position}: {prompt}',
+                'questionDe': f'Titel {position}: {german}',
+                'correctAnswer': getattr(song, field),
+                'hostNote': f'{position}. {song.artist} — {song.title}',
+            })
+    pack = {
+        'format': 'quizarium', 'version': 1, 'questions': questions,
+        'rounds': [{'id': prefix, 'title': title, 'questionIds': [q['id'] for q in questions]}],
+        'quizzes': [{'id': f'{prefix}-quiz', 'title': title, 'roundIds': [prefix]}],
+    }
+    response = jsonify(pack)
+    response.headers.set('Content-Disposition', 'attachment', filename=f'{prefix}-quizarium.json')
+    response.cache_control.private = True
+    response.cache_control.no_store = True
+    return response
+
+
 @rounds_bp.get('/<int:round_id>/playlists/deezer-file')
 @login_required
 def download_deezer_playlist_file(round_id):
