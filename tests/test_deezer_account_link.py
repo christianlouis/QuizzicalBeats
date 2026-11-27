@@ -1,11 +1,11 @@
 """Offline tests for personal Deezer account linking."""
 
 import os
+import time
 
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-only')
 os.environ.setdefault('AUTOMATION_TOKEN', 'test-automation-token-for-testing')
 
-from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
@@ -45,10 +45,13 @@ def test_link_deezer_uses_state_and_manage_library(app, client):
     response = client.post('/deezer-link', data={'round_id': '27'})
     assert response.status_code == 302
     query = parse_qs(urlparse(response.location).query)
-    assert query['perms'] == ['manage_library,delete_library']
+    assert query['redirect_uri'] == ['https://quiz.example/deezer-callback']
+    assert set(query['perms'][0].split(',')) == {
+        'basic_access', 'manage_library', 'delete_library', 'offline_access',
+    }
     assert query['state']
     with client.session_transaction() as session:
-        assert session['deezer_oauth_state']['round_id'] == '27'
+        assert session['deezer_oauth_state']['round_id'] == 27
         assert session['deezer_oauth_state']['value'] == query['state'][0]
         assert session['deezer_oauth_state']['user_id']
 
@@ -75,11 +78,15 @@ def test_callback_verifies_identity_encrypts_token_and_returns_round(mock_get, a
 
 
 def test_callback_rejects_expired_state(app, client):
-    app.config.update(DEEZER_APP_ID='app-id', DEEZER_APP_SECRET='app-secret')
+    app.config.update(DEEZER_APP_ID='app-id', DEEZER_APP_SECRET='app-secret',
+                      DEEZER_REDIRECT_URI=None, USE_HTTPS=True)
     _logged_in_client(app, client, 'expired-user')
-    client.post('/deezer-link')
+    response = client.post('/deezer-link')
+    assert parse_qs(urlparse(response.location).query)['redirect_uri'] == [
+        'https://localhost/deezer-callback'
+    ]
     with client.session_transaction() as session:
-        session['deezer_oauth_state']['expires_at'] = (datetime.utcnow() - timedelta(seconds=1)).timestamp()
+        session['deezer_oauth_state']['expires_at'] = time.time() - 1
         state = session['deezer_oauth_state']['value']
     response = client.get(f'/deezer-callback?code=code&state={state}')
     assert response.status_code == 302

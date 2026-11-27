@@ -418,7 +418,7 @@
                 <div role="status" class="my-2 text-sm {{ 'text-teal-700' if notice.level == 'success' else 'text-orange-800' }}">
                     <p>{{ notice.message }}</p>
                     {% if notice.missing %}
-                    <p class="mt-1 font-semibold">Unmatched songs</p>
+                    <p class="mt-1 font-semibold">Songs left out</p>
                     <ul>{% for song in notice.missing %}<li>{{ song }}</li>{% endfor %}</ul>
                     {% if notice.more_missing %}<p>And {{ notice.more_missing }} more.</p>{% endif %}
                     {% endif %}

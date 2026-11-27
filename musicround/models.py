@@ -356,6 +356,25 @@ class Round(db.Model):
         self.pdf_generated = False
 
 
+class DeezerAccount(db.Model):
+    """Encrypted personal Deezer connection used for playlist export."""
+
+    __tablename__ = 'deezer_account'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), unique=True,
+                        nullable=False)
+    account_id = db.Column(db.String(80), nullable=False, index=True)
+    access_token_ciphertext = db.Column(db.Text, nullable=False)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+                           nullable=False)
+
+    user = db.relationship('User', backref=db.backref('deezer_account', uselist=False,
+                                                       cascade='all, delete-orphan'))
+
+
 class RoundPlaylist(db.Model):
     """Personal streaming playlist for a saved round and a linked provider account."""
     __tablename__ = 'round_playlist'
@@ -369,6 +388,11 @@ class RoundPlaylist(db.Model):
     status = db.Column(db.String(16), nullable=False, default='idle')
     operation_id = db.Column(db.String(32))
     started_at = db.Column(db.DateTime)
+
+    round = db.relationship('Round', backref=db.backref('streaming_playlists',
+                                                         cascade='all, delete-orphan'))
+    user = db.relationship('User', backref=db.backref('round_playlists',
+                                                       cascade='all, delete-orphan'))
 
     __table_args__ = (
         db.UniqueConstraint('round_id', 'user_id', 'provider', 'account_id',
@@ -722,25 +746,6 @@ class ImportJobRecord(db.Model):
         if self.started_at and self.completed_at:
             return (self.completed_at - self.started_at).total_seconds()
         return None
-
-
-class DeezerAccount(db.Model):
-    """Encrypted personal Deezer connection used for playlist export."""
-
-    __tablename__ = 'deezer_account'
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), unique=True,
-                        nullable=False)
-    account_id = db.Column(db.String(80), nullable=False, index=True)
-    access_token_ciphertext = db.Column(db.Text, nullable=False)
-    token_expires_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
-                           nullable=False)
-
-    user = db.relationship('User', backref=db.backref('deezer_account', uselist=False,
-                                                       cascade='all, delete-orphan'))
 
     @property
     def item_url(self):

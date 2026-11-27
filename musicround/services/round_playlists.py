@@ -29,7 +29,7 @@ def _needs_library_check(row, now):
 def playlist_controls(round_id, user_id, accounts):
     """Describe each account's buttons and links without passing tokens to the view."""
     rows = RoundPlaylist.query.filter_by(round_id=round_id, user_id=user_id).all()
-    current = {row.provider: row for row in rows if row.account_id == accounts[row.provider]}
+    current = {row.provider: row for row in rows if row.account_id == accounts.get(row.provider)}
     controls = []
     for provider, label in PROVIDERS.items():
         row = current.get(provider)
@@ -92,16 +92,33 @@ def _round_tracks(round_obj, provider, token):
     songs = {song.id: song for song in round_obj.song_list}
     resolved = {}
     track_ids, missing = [], []
+    deezer_ids = set()
     for position, song_id in enumerate(round_obj.song_id_list, start=1):
         song = songs.get(song_id)
         if song and song_id not in resolved:
             resolved[song_id] = playlist_providers.resolve_track(provider, token, song)
-        if resolved.get(song_id):
-            track_ids.append(resolved[song_id])
+        track_id = resolved.get(song_id)
+        if track_id and provider == 'deezer' and track_id in deezer_ids:
+            missing.append((position, song_id, True))
+        elif track_id:
+            track_ids.append(track_id)
+            if provider == 'deezer':
+                deezer_ids.add(track_id)
         else:
-            title = f'{song.artist} — {song.title}' if song else f'Missing library song #{song_id}'
-            missing.append(f'{position}. {title}')
+            missing.append((position, song_id, False))
     return track_ids, missing
+
+
+def describe_omissions(notice, songs):
+    """Render saved references on the round page, keeping song titles out of the session cookie."""
+    by_id = {song.id: song for song in songs}
+    descriptions = []
+    for position, song_id, repeated in notice.get('missing', []):
+        song = by_id.get(song_id)
+        title = f'{song.artist} — {song.title}' if song else f'Missing library song #{song_id}'
+        suffix = ' (repeated recording on Deezer)' if repeated else ''
+        descriptions.append(f'{position}. {title}{suffix}')
+    return dict(notice, missing=descriptions)
 
 
 def export_round_playlist(round_obj, user_id, provider, account_id, token, *,
@@ -129,7 +146,7 @@ def export_round_playlist(round_obj, user_id, provider, account_id, token, *,
         if creating:
             remote_id = playlist_providers.create_playlist(provider, token, title)
             _checkpoint(row_id, operation, playlist_id=remote_id, status='syncing')
-        playlist_providers.sync_tracks(provider, token, remote_id, track_ids)
+        playlist_providers.sync_tracks(provider, token, remote_id, track_ids, account_id=account_id)
     except playlist_providers.PlaylistProviderError as exc:
         unknown = not remote_id and exc.creation_uncertain
         _checkpoint(row_id, operation, operation_id=None,

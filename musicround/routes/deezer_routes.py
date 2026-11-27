@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 import secrets
 import time
 from urllib.parse import urlencode
+from sqlalchemy.exc import SQLAlchemyError
 from musicround.models import Song, db, DeezerAccount
+from musicround.helpers.auth_helpers import get_oauth_redirect_uri
 from musicround.helpers.deezer_account import DeezerAccountError, save_deezer_account
 import deezer
 import musicbrainzngs
@@ -25,7 +27,7 @@ def _same_oauth_state(expected, supplied):
 
 def _deezer_return_url(round_id):
     if round_id:
-        return url_for('rounds.round_detail', round_id=int(round_id)) + '#streaming-playlists'
+        return url_for('rounds.round_detail', round_id=round_id, _anchor='streaming-playlists')
     return url_for('users.profile')
 
 
@@ -34,25 +36,24 @@ def _deezer_return_url(round_id):
 def link_deezer():
     """Start the account-bound Deezer OAuth flow for playlist export."""
     app_id = current_app.config.get('DEEZER_APP_ID')
+    round_id = request.form.get('round_id', type=int)
+    if round_id is not None and not 0 < round_id < 2**63:
+        round_id = None
     if not app_id or not current_app.config.get('DEEZER_APP_SECRET'):
         flash('Deezer integration is not configured.', 'danger')
-        return redirect(_deezer_return_url(request.form.get('round_id', '').strip()
-                                           if request.form.get('round_id', '').strip().isdigit()
-                                           else ''))
+        return redirect(_deezer_return_url(round_id))
 
-    round_id = request.form.get('round_id', '').strip()
     state = secrets.token_urlsafe(32)
     session['deezer_oauth_state'] = {
         'value': state,
         'user_id': current_user.id,
         'expires_at': time.time() + timedelta(minutes=10).total_seconds(),
-        'round_id': round_id if round_id.isdigit() else '',
+        'round_id': round_id,
     }
-    redirect_uri = current_app.config.get('DEEZER_REDIRECT_URI') or url_for(
-        'deezer.deezer_callback', _external=True
-    )
-    query = urlencode({'app_id': app_id, 'redirect_uri': redirect_uri,
-                       'perms': 'manage_library,delete_library', 'state': state})
+    redirect_uri = (current_app.config.get('DEEZER_REDIRECT_URI')
+                    or get_oauth_redirect_uri('deezer.deezer_callback'))
+    query = urlencode({'app_id': app_id, 'redirect_uri': redirect_uri, 'state': state,
+                       'perms': 'basic_access,manage_library,delete_library,offline_access'})
     return redirect(f'https://connect.deezer.com/oauth/auth.php?{query}')
 
 
@@ -82,14 +83,15 @@ def deezer_callback():
             'https://connect.deezer.com/oauth/access_token.php',
             params={'app_id': current_app.config['DEEZER_APP_ID'],
                     'secret': current_app.config['DEEZER_APP_SECRET'], 'code': code,
-                    'output': 'json'}, timeout=10)
+                    'output': 'json'}, timeout=10, allow_redirects=False)
         response.raise_for_status()
         token_payload = response.json()
         access_token = token_payload.get('access_token')
-        if not access_token:
+        if not isinstance(access_token, str) or not access_token.strip():
             raise ValueError('missing Deezer access token')
         profile_response = requests.get('https://api.deezer.com/user/me',
-                                        params={'access_token': access_token}, timeout=10)
+                                        params={'access_token': access_token}, timeout=10,
+                                        allow_redirects=False)
         profile_response.raise_for_status()
         profile_payload = profile_response.json()
         account_id = profile_payload.get('id') if isinstance(profile_payload, dict) else None
@@ -100,7 +102,8 @@ def deezer_callback():
                       if expires and int(expires) > 0 else None)
         save_deezer_account(current_user.id, int(account_id), access_token, expires_at)
     except (requests.RequestException, ValueError, TypeError, KeyError,
-            AttributeError, DeezerAccountError, json.JSONDecodeError) as exc:
+            AttributeError, OverflowError, DeezerAccountError, SQLAlchemyError) as exc:
+        db.session.rollback()
         current_app.logger.warning('Deezer account connection failed for user %s: %s',
                                     current_user.id, type(exc).__name__)
         flash('Deezer connection failed. Please try again.', 'danger')

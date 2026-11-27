@@ -9,6 +9,23 @@ Quizzical Beats currently supports the following export options:
 - **PDF**: Round document with questions, answers, and song information
 - **MP3**: Audio file with all songs concatenated for playback during your quiz
 - **JSON**: Metadata about the round and songs (exported automatically with Dropbox exports)
+- **Spotify and Deezer** create private playlists of the full recordings in your linked account.
+
+## Spotify and Deezer playlists
+
+1. Open a round you own or can produce. Save any changes to its songs or their order.
+2. Under **Playlists**, connect your personal Spotify or Deezer account if prompted.
+3. Click **Create Spotify playlist** or **Create Deezer playlist**. Use **Open playlist** to listen in the service.
+
+The playlist takes the round's name. **Update** synchronizes its tracks and order with the
+saved round, including removing tracks you took out. Each provider and each linked account
+gets its own playlist. Changes made directly to that playlist can be replaced on the next update.
+
+If a recording is unavailable or the artist and title match multiple recordings, the page
+lists the affected songs. Choose **Use … available songs** to export just the matches.
+Spotify retains repeated recordings. Deezer accepts each recording once and lists any
+repeats before you decide. If the service cannot confirm that a playlist is private, the
+app keeps its link and waits for you to set it to private before sending any songs.
 
 ## Local Export
 

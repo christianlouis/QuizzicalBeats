@@ -1015,9 +1015,10 @@ def spotify_link():
             return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
         redirect_uri = get_oauth_redirect_uri('users.spotify_link_callback')
         state = uuid.uuid4().hex
+        round_id = request.form.get('round_id', type=int)
         session['spotify_link_context'] = {
             'state': state, 'user_id': current_user.id,
-            'round_id': request.form.get('round_id', type=int),
+            'round_id': round_id if round_id and 0 < round_id < 2**63 else None,
         }
         return oauth.spotify.authorize_redirect(redirect_uri, state=state, show_dialog='true')
 
@@ -1051,7 +1052,7 @@ def spotify_link_callback():
     """Callback for linking Spotify to an existing user account."""
     context = session.pop('spotify_link_context', {})
     if (context.get('user_id') != current_user.id or
-            not compare_digest(context.get('state', ''), request.args.get('state', ''))):
+            not compare_digest(context.get('state', '').encode(), request.args.get('state', '').encode())):
         flash('Start the Spotify connection again from your own account.', 'warning')
         return redirect(url_for('users.spotify_link'))
     destination = url_for('users.spotify_link')

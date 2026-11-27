@@ -39,16 +39,15 @@ round to a personal Deezer playlist. Configure `DEEZER_APP_ID`,
 `DEEZER_APP_SECRET`, and the exact `DEEZER_REDIRECT_URI` callback in the Deezer
 developer console (for example `https://your-domain.example/deezer-callback`).
 
-The authorization request asks only for `manage_library,delete_library`: the
-first permits creating/updating personal playlists and the second permits
-removing obsolete tracks during an update. No profile, email, or library-read
-permission is requested. OAuth state is
-single-use, bound to the logged-in user session, expires after ten minutes,
-and may carry a round ID for returning to the round after linking. The callback
-verifies the Deezer `/user/me` identity before storing the account. Access
-tokens are encrypted server-side and are never placed in browser state or logs.
-Set `DEEZER_TOKEN_ENCRYPTION_KEY` to a Fernet key for key rotation/isolation;
-if omitted, the application derives a key from `SECRET_KEY`.
+The authorization request uses `basic_access` to identify the account, `manage_library`
+to create and update the playlist, and `delete_library` to remove tracks when the round
+changes. It requests `offline_access` so that later rounds can use the same connection.
+The callback verifies the account through Deezer's `/user/me` endpoint. Its state is bound to the signed-in user
+and expires after ten minutes. Starting the connection from a round returns you to that round.
+
+The application encrypts access tokens on the server. Set `DEEZER_TOKEN_ENCRYPTION_KEY`
+to a Fernet key to use a dedicated encryption key. The default derives a key from
+`SECRET_KEY`. Changing the effective key requires users to reconnect.
 
 The profile page provides Connect, reconnect, and disconnect controls. The
 link form is `POST /deezer-link` (endpoint `deezer.link_deezer`) and accepts an

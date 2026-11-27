@@ -686,7 +686,9 @@ def round_detail(round_id):
             })
             notice = session.get('round_playlist_notice', {})
             if (notice.get('round_id'), notice.get('user_id')) == (rnd.id, current_user.id):
-                playlist_notice = session.pop('round_playlist_notice')
+                playlist_notice = round_playlists.describe_omissions(
+                    session.pop('round_playlist_notice'), ordered_songs
+                )
 
         return render_template(
             'round_detail.html',

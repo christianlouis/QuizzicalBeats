@@ -61,10 +61,10 @@ When configuring Dropbox in the Dropbox Developer Console:
 **Callback URL:** `https://your-domain.com/deezer-callback`
 **Local Development:** `http://localhost:5000/deezer-callback`
 
-Register this exact URL in the Deezer application settings. The account-link
-flow requests only `manage_library,delete_library`: create/update access plus
-the ability to remove obsolete playlist entries. It does not request email or
-library-read permissions.
+Register this exact URL in the Deezer application settings. The account-link flow
+requests `basic_access` to identify the account, `manage_library` for playlist creation,
+`delete_library` for removing tracks during an update, and `offline_access` to keep
+the connection for future rounds.
 
 ## Environment Variables
 
