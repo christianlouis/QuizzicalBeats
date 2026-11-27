@@ -16,12 +16,16 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from flask import Blueprint, session, redirect, request, render_template, url_for, current_app, send_file, jsonify, flash, abort
 from flask_login import current_user, login_required
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import contains_eager, joinedload
 from musicround.models import PlannedQuizRound, Round, RoundAccessEvent, RoundAudioScript, RoundExport, RoundShare, Song, SystemSetting, User, db
 from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from musicround.helpers.auth_helpers import oauth
+from musicround.helpers.deezer_account import get_current_user_deezer_account
+from musicround.helpers.playlist_providers import PlaylistProviderError
+from musicround.helpers.spotify_helper import get_current_user_spotify_token
 from musicround.helpers.email_helper import send_email as send_quiz_email
 from musicround.helpers.paths import app_data_path
 from musicround.helpers import round_notifications
@@ -31,7 +35,7 @@ from musicround.helpers.storage_health import (
     round_mp3_path,
     round_pdf_path,
 )
-from musicround.services import automation
+from musicround.services import automation, round_playlists
 from musicround.services.automation import AutomationError
 
 rounds_bp = Blueprint('rounds', __name__, url_prefix='/rounds')
@@ -671,10 +675,25 @@ def round_detail(round_id):
             requester_user_id=current_user.id,
         )["comments"]
 
+        playlist_controls = []
+        playlist_notice = None
+        if _can_produce_round(rnd):
+            deezer_account = get_current_user_deezer_account()
+            playlist_controls = round_playlists.playlist_controls(rnd.id, current_user.id, {
+                'spotify': (current_user.spotify_id if current_user.spotify_token
+                            or current_user.spotify_refresh_token else None),
+                'deezer': deezer_account[0] if deezer_account else None,
+            })
+            notice = session.get('round_playlist_notice', {})
+            if (notice.get('round_id'), notice.get('user_id')) == (rnd.id, current_user.id):
+                playlist_notice = session.pop('round_playlist_notice')
+
         return render_template(
             'round_detail.html',
             round=rnd,
             songs=ordered_songs,
+            playlist_controls=playlist_controls,
+            playlist_notice=playlist_notice,
             user_info=user_info,
             email_error=email_error,
             round_quality_report=round_quality_report,
@@ -690,6 +709,44 @@ def round_detail(round_id):
         )
     else:
         return 'Round not found'
+
+
+@rounds_bp.post('/<int:round_id>/playlists/<provider>')
+@login_required
+def export_streaming_playlist(round_id, provider):
+    """Export to the signed-in quizmaster's own streaming account."""
+    if provider not in round_playlists.PROVIDERS:
+        abort(404)
+    rnd = _get_producible_round_or_404(round_id)
+    try:
+        if provider == 'spotify':
+            account_id = current_user.spotify_id
+            token = get_current_user_spotify_token() if account_id else None
+        else:
+            account_id, token = get_current_user_deezer_account() or (None, None)
+        if not token:
+            label = round_playlists.PROVIDERS[provider]
+            notice = dict(message=f'Connect your {label} account to export this round.',
+                          level='warning', reconnect=True)
+        else:
+            notice = round_playlists.export_round_playlist(
+                rnd, current_user.id, provider, account_id, token,
+                allow_partial=request.form.get('allow_partial') == '1',
+                checked_library=request.form.get('checked_library') == '1',
+            )
+    except PlaylistProviderError as exc:
+        notice = dict(message=str(exc), level='warning', reconnect=exc.reconnect)
+    except round_playlists.PlaylistBusy as exc:
+        notice = dict(message=str(exc), level='warning')
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.error('Playlist export storage unavailable for round %s', round_id)
+        notice = dict(message='Could not save the playlist status. Reopen this round to retry.',
+                      level='warning')
+    session['round_playlist_notice'] = dict(notice, round_id=round_id,
+                                            user_id=current_user.id, provider=provider)
+    return redirect(url_for('rounds.round_detail', round_id=round_id,
+                            _anchor='streaming-playlists'), code=303)
 
 
 @rounds_bp.route('/<int:round_id>/bundle-review')

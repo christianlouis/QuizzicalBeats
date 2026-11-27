@@ -356,6 +356,26 @@ class Round(db.Model):
         self.pdf_generated = False
 
 
+class RoundPlaylist(db.Model):
+    """Personal streaming playlist for a saved round and a linked provider account."""
+    __tablename__ = 'round_playlist'
+
+    id = db.Column(db.Integer, primary_key=True)
+    round_id = db.Column(db.Integer, db.ForeignKey('round.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    provider = db.Column(db.String(10), nullable=False)
+    account_id = db.Column(db.String(100), nullable=False)
+    playlist_id = db.Column(db.String(100))
+    status = db.Column(db.String(16), nullable=False, default='idle')
+    operation_id = db.Column(db.String(32))
+    started_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.UniqueConstraint('round_id', 'user_id', 'provider', 'account_id',
+                            name='uq_round_playlist_account'),
+    )
+
+
 class RoundShare(db.Model):
     """
     Share grants for quiz rounds between quizmasters.

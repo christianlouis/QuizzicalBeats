@@ -1012,7 +1012,12 @@ def spotify_link():
             flash('Spotify integration is not configured.', 'danger')
             return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
         redirect_uri = get_oauth_redirect_uri('users.spotify_link_callback')
-        return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
+        state = uuid.uuid4().hex
+        session['spotify_link_context'] = {
+            'state': state, 'user_id': current_user.id,
+            'round_id': request.form.get('round_id', type=int),
+        }
+        return oauth.spotify.authorize_redirect(redirect_uri, state=state, show_dialog='true')
 
     # GET: Show management UI
     spotify_user_info = session.get('spotify_user_info') or None
@@ -1042,22 +1047,32 @@ def spotify_link():
 @login_required
 def spotify_link_callback():
     """Callback for linking Spotify to an existing user account."""
+    context = session.pop('spotify_link_context', {})
+    if (context.get('user_id') != current_user.id or
+            not compare_digest(context.get('state', ''), request.args.get('state', ''))):
+        flash('Start the Spotify connection again from your own account.', 'warning')
+        return redirect(url_for('users.spotify_link'))
+    destination = url_for('users.spotify_link')
+    if context.get('round_id'):
+        destination = url_for('rounds.round_detail', round_id=context['round_id'],
+                              _anchor='streaming-playlists')
     try:
         token = oauth.spotify.authorize_access_token()
         user_info = get_spotify_user_info(token)
         
-        if not user_info or 'id' not in user_info:
+        if not user_info or not user_info.get('id'):
             flash('Failed to get user information from Spotify.', 'danger')
-            current_app.logger.error(f"Spotify link callback: Missing ID in user_info for user {current_user.id}. Info: {user_info}")
-            return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+            current_app.logger.warning('Spotify link returned no account ID for user %s', current_user.id)
+            return redirect(destination)
 
         _process_spotify_link(current_user, token, user_info)
 
     except Exception as e:
-        current_app.logger.error(f"Error in Spotify link callback for user {current_user.id}: {str(e)}")
+        current_app.logger.warning('Spotify linking failed for user %s (%s)', current_user.id,
+                                   type(e).__name__)
         flash('An error occurred while linking your Spotify account. Please try again.', 'danger')
     
-    return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+    return redirect(destination)
 
 @users_bp.route('/spotify/disconnect', methods=['POST'])
 @login_required
