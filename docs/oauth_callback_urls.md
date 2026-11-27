@@ -62,7 +62,9 @@ When configuring Dropbox in the Dropbox Developer Console:
 **Local Development:** `http://localhost:5000/deezer-callback`
 
 Register this exact URL in the Deezer application settings. The account-link
-flow requests the `manage_library` permission for personal playlist export.
+flow requests only `manage_library,delete_library`: create/update access plus
+the ability to remove obsolete playlist entries. It does not request email or
+library-read permissions.
 
 ## Environment Variables
 

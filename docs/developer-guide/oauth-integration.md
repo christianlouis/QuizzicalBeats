@@ -39,7 +39,10 @@ round to a personal Deezer playlist. Configure `DEEZER_APP_ID`,
 `DEEZER_APP_SECRET`, and the exact `DEEZER_REDIRECT_URI` callback in the Deezer
 developer console (for example `https://your-domain.example/deezer-callback`).
 
-The authorization request asks only for `manage_library`. OAuth state is
+The authorization request asks only for `manage_library,delete_library`: the
+first permits creating/updating personal playlists and the second permits
+removing obsolete tracks during an update. No profile, email, or library-read
+permission is requested. OAuth state is
 single-use, bound to the logged-in user session, expires after ten minutes,
 and may carry a round ID for returning to the round after linking. The callback
 verifies the Deezer `/user/me` identity before storing the account. Access
