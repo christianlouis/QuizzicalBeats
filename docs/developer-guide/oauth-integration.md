@@ -1,6 +1,6 @@
 # OAuth Integration
 
-This document details how Quizzical Beats integrates with OAuth providers, including Spotify and Dropbox.
+This document details how Quizzical Beats integrates with OAuth providers, including Spotify, Deezer, and Dropbox.
 
 ## Overview
 
@@ -31,6 +31,25 @@ DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY')
 DROPBOX_APP_SECRET = os.environ.get('DROPBOX_APP_SECRET')
 DROPBOX_REDIRECT_URI = os.environ.get('DROPBOX_REDIRECT_URI', 'http://localhost:5000/users/dropbox/callback')
 ```
+
+### Deezer OAuth (linked playlist export)
+
+Deezer linking is an authenticated, user-bound flow used only when exporting a
+round to a personal Deezer playlist. Configure `DEEZER_APP_ID`,
+`DEEZER_APP_SECRET`, and the exact `DEEZER_REDIRECT_URI` callback in the Deezer
+developer console (for example `https://your-domain.example/deezer-callback`).
+
+The authorization request asks only for `manage_library`. OAuth state is
+single-use, bound to the logged-in user session, expires after ten minutes,
+and may carry a round ID for returning to the round after linking. The callback
+verifies the Deezer `/user/me` identity before storing the account. Access
+tokens are encrypted server-side and are never placed in browser state or logs.
+Set `DEEZER_TOKEN_ENCRYPTION_KEY` to a Fernet key for key rotation/isolation;
+if omitted, the application derives a key from `SECRET_KEY`.
+
+The profile page provides Connect, reconnect, and disconnect controls. The
+link form is `POST /deezer-link` (endpoint `deezer.link_deezer`) and accepts an
+optional `round_id` form field. Disconnect is `POST /deezer-disconnect`.
 
 ## Dropbox Integration Implementation
 

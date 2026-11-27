@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from musicround.models import (
     db, User, Role, SeedSource, SeedSourceCandidate, SeedSourceRun, SystemSetting,
-    UserPreferences,
+    UserPreferences, DeezerAccount,
 )
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
@@ -765,6 +765,7 @@ def profile():
 
     spotify_status_payload = spotify_token_status(current_user, now=now)
     dropbox_status_payload = dropbox_token_status(current_user, now=now)
+    deezer_account = DeezerAccount.query.filter_by(user_id=current_user.id).first()
     spotify_token_notice = token_notice(spotify_status_payload)
     dropbox_token_notice = token_notice(dropbox_status_payload)
     
@@ -787,6 +788,7 @@ def profile():
         dropbox_token_notice=dropbox_token_notice,
         spotify_token_status=spotify_status_payload,
         dropbox_token_status=dropbox_status_payload,
+        deezer_connected=bool(deezer_account),
     )
 
 @users_bp.route('/edit-profile', methods=['GET', 'POST'])

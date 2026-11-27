@@ -1,5 +1,10 @@
 from flask import Blueprint, render_template, redirect, url_for, request, current_app, flash, session, jsonify
-from musicround.models import Song, db
+from flask_login import login_required, current_user
+from datetime import datetime, timedelta
+import secrets
+from urllib.parse import urlencode
+from musicround.models import Song, db, DeezerAccount
+from musicround.helpers.deezer_account import save_deezer_account
 import deezer
 import musicbrainzngs
 import requests
@@ -9,6 +14,92 @@ from musicround.helpers.metadata import get_song_metadata_by_isrc
 from musicround.helpers.import_helper import ImportHelper
 
 deezer_bp = Blueprint('deezer', __name__)
+
+
+@deezer_bp.route('/deezer-link', methods=['POST'])
+@login_required
+def link_deezer():
+    """Start the account-bound Deezer OAuth flow for playlist export."""
+    app_id = current_app.config.get('DEEZER_APP_ID')
+    if not app_id or not current_app.config.get('DEEZER_APP_SECRET'):
+        flash('Deezer integration is not configured.', 'danger')
+        return redirect(request.form.get('next') or url_for('users.profile'))
+
+    round_id = request.form.get('round_id', '').strip()
+    state = secrets.token_urlsafe(32)
+    session['deezer_oauth_state'] = {
+        'value': state,
+        'expires_at': (datetime.utcnow() + timedelta(minutes=10)).timestamp(),
+        'round_id': round_id if round_id.isdigit() else '',
+    }
+    redirect_uri = current_app.config.get('DEEZER_REDIRECT_URI') or url_for(
+        'deezer.deezer_callback', _external=True
+    )
+    query = urlencode({'app_id': app_id, 'redirect_uri': redirect_uri,
+                       'perms': 'manage_library', 'state': state})
+    return redirect(f'https://connect.deezer.com/oauth/auth.php?{query}')
+
+
+@deezer_bp.route('/deezer-callback', methods=['GET'])
+@login_required
+def deezer_callback():
+    """Validate and consume the one-time Deezer OAuth callback."""
+    pending = session.pop('deezer_oauth_state', None)
+    if not pending or not secrets.compare_digest(str(pending.get('value', '')), request.args.get('state', '')):
+        flash('Deezer connection could not be verified. Please try again.', 'danger')
+        return redirect(url_for('users.profile'))
+    if float(pending.get('expires_at', 0)) <= datetime.utcnow().timestamp():
+        flash('The Deezer connection request expired. Please try again.', 'warning')
+        return redirect(url_for('users.profile'))
+
+    code = request.args.get('code', '').strip()
+    if not code:
+        flash('Deezer did not approve the connection.', 'warning')
+        return redirect(url_for('users.profile'))
+    try:
+        response = requests.get(
+            'https://connect.deezer.com/oauth/access_token.php',
+            params={'app_id': current_app.config['DEEZER_APP_ID'],
+                    'secret': current_app.config['DEEZER_APP_SECRET'], 'code': code,
+                    'output': 'json'}, timeout=10)
+        response.raise_for_status()
+        token_payload = response.json()
+        access_token = token_payload.get('access_token')
+        if not access_token:
+            raise ValueError('missing Deezer access token')
+        profile_response = requests.get('https://api.deezer.com/user/me',
+                                        params={'access_token': access_token}, timeout=10)
+        profile_response.raise_for_status()
+        account_id = (profile_response.json() or {}).get('id')
+        if not account_id:
+            raise ValueError('missing Deezer account id')
+        expires = token_payload.get('expires')
+        expires_at = (datetime.utcnow() + timedelta(seconds=int(expires))
+                      if expires and int(expires) > 0 else None)
+        save_deezer_account(current_user.id, account_id, access_token, expires_at)
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        current_app.logger.warning('Deezer account connection failed for user %s: %s',
+                                    current_user.id, type(exc).__name__)
+        flash('Deezer connection failed. Please try again.', 'danger')
+        return redirect(url_for('users.profile'))
+
+    flash('Deezer is connected for playlist export.', 'success')
+    round_id = pending.get('round_id')
+    if round_id:
+        return redirect(url_for('rounds.round_detail', round_id=int(round_id)))
+    return redirect(url_for('users.profile'))
+
+
+@deezer_bp.route('/deezer-disconnect', methods=['POST'])
+@login_required
+def disconnect_deezer():
+    """Remove the current user's stored Deezer connection."""
+    account = DeezerAccount.query.filter_by(user_id=current_user.id).first()
+    if account:
+        db.session.delete(account)
+        db.session.commit()
+    flash('Deezer has been disconnected.', 'success')
+    return redirect(url_for('users.profile'))
 
 
 def _safe_deezer_import_error(item_type):

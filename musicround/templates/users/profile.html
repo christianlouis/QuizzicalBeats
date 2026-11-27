@@ -185,6 +185,42 @@
                 </a>
             </div>
             {% endif %}
+
+            <!-- Deezer Connection -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">
+                <div class="flex items-center mb-3">
+                    <span class="text-[#A238FF] text-2xl mr-3">♪</span>
+                    <div>
+                        <h4 class="font-medium">Deezer</h4>
+                        <p class="text-sm text-gray-600">
+                            {% if deezer_connected %}Connected for playlist export{% else %}Not connected{% endif %}
+                        </p>
+                    </div>
+                </div>
+                {% if deezer_connected %}
+                    <div class="grid grid-cols-1 gap-2">
+                        <form action="{{ url_for('deezer.disconnect_deezer') }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="inline-block w-full bg-gray-200 hover:bg-gray-300 text-gray-700 text-center py-1 px-3 rounded-md text-sm transition-colors">
+                                Disconnect Deezer
+                            </button>
+                        </form>
+                        <form action="{{ url_for('deezer.link_deezer') }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="inline-block w-full bg-[#A238FF] hover:bg-[#8D27E8] text-white text-center py-1 px-3 rounded-md text-sm transition-colors">
+                                Reconnect Deezer
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <form action="{{ url_for('deezer.link_deezer') }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" class="inline-block w-full bg-[#A238FF] hover:bg-[#8D27E8] text-white text-center py-1 px-3 rounded-md text-sm transition-colors">
+                            Connect Deezer
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
             
             <!-- Dropbox Connection -->
             <div class="bg-gray-50 p-4 rounded-lg mb-4 shadow-sm">

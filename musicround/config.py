@@ -59,6 +59,7 @@ class Config:
     DEEZER_APP_ID = os.getenv("DEEZER_APP_ID", "")
     DEEZER_APP_SECRET = os.getenv("DEEZER_APP_SECRET", "")
     DEEZER_REDIRECT_URI = os.getenv("DEEZER_REDIRECT_URI", "http://localhost:5000/deezer-callback")
+    DEEZER_TOKEN_ENCRYPTION_KEY = os.getenv("DEEZER_TOKEN_ENCRYPTION_KEY", "")
     
     # Google OAuth credentials
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")

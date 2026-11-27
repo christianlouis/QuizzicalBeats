@@ -19,6 +19,7 @@ Flask-Login
 Flask-Mail
 Flask-Session
 authlib>=1.6.5
+cryptography>=43.0.0
 Flask-Caching
 gunicorn
 psutil

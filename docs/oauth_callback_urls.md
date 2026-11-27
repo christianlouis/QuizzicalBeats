@@ -4,7 +4,7 @@ This document provides the callback URLs needed when configuring OAuth integrati
 
 ## Overview
 
-When configuring OAuth providers (Google, Authentik, Spotify, Dropbox), you need to set up redirect/callback URLs in each provider's developer console. These URLs tell the provider where to send users after they authenticate.
+When configuring OAuth providers (Google, Authentik, Spotify, Deezer, Dropbox), you need to set up redirect/callback URLs in each provider's developer console. These URLs tell the provider where to send users after they authenticate.
 
 ## Callback URLs by Provider
 
@@ -55,6 +55,14 @@ When configuring Dropbox in the Dropbox Developer Console:
    - `account_info.read`
    - `offline_access` (for refresh tokens)
 4. Set the app status to "Production" if it's still in development mode
+
+### Deezer API
+
+**Callback URL:** `https://your-domain.com/deezer-callback`
+**Local Development:** `http://localhost:5000/deezer-callback`
+
+Register this exact URL in the Deezer application settings. The account-link
+flow requests the `manage_library` permission for personal playlist export.
 
 ## Environment Variables
 
