@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from musicround.models import (
     db, User, Role, SeedSource, SeedSourceCandidate, SeedSourceRun, SystemSetting,
-    UserPreferences,
+    UserPreferences, DeezerAccount,
 )
 from musicround.helpers.utils import get_available_voices, is_safe_url
 from musicround.helpers.auth_helpers import oauth, find_or_create_user, update_oauth_tokens, get_google_user_info, get_authentik_user_info, get_spotify_user_info, get_oauth_redirect_uri
@@ -765,6 +765,7 @@ def profile():
 
     spotify_status_payload = spotify_token_status(current_user, now=now)
     dropbox_status_payload = dropbox_token_status(current_user, now=now)
+    deezer_account = DeezerAccount.query.filter_by(user_id=current_user.id).first()
     spotify_token_notice = token_notice(spotify_status_payload)
     dropbox_token_notice = token_notice(dropbox_status_payload)
     
@@ -787,6 +788,7 @@ def profile():
         dropbox_token_notice=dropbox_token_notice,
         spotify_token_status=spotify_status_payload,
         dropbox_token_status=dropbox_status_payload,
+        deezer_connected=bool(deezer_account),
     )
 
 @users_bp.route('/edit-profile', methods=['GET', 'POST'])
@@ -1012,7 +1014,13 @@ def spotify_link():
             flash('Spotify integration is not configured.', 'danger')
             return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
         redirect_uri = get_oauth_redirect_uri('users.spotify_link_callback')
-        return oauth.spotify.authorize_redirect(redirect_uri, show_dialog='true')
+        state = uuid.uuid4().hex
+        round_id = request.form.get('round_id', type=int)
+        session['spotify_link_context'] = {
+            'state': state, 'user_id': current_user.id,
+            'round_id': round_id if round_id and 0 < round_id < 2**63 else None,
+        }
+        return oauth.spotify.authorize_redirect(redirect_uri, state=state, show_dialog='true')
 
     # GET: Show management UI
     spotify_user_info = session.get('spotify_user_info') or None
@@ -1042,22 +1050,32 @@ def spotify_link():
 @login_required
 def spotify_link_callback():
     """Callback for linking Spotify to an existing user account."""
+    context = session.pop('spotify_link_context', {})
+    if (context.get('user_id') != current_user.id or
+            not compare_digest(context.get('state', '').encode(), request.args.get('state', '').encode())):
+        flash('Start the Spotify connection again from your own account.', 'warning')
+        return redirect(url_for('users.spotify_link'))
+    destination = url_for('users.spotify_link')
+    if context.get('round_id'):
+        destination = url_for('rounds.round_detail', round_id=context['round_id'],
+                              _anchor='streaming-playlists')
     try:
         token = oauth.spotify.authorize_access_token()
         user_info = get_spotify_user_info(token)
         
-        if not user_info or 'id' not in user_info:
+        if not user_info or not user_info.get('id'):
             flash('Failed to get user information from Spotify.', 'danger')
-            current_app.logger.error(f"Spotify link callback: Missing ID in user_info for user {current_user.id}. Info: {user_info}")
-            return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+            current_app.logger.warning('Spotify link returned no account ID for user %s', current_user.id)
+            return redirect(destination)
 
         _process_spotify_link(current_user, token, user_info)
 
     except Exception as e:
-        current_app.logger.error(f"Error in Spotify link callback for user {current_user.id}: {str(e)}")
+        current_app.logger.warning('Spotify linking failed for user %s (%s)', current_user.id,
+                                   type(e).__name__)
         flash('An error occurred while linking your Spotify account. Please try again.', 'danger')
     
-    return redirect(url_for('users.spotify_link')) # Redirect to spotify_link page
+    return redirect(destination)
 
 @users_bp.route('/spotify/disconnect', methods=['POST'])
 @login_required

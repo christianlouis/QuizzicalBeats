@@ -403,6 +403,68 @@
         </form>
     </div>
 
+    {% if playlist_controls %}
+    <section id="streaming-playlists" aria-labelledby="playlists-heading" class="bg-white shadow-md rounded-lg p-6 mb-6">
+        <h2 id="playlists-heading" class="text-2xl font-bold text-navy-800 font-montserrat">Playlists</h2>
+        <p class="mt-1 text-sm text-gray-600">Export the songs in this round in their saved order.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {% for item in playlist_controls %}
+            {% set notice = playlist_notice if playlist_notice and playlist_notice.provider == item.provider else none %}
+            {% set connect = not item.connected or (notice and notice.reconnect) %}
+            {% set configured = config.SPOTIFY_CLIENT_ID and config.SPOTIFY_CLIENT_SECRET if item.provider == 'spotify' else config.DEEZER_APP_ID and config.DEEZER_APP_SECRET %}
+            <div class="border border-gray-200 rounded-md p-4">
+                <h3 class="text-lg font-semibold text-navy-800">{{ item.label }}</h3>
+                {% if notice %}
+                <div role="status" class="my-2 text-sm {{ 'text-teal-700' if notice.level == 'success' else 'text-orange-800' }}">
+                    <p>{{ notice.message }}</p>
+                    {% if notice.missing %}
+                    <p class="mt-1 font-semibold">Songs left out</p>
+                    <ul>{% for song in notice.missing %}<li>{{ song }}</li>{% endfor %}</ul>
+                    {% if notice.more_missing %}<p>And {{ notice.more_missing }} more.</p>{% endif %}
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% if item.provider == 'deezer' and not configured %}
+                <div class="mt-4">
+                    <p class="text-sm text-gray-700">Download the round, then select the file in TuneMyMusic to import it into your Deezer account.</p>
+                    <a href="{{ url_for('rounds.download_deezer_playlist_file', round_id=round.id) }}" class="inline-block mt-2 bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded-md">Download Deezer playlist file</a>
+                    <a href="https://www.tunemymusic.com/transfer/file-to-deezer" target="_blank" rel="noreferrer noopener" class="inline-block mt-3 text-teal-700 underline">Import file into Deezer via TuneMyMusic</a>
+                </div>
+                {% elif connect %}
+                <form method="post" action="{{ url_for('users.spotify_link' if item.provider == 'spotify' else 'deezer.link_deezer') }}" class="mt-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="round_id" value="{{ round.id }}">
+                    <button type="submit" {% if not configured %}disabled{% endif %} class="bg-navy-700 hover:bg-navy-800 text-white py-2 px-4 rounded-md disabled:opacity-50">
+                        {{ 'Reconnect' if item.connected else 'Connect' }} {{ item.label }}
+                    </button>
+                    {% if not configured %}<p class="mt-2 text-sm text-gray-600">{{ item.label }} account linking needs to be configured on this server.</p>{% endif %}
+                </form>
+                {% else %}
+                <form method="post" action="{{ url_for('rounds.export_streaming_playlist', round_id=round.id, provider=item.provider) }}" class="mt-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% if item.check_library %}
+                    <label class="block mb-2 text-sm">
+                        <input type="checkbox" name="checked_library" value="1" required>
+                        I checked my {{ item.label }} library and removed any empty playlist from the previous attempt.
+                    </label>
+                    {% endif %}
+                    {% if notice and notice.available %}
+                    <input type="hidden" name="allow_partial" value="1">
+                    {% endif %}
+                    <button type="submit" class="bg-teal-700 hover:bg-teal-800 text-white py-2 px-4 rounded-md">
+                        {% if notice and notice.available %}Use {{ notice.available }} available {{ 'song' if notice.available == 1 else 'songs' }}{% else %}{{ 'Update' if item.url else 'Create' }} {{ item.label }} playlist{% endif %}
+                    </button>
+                </form>
+                {% endif %}
+                {% if item.url %}
+                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="inline-block mt-3 text-teal-700 underline">Open {{ item.label }} playlist</a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-lg transition-shadow">
             <div class="flex items-center justify-center mb-4 text-navy-800">
